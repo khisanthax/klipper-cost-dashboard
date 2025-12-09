@@ -1,0 +1,17 @@
+{
+  "profiles": {
+    "c444b66f-4b04-4265-a771-0238d412abdd": {
+      "name": "Kingroon",
+      "material": "PETG",
+      "filament_mode": "per_meter",
+      "filament_rate": 0.25,
+      "grams_per_meter": 3.0,
+      "id": "c444b66f-4b04-4265-a771-0238d412abdd"
+    }
+  },
+  "mappings": {
+    "Ender5P": "c444b66f-4b04-4265-a771-0238d412abdd",
+    "SV07": "c444b66f-4b04-4265-a771-0238d412abdd",
+    "SV08": "c444b66f-4b04-4265-a771-0238d412abdd"
+  }
+}

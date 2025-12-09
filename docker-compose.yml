@@ -1,0 +1,13 @@
+version: "3.8"
+
+services:
+  print-cost-dashboard:
+    build: .
+    container_name: print-cost-dashboard
+    restart: unless-stopped
+    ports:
+      - "6060:5000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=America/New_York

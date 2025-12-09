@@ -1,0 +1,38 @@
+{
+  "SV08": {
+    "rate_per_hour": 1.0,
+    "filament_mode": "per_meter",
+    "filament_rate": 0.25,
+    "grams_per_meter": 3.0
+  },
+  "SV07": {
+    "rate_per_hour": 1.0,
+    "filament_mode": "per_meter",
+    "filament_rate": 0.25,
+    "grams_per_meter": 3.0
+  },
+  "Ender5P": {
+    "rate_per_hour": 6.0,
+    "filament_mode": "per_meter",
+    "filament_rate": 0.3,
+    "grams_per_meter": 3.0
+  },
+  "Sovol": {
+    "rate_per_hour": 1.0,
+    "filament_mode": "per_meter",
+    "filament_rate": 0.25,
+    "grams_per_meter": 3.0
+  },
+  "Cube_PETG_0.2_9m38s.gcode": {
+    "rate_per_hour": 1.0,
+    "filament_mode": "per_meter",
+    "filament_rate": 0.25,
+    "grams_per_meter": 3.0
+  },
+  "Cube_PETG_0.2_11m55s.gcode": {
+    "rate_per_hour": 1.0,
+    "filament_mode": "per_meter",
+    "filament_rate": 0.25,
+    "grams_per_meter": 3.0
+  }
+}

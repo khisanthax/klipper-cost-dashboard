@@ -1,0 +1,1188 @@
+import os
+
+import csv
+
+import json
+
+import secrets
+
+from datetime import datetime, timedelta
+
+from flask import (
+
+    Flask,
+
+    request,
+
+    jsonify,
+
+    jsonify,
+
+    render_template,  # Changed from render_template_string
+
+    redirect,
+
+    url_for,
+
+    send_file,
+
+)
+
+from report_utils import (
+    get_date_range_from_params,
+    compute_monthly_breakdown,
+    compute_top_printers
+)
+
+
+app = Flask(__name__)
+
+
+DATA_DIR = "data"
+
+CSV_FILE = os.path.join(DATA_DIR, "print_costs.csv")
+
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+
+DISPLAY_FILE = os.path.join(DATA_DIR, "display.json")
+
+SECRET_FILE = os.path.join(DATA_DIR, "secret.json")
+
+
+# --- Default pricing (fallback) ---
+
+DEFAULT_PRICING = {
+
+    "rate_per_hour": 1.0,          # USD per hour of machine time
+
+    "filament_mode": "per_meter",  # "per_meter", "per_gram", or "per_kg"
+
+    "filament_rate": 0.25,         # USD per unit of the chosen mode
+
+    "grams_per_meter": 3.0,        # approx grams per meter
+
+}
+
+
+# CSV columns (raw stats + pricing + computed costs)
+
+HEADERS = [
+
+    "timestamp",
+
+    "printer",
+
+    "filename",
+
+    "duration_seconds",
+
+    "duration_hours",
+
+    "filament_mm",
+
+    "filament_meters",
+
+    "rate_per_hour",
+
+    "filament_mode",
+
+    "filament_rate",
+
+    "grams_per_meter",
+
+    "time_cost",
+
+    "material_cost",
+
+    "total_cost",
+
+]
+
+
+# User-friendly column names
+FRIENDLY_HEADERS = {
+
+    "timestamp": "Date & Time",
+
+    "printer": "Printer",
+
+    "filename": "File Name",
+
+    "duration_seconds": "Duration (sec)",
+
+    "duration_hours": "Duration (hrs)",
+
+    "filament_mm": "Filament (mm)",
+
+    "filament_meters": "Filament (m)",
+
+    "rate_per_hour": "Rate ($/hr)",
+
+    "filament_mode": "Filament Mode",
+
+    "filament_rate": "Filament Rate ($)",
+
+    "grams_per_meter": "Grams/meter",
+
+    "time_cost": "Time Cost ($)",
+
+    "material_cost": "Material Cost ($)",
+
+    "total_cost": "Total Cost ($)",
+
+}
+
+
+# Colors per printer for tags
+
+PRINTER_COLORS = {
+
+    "SV08": "#cce5ff",    # light blue
+
+    "SV07": "#d4edda",    # light green
+
+    "Ender5P": "#ffeeba", # light yellow
+
+}
+
+
+
+
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+
+
+def ensure_settings_exists():
+
+    """Create a default settings.json if it doesn't exist."""
+
+    if not os.path.exists(SETTINGS_FILE):
+
+        initial = {}
+
+        for pname in ["SV08", "SV07", "Ender5P"]:
+
+            initial[pname] = dict(DEFAULT_PRICING)
+
+        with open(SETTINGS_FILE, "w") as f:
+
+            json.dump(initial, f, indent=2)
+
+
+
+def load_settings() -> dict:
+
+    ensure_settings_exists()
+
+    try:
+
+        with open(SETTINGS_FILE) as f:
+
+            data = json.load(f)
+
+            if not isinstance(data, dict):
+
+                return {}
+
+            return data
+
+    except Exception:
+
+        return {}
+
+
+
+def save_settings(settings: dict):
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    with open(SETTINGS_FILE, "w") as f:
+
+        json.dump(settings, f, indent=2)
+
+
+
+def ensure_display_exists():
+
+    """Create a default display.json if it doesn't exist."""
+
+    if not os.path.exists(DISPLAY_FILE):
+
+        data = {"visible_columns": HEADERS}
+
+        with open(DISPLAY_FILE, "w") as f:
+
+            json.dump(data, f, indent=2)
+
+
+
+def load_display_settings():
+
+    ensure_display_exists()
+
+    try:
+
+        with open(DISPLAY_FILE) as f:
+
+            data = json.load(f)
+
+            if not isinstance(data, dict):
+
+                return {"visible_columns": HEADERS}
+
+            cols = data.get("visible_columns", HEADERS)
+
+            cols = [c for c in cols if c in HEADERS]
+
+            if not cols:
+
+                cols = HEADERS
+
+            return {"visible_columns": cols}
+
+    except Exception:
+
+        return {"visible_columns": HEADERS}
+
+
+
+def save_display_settings(visible_columns):
+
+    visible = [c for c in visible_columns if c in HEADERS]
+
+    if not visible:
+
+        visible = HEADERS
+
+    with open(DISPLAY_FILE, "w") as f:
+
+        json.dump({"visible_columns": visible}, f, indent=2)
+
+
+
+def ensure_api_key():
+
+    """
+
+    Load API key from secret.json if it exists.
+
+    Only generates a new key if the file doesn't exist (first-time setup).
+
+    This prevents overwriting API keys set by the installer.
+
+    Returns the API key or None if file doesn't exist and couldn't be created.
+
+    """
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    # Try to read existing key first
+    if os.path.exists(SECRET_FILE):
+
+        try:
+
+            with open(SECRET_FILE) as f:
+
+                data = json.load(f)
+
+                existing_key = data.get("api_key")
+
+                if existing_key:
+
+                    # Key exists - use it (don't regenerate)
+
+                    return existing_key
+
+        except Exception:
+
+            # File exists but is corrupted - don't overwrite, let installer fix it
+
+            pass
+
+    # File doesn't exist - only generate on first-time setup
+
+    # This should normally be done by the installer, but we provide a fallback
+
+    key = secrets.token_hex(16)
+
+    try:
+
+        with open(SECRET_FILE, "w") as f:
+
+            json.dump({"api_key": key}, f, indent=2)
+
+        return key
+
+    except Exception:
+
+        return None
+
+
+
+API_KEY = ensure_api_key()
+
+
+
+class Cfg:
+
+    def __init__(self, d):
+
+        self.rate_per_hour = d.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"])
+
+        self.filament_mode = d.get("filament_mode", DEFAULT_PRICING["filament_mode"])
+
+        self.filament_rate = d.get("filament_rate", DEFAULT_PRICING["filament_rate"])
+
+        self.grams_per_meter = d.get("grams_per_meter", DEFAULT_PRICING["grams_per_meter"])
+
+
+
+def get_pricing_for_printer_raw(printer_name: str) -> dict:
+
+    settings = load_settings()
+
+    base = dict(DEFAULT_PRICING)
+
+    override = settings.get(printer_name, {})
+
+    if isinstance(override, dict):
+
+        base.update(override)
+
+    return base
+
+
+
+def get_pricing_for_printer(printer_name: str) -> Cfg:
+
+    return Cfg(get_pricing_for_printer_raw(printer_name))
+
+
+
+def compute_costs(printer_name: str, duration_seconds: float, filament_mm: float) -> dict:
+
+    cfg = get_pricing_for_printer(printer_name)
+
+    rate_per_hour = float(cfg.rate_per_hour)
+
+    filament_mode = cfg.filament_mode
+
+    filament_rate = float(cfg.filament_rate)
+
+    grams_per_meter = float(cfg.grams_per_meter)
+
+
+    duration_hours = duration_seconds / 3600.0
+
+    filament_meters = filament_mm / 1000.0
+
+    grams = filament_meters * grams_per_meter
+
+
+    time_cost = duration_hours * rate_per_hour
+
+
+    if filament_mode == "per_meter":
+
+        material_cost = filament_meters * filament_rate
+
+    elif filament_mode == "per_gram":
+
+        material_cost = grams * filament_rate
+
+    elif filament_mode == "per_kg":
+
+        kg = grams / 1000.0
+
+        material_cost = kg * filament_rate
+
+    else:
+
+        material_cost = 0.0
+
+
+    total_cost = time_cost + material_cost
+
+
+    return {
+
+        "duration_hours": duration_hours,
+
+        "filament_meters": filament_meters,
+
+        "rate_per_hour": rate_per_hour,
+
+        "filament_mode": filament_mode,
+
+        "filament_rate": filament_rate,
+
+        "grams_per_meter": grams_per_meter,
+
+        "time_cost": time_cost,
+
+        "material_cost": material_cost,
+
+        "total_cost": total_cost,
+
+    }
+
+
+
+def append_row(data: dict):
+
+    file_exists = os.path.exists(CSV_FILE)
+
+    with open(CSV_FILE, "a", newline="") as f:
+
+        writer = csv.DictWriter(f, fieldnames=HEADERS)
+
+        if not file_exists:
+
+            writer.writeheader()
+
+        writer.writerow({h: data.get(h, "") for h in HEADERS})
+
+
+
+def load_rows_raw():
+
+    rows = []
+
+    if not os.path.exists(CSV_FILE):
+
+        return rows, "CSV file not found yet. Send at least one print to /log-print."
+
+    try:
+
+        with open(CSV_FILE, newline="") as f:
+
+            reader = csv.DictReader(f)
+
+            for idx, r in enumerate(reader):
+
+                r = dict(r)
+
+                r["row_index"] = idx
+
+                ts = r.get("timestamp", "")
+
+                if ts:
+
+                    try:
+
+                        ts_float = float(ts)
+
+                        # NEW: keep raw timestamp for filtering
+                        r["timestamp_raw"] = ts_float
+
+                        r["timestamp"] = datetime.fromtimestamp(ts_float).strftime(
+
+                            "%Y-%m-%d %H:%M:%S"
+
+                        )
+
+                    except Exception:
+
+                        r["timestamp_raw"] = None
+                else:
+                    r["timestamp_raw"] = None
+
+                rows.append(r)
+
+        return rows, None
+
+    except Exception as e:
+
+        return [], f"Error reading CSV: {e}"
+
+
+
+def rewrite_csv_without_indices(indices_to_remove):
+
+    if not os.path.exists(CSV_FILE):
+
+        return
+
+    rows, _ = load_rows_raw()
+
+    keep = [r for r in rows if r.get("row_index") not in indices_to_remove]
+
+    with open(CSV_FILE, "w", newline="") as f:
+
+        writer = csv.DictWriter(f, fieldnames=HEADERS)
+
+        writer.writeheader()
+
+        for r in keep:
+
+            out = {h: r.get(h, "") for h in HEADERS}
+
+            writer.writerow(out)
+
+
+
+def get_known_printers():
+
+    printers = set()
+
+    settings = load_settings()
+
+    printers.update(settings.keys())
+
+    if os.path.exists(CSV_FILE):
+
+        try:
+
+            with open(CSV_FILE, newline="") as f:
+
+                reader = csv.DictReader(f)
+
+                for r in reader:
+
+                    p = r.get("printer")
+
+                    if p:
+
+                        printers.add(p)
+
+        except Exception:
+
+            pass
+
+    return sorted(printers)
+
+
+
+def compute_summary(rows):
+    total_prints = len(rows)
+    total_hours = 0.0
+    total_meters = 0.0
+    total_cost = 0.0
+
+    for r in rows:
+        try:
+            total_hours += float(r.get("duration_hours") or 0)
+            total_meters += float(r.get("filament_meters") or 0)
+            total_cost += float(r.get("total_cost") or 0)
+        except ValueError:
+            pass
+
+    return {
+        "total_prints": total_prints,
+        "total_hours": total_hours,
+        "total_meters": total_meters,
+        "total_cost": total_cost,
+    }
+
+
+def _parse_date(s):
+    try:
+        return datetime.strptime(s, "%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def get_date_range_from_params(args):
+    """
+    args: request.args
+    Returns (start_dt, end_dt, label, quick_range)
+    - start_dt / end_dt are datetime or None
+    - label is a human-readable string for UI
+    - quick_range is the normalized quick range key
+    """
+    quick = (args.get("quick_range") or "").lower()
+    today = datetime.now().date()
+
+    if quick in ("last7", "last_7"):
+        start = today - timedelta(days=7)
+        end = today
+        label = "Last 7 days"
+        return (
+            datetime.combine(start, datetime.min.time()),
+            datetime.combine(end, datetime.max.time()),
+            label,
+            "last7",
+        )
+
+    if quick in ("last30", "last_30"):
+        start = today - timedelta(days=30)
+        end = today
+        label = "Last 30 days"
+        return (
+            datetime.combine(start, datetime.min.time()),
+            datetime.combine(end, datetime.max.time()),
+            label,
+            "last30",
+        )
+
+    if quick == "this_month":
+        start = today.replace(day=1)
+        if start.month == 12:
+            next_month = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            next_month = start.replace(month=start.month + 1, day=1)
+        end = next_month - timedelta(days=1)
+        label = "This month"
+        return (
+            datetime.combine(start, datetime.min.time()),
+            datetime.combine(end, datetime.max.time()),
+            label,
+            "this_month",
+        )
+
+    if quick == "last_month":
+        first_this = today.replace(day=1)
+        end = first_this - timedelta(days=1)
+        start = end.replace(day=1)
+        label = "Last month"
+        return (
+            datetime.combine(start, datetime.min.time()),
+            datetime.combine(end, datetime.max.time()),
+            label,
+            "last_month",
+        )
+
+    # Manual range
+    start_str = (args.get("start_date") or "").strip()
+    end_str = (args.get("end_date") or "").strip()
+    start_dt = _parse_date(start_str) if start_str else None
+    end_dt = _parse_date(end_str) if end_str else None
+
+    label_parts = []
+    if start_dt:
+        label_parts.append(f"from {start_dt.date().isoformat()}")
+    if end_dt:
+        label_parts.append(f"to {end_dt.date().isoformat()}")
+    label = " ".join(label_parts) if label_parts else "All time"
+
+    return start_dt, end_dt, label, ""
+
+
+def compute_monthly_breakdown(rows):
+    """
+    Group rows by (year, month) and aggregate:
+    - total prints
+    - total hours
+    - total cost
+    Returns: list of dicts sorted by (year, month)
+    """
+    months = {}
+
+    for r in rows:
+        ts_raw = r.get("timestamp_raw")
+        if not ts_raw:
+            continue
+        try:
+            dt = datetime.fromtimestamp(float(ts_raw))
+        except Exception:
+            continue
+
+        key = (dt.year, dt.month)
+        if key not in months:
+            months[key] = {"count": 0, "hours": 0.0, "cost": 0.0}
+
+        months[key]["count"] += 1
+
+        try:
+            hours = float(r.get("duration_hours") or 0.0)
+            cost = float(r.get("total_cost") or 0.0)
+        except ValueError:
+            hours = 0.0
+            cost = 0.0
+
+        months[key]["hours"] += hours
+        months[key]["cost"] += cost
+
+    result = []
+    for (year, month), data in sorted(months.items()):
+        result.append({
+            "year": year,
+            "month": month,
+            "label": f"{year}-{month:02d}",
+            "count": data["count"],
+            "hours": data["hours"],
+            "cost": data["cost"],
+        })
+    return result
+
+
+# --- BACKEND: Printer rename/merge functions ---
+def rename_printer(old_name, new_name, update_csv=True):
+    # Update settings
+    settings = load_settings()
+    if old_name in settings:
+        settings[new_name] = settings.pop(old_name)
+        save_settings(settings)
+    # Update client registry
+    registry = load_state("clients", [])
+    changed = False
+    for entry in registry:
+        if entry.get("printer_name") == old_name:
+            entry["printer_name"] = new_name
+            changed = True
+    if changed:
+        save_state("clients", registry)
+    # Update CSV if requested
+    if update_csv and os.path.exists(CSV_FILE):
+        rows, _ = load_rows_raw()
+        for row in rows:
+            if row.get("printer") == old_name:
+                row["printer"] = new_name
+        with open(CSV_FILE, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADERS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+
+def merge_printers(names_to_merge, merged_name):
+    # (1) Combine settings (last one wins), (2) update registry, (3) rewrite CSV
+    settings = load_settings()
+    for name in names_to_merge:
+        if name in settings:
+            settings[merged_name] = settings.pop(name)
+    save_settings(settings)
+    # Registry
+    registry = load_state("clients", [])
+    changed = False
+    for entry in registry:
+        if entry.get("printer_name") in names_to_merge:
+            entry["printer_name"] = merged_name
+            changed = True
+    if changed:
+        save_state("clients", registry)
+    # CSV
+    if os.path.exists(CSV_FILE):
+        rows, _ = load_rows_raw()
+        for row in rows:
+            if row.get("printer") in names_to_merge:
+                row["printer"] = merged_name
+        with open(CSV_FILE, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADERS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+
+@app.post("/log-print")
+
+def log_print():
+
+    # Simple API key check
+
+    auth = request.headers.get("X-API-Key", "")
+
+    if API_KEY and auth != API_KEY:
+
+        return jsonify({"status": "error", "error": "Unauthorized"}), 403
+
+
+    payload = request.get_json(force=True, silent=True)
+
+    if not payload:
+
+        return jsonify({"status": "error", "error": "Invalid or missing JSON"}), 400
+
+
+    missing = [k for k in ["timestamp", "printer", "filename", "duration_seconds", "filament_mm"] if k not in payload]
+
+    if missing:
+
+        return jsonify({"status": "error", "error": f"Missing fields: {', '.join(missing)}"}), 400
+
+
+    try:
+
+        ts = float(payload["timestamp"])
+
+        duration_seconds = float(payload["duration_seconds"])
+
+        filament_mm = float(payload["filament_mm"])
+
+    except ValueError:
+
+        return jsonify({"status": "error", "error": "Numeric fields must be numbers"}), 400
+
+
+    printer_name = str(payload["printer"])
+
+    filename = str(payload["filename"])
+
+
+    # Make sure printer exists in settings
+
+    settings = load_settings()
+
+    if printer_name not in settings:
+
+        settings[printer_name] = dict(DEFAULT_PRICING)
+
+        save_settings(settings)
+
+
+    cost_data = compute_costs(printer_name, duration_seconds, filament_mm)
+
+
+    row = {
+
+        "timestamp": ts,
+
+        "printer": printer_name,
+
+        "filename": filename,
+
+        "duration_seconds": duration_seconds,
+
+        "filament_mm": filament_mm,
+
+    }
+
+    row.update(cost_data)
+
+
+    append_row(row)
+
+    return jsonify({"status": "ok"})
+
+
+
+@app.route("/", methods=["GET", "POST"])
+
+def index():
+
+    if request.method == "POST":
+
+        action = request.form.get("action")
+
+        if action == "delete":
+
+            ids = request.form.getlist("delete_rows")
+
+            indices = set()
+
+            for x in ids:
+
+                try:
+
+                    indices.add(int(x))
+
+                except ValueError:
+
+                    continue
+
+            if indices:
+
+                rewrite_csv_without_indices(indices)
+
+        return redirect(url_for("index"))
+
+
+    rows, error = load_rows_raw()
+
+    printers = get_known_printers()
+
+    selected_printer = request.args.get("printer", "All")
+    
+    # Filter by printer
+    if selected_printer != "All":
+        rows = [r for r in rows if r.get("printer") == selected_printer]
+
+    # NEW: date range filtering
+    start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
+    if start_dt or end_dt:
+        filtered = []
+        for r in rows:
+            ts_raw = r.get("timestamp_raw")
+            if not ts_raw:
+                continue
+            try:
+                ts_dt = datetime.fromtimestamp(float(ts_raw))
+            except Exception:
+                continue
+            if start_dt and ts_dt < start_dt:
+                continue
+            if end_dt and ts_dt > end_dt:
+                continue
+            filtered.append(r)
+        rows = filtered
+    else:
+        range_label = "All time"
+        quick_range = request.args.get("quick_range", "")
+
+    summary = compute_summary(rows)
+    # Note: monthly_breakdown is computed here but will be passed to /reports in Freedom Mode
+    # However, per spec we might want to show it on index too or just pass it.
+    # Let's compute it here so it's available if we decide to show it on index.
+    monthly_breakdown = compute_monthly_breakdown(rows)
+
+    display_settings = load_display_settings()
+
+    visible_columns = display_settings["visible_columns"]
+
+    hidden_columns = [h for h in HEADERS if h not in visible_columns]
+
+    # Prepare chart data (simple example for now, can be expanded)
+    # We'll pass empty data for now as we're moving to /reports for charts
+    chart_cost_per_day = {"labels": [], "values": []}
+    chart_hours_per_printer = {"labels": [], "values": []}
+
+    return render_template(
+        "index.html",
+        rows=rows,
+        headers=HEADERS,
+        friendly_headers=FRIENDLY_HEADERS,
+        csv_file=CSV_FILE,
+        error=error,
+        printers=printers,
+        selected_printer=selected_printer,
+        summary=summary,
+        printer_colors=PRINTER_COLORS,
+        hidden_columns=hidden_columns,
+        chart_cost_per_day=chart_cost_per_day,
+        chart_hours_per_printer=chart_hours_per_printer,
+        # NEW Phase 8.1 variables:
+        range_label=range_label,
+        start_date=request.args.get("start_date", ""),
+        end_date=request.args.get("end_date", ""),
+        quick_range=quick_range,
+        monthly_breakdown=monthly_breakdown,
+    )
+
+
+def compute_top_printers(rows, limit=5):
+    """
+    Aggregate cost by printer and return top N.
+    """
+    stats = {}
+    for r in rows:
+        p = r.get("printer", "Unknown")
+        try:
+            cost = float(r.get("total_cost") or 0.0)
+        except ValueError:
+            cost = 0.0
+        
+        if p not in stats:
+            stats[p] = {"name": p, "count": 0, "cost": 0.0}
+        
+        stats[p]["count"] += 1
+        stats[p]["cost"] += cost
+    
+    sorted_printers = sorted(stats.values(), key=lambda x: x["cost"], reverse=True)
+    return sorted_printers[:limit]
+
+
+@app.route("/reports")
+def reports_page():
+    rows, error = load_rows_raw()
+    
+    # Apply date filters
+    start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
+    if start_dt or end_dt:
+        filtered = []
+        for r in rows:
+            ts_raw = r.get("timestamp_raw")
+            if not ts_raw:
+                continue
+            try:
+                ts_dt = datetime.fromtimestamp(float(ts_raw))
+            except Exception:
+                continue
+            if start_dt and ts_dt < start_dt:
+                continue
+            if end_dt and ts_dt > end_dt:
+                continue
+            filtered.append(r)
+        rows = filtered
+    else:
+        range_label = "All time"
+        quick_range = request.args.get("quick_range", "")
+
+    summary = compute_summary(rows)
+    monthly_breakdown = compute_monthly_breakdown(rows)
+    top_printers = compute_top_printers(rows)
+
+    return render_template(
+        "reports.html",
+        summary=summary,
+        monthly_breakdown=monthly_breakdown,
+        top_printers=top_printers,
+        start_date=request.args.get("start_date", ""),
+        end_date=request.args.get("end_date", ""),
+        quick_range=quick_range,
+        range_label=range_label
+    )
+
+
+
+@app.route("/settings", methods=["GET", "POST"])
+
+def settings_page():
+
+    msg = ""
+
+    if request.method == "POST":
+
+        form_type = request.form.get("form_type", "printer")
+
+        if form_type == "rename_printer":
+
+            old_name = request.form.get("old_name", "")
+
+            new_name = request.form.get("new_name", "")
+
+            update_csv = bool(request.form.get("update_csv"))
+
+            if old_name and new_name and (old_name != new_name):
+
+                rename_printer(old_name, new_name, update_csv)
+
+                msg = f"Renamed {old_name} to {new_name}."
+
+            else:
+
+                msg = "Invalid rename."
+
+        elif form_type == "merge_printers":
+
+            names = request.form.getlist("names_to_merge")
+
+            merged_name = request.form.get("merged_name", "")
+
+            if names and merged_name and merged_name not in names:
+
+                merge_printers(names, merged_name)
+
+                msg = f"Merged printers {', '.join(names)} into {merged_name}."
+
+            else:
+
+                msg = "Invalid merge."
+
+        # --- original printer settings logic below ---
+        elif form_type == "printer":
+
+            printer = request.form.get("printer")
+
+            if printer:
+
+                settings = load_settings()
+
+                try:
+
+                    rate_per_hour = float(request.form.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"]))
+
+                    filament_rate = float(request.form.get("filament_rate", DEFAULT_PRICING["filament_rate"]))
+
+                    grams_per_meter = float(request.form.get("grams_per_meter", DEFAULT_PRICING["grams_per_meter"]))
+
+                except ValueError:
+
+                    return redirect(url_for("settings_page"))
+
+                filament_mode = request.form.get("filament_mode", DEFAULT_PRICING["filament_mode"])
+
+                if filament_mode not in ("per_meter", "per_gram", "per_kg"):
+
+                    filament_mode = DEFAULT_PRICING["filament_mode"]
+
+
+                settings[printer] = {
+
+                    "rate_per_hour": rate_per_hour,
+
+                    "filament_mode": filament_mode,
+
+                    "filament_rate": filament_rate,
+
+                    "grams_per_meter": grams_per_meter,
+
+                }
+
+                save_settings(settings)
+
+
+        elif form_type == "columns":
+
+            cols = request.form.getlist("columns")
+
+            save_display_settings(cols)
+
+
+        return redirect(url_for("settings_page"))
+
+
+    printers = get_known_printers()
+
+    configs = {}
+
+    for p in printers:
+
+        configs[p] = get_pricing_for_printer(p)
+
+
+    display_settings = load_display_settings()
+
+    visible_columns = display_settings["visible_columns"]
+
+
+    return render_template(
+        "settings.html",
+        printers=printers,
+        configs=configs,
+        headers=HEADERS,
+        visible_columns=visible_columns,
+        msg=msg
+    )
+
+
+
+
+@app.route("/download")
+
+def download_csv():
+
+    if not os.path.exists(CSV_FILE):
+
+        return "No CSV file found.", 404
+
+    return send_file(CSV_FILE, as_attachment=True, download_name="print_costs.csv")
+
+
+
+@app.route("/health")
+
+def health():
+
+    """
+
+    Simple health check endpoint for monitoring and diagnostics.
+
+    Returns 200 OK with basic status information.
+
+    """
+
+    status = {
+
+        "status": "ok",
+
+        "service": "print-cost-dashboard",
+
+        "api_key_configured": bool(API_KEY),
+
+        "data_dir_exists": os.path.exists(DATA_DIR),
+
+        "csv_file_exists": os.path.exists(CSV_FILE),
+
+        "settings_file_exists": os.path.exists(SETTINGS_FILE),
+
+    }
+
+    return jsonify(status), 200
+
+
+
+if __name__ == "__main__":
+
+    app.run(host="0.0.0.0", port=5000)
+

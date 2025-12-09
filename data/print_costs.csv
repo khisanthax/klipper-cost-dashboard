@@ -1,0 +1,3 @@
+timestamp,printer,filename,duration_seconds,duration_hours,filament_mm,filament_meters,rate_per_hour,filament_mode,filament_rate,grams_per_meter,time_cost,material_cost,total_cost,filament_profile_id,filament_material,status,failure_reason
+
+1765298889.0,Cube_PETG_0.2_11m55s.gcode,688,803.0,0.22305555555555556,0.0,0.0,1.0,per_meter,0.25,3.0,1.0,0.0,1.0,,,completed,

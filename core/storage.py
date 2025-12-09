@@ -1,0 +1,257 @@
+"""
+File I/O and data persistence for Print Cost Dashboard.
+"""
+import os
+import csv
+import json
+import secrets
+from datetime import datetime
+
+
+def ensure_settings_exists(settings_file, default_pricing):
+    """Create a default settings.json if it doesn't exist."""
+    if not os.path.exists(settings_file):
+        initial = {}
+        for pname in ["SV08", "SV07", "Ender5P"]:
+            initial[pname] = dict(default_pricing)
+        with open(settings_file, "w") as f:
+            json.dump(initial, f, indent=2)
+
+
+def load_settings(settings_file):
+    """Load printer settings from JSON file."""
+    from core.config import DEFAULT_PRICING
+    ensure_settings_exists(settings_file, DEFAULT_PRICING)
+    try:
+        with open(settings_file) as f:
+            data = json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            return data
+    except Exception:
+        return {}
+
+
+def save_settings(settings_file, data_dir, settings):
+    """Save printer settings to JSON file."""
+    os.makedirs(data_dir, exist_ok=True)
+    with open(settings_file, "w") as f:
+        json.dump(settings, f, indent=2)
+
+
+def ensure_display_exists(display_file, headers):
+    """Create a default display.json if it doesn't exist."""
+    if not os.path.exists(display_file):
+        data = {"visible_columns": headers}
+        with open(display_file, "w") as f:
+            json.dump(data, f, indent=2)
+
+
+def load_display_settings(display_file, headers):
+    """Load display settings from JSON file."""
+    ensure_display_exists(display_file, headers)
+    try:
+        with open(display_file) as f:
+            data = json.load(f)
+            if not isinstance(data, dict):
+                return {"visible_columns": headers}
+            cols = data.get("visible_columns", headers)
+            cols = [c for c in cols if c in headers]
+            if not cols:
+                cols = headers
+            return {"visible_columns": cols}
+    except Exception:
+        return {"visible_columns": headers}
+
+
+def save_display_settings(display_file, headers, visible_columns):
+    """Save display settings to JSON file."""
+    visible = [c for c in visible_columns if c in headers]
+    if not visible:
+        visible = headers
+    with open(display_file, "w") as f:
+        json.dump({"visible_columns": visible}, f, indent=2)
+
+
+def ensure_api_key(secret_file=None, data_dir=None):
+    """
+    Load API key from secret.json if it exists.
+    Only generates a new key if the file doesn't exist (first-time setup).
+    This prevents overwriting API keys set by the installer.
+    Returns the API key or None if file doesn't exist and couldn't be created.
+    """
+    if secret_file is None:
+        from core.config import SECRET_FILE, DATA_DIR
+        secret_file = SECRET_FILE
+        data_dir = DATA_DIR
+    
+    os.makedirs(data_dir, exist_ok=True)
+    
+    # Try to read existing key first
+    if os.path.exists(secret_file):
+        try:
+            with open(secret_file) as f:
+                data = json.load(f)
+                existing_key = data.get("api_key")
+                if existing_key:
+                    # Key exists - use it (don't regenerate)
+                    return existing_key
+        except Exception:
+            # File exists but is corrupted - don't overwrite, let installer fix it
+            pass
+    
+    # File doesn't exist - only generate on first-time setup
+    # This should normally be done by the installer, but we provide a fallback
+    key = secrets.token_hex(16)
+    try:
+        with open(secret_file, "w") as f:
+            json.dump({"api_key": key}, f, indent=2)
+        return key
+    except Exception:
+        return None
+
+
+def append_row(csv_file, headers, data):
+    """Append a row to the CSV file."""
+    file_exists = os.path.exists(csv_file)
+    with open(csv_file, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow({h: data.get(h, "") for h in headers})
+
+
+def load_rows_raw(csv_file):
+    """Load all rows from CSV file with timestamp parsing."""
+    rows = []
+    if not os.path.exists(csv_file):
+        return rows, "CSV file not found yet. Send at least one print to /log-print."
+    try:
+        with open(csv_file, newline="") as f:
+            reader = csv.DictReader(f)
+            for idx, r in enumerate(reader):
+                r = dict(r)
+                
+                # Ensure new fields exist for backwards compatibility
+                if "filament_profile_id" not in r:
+                    r["filament_profile_id"] = ""
+                if "filament_material" not in r:
+                    r["filament_material"] = ""
+                if "status" not in r:
+                    r["status"] = "completed"
+                if "failure_reason" not in r:
+                    r["failure_reason"] = ""
+                
+                r["row_index"] = idx
+                ts = r.get("timestamp", "")
+                if ts:
+                    try:
+                        ts_float = float(ts)
+                        # Keep raw timestamp for filtering
+                        r["timestamp_raw"] = ts_float
+                        r["timestamp"] = datetime.fromtimestamp(ts_float).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                    except Exception:
+                        r["timestamp_raw"] = None
+                else:
+                    r["timestamp_raw"] = None
+                rows.append(r)
+        return rows, None
+    except Exception as e:
+        return [], f"Error reading CSV: {e}"
+
+
+def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
+    """Rewrite CSV file without specified row indices."""
+    if not os.path.exists(csv_file):
+        return
+    rows, _ = load_rows_raw(csv_file)
+    keep = [r for r in rows if r.get("row_index") not in indices_to_remove]
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for r in keep:
+            out = {h: r.get(h, "") for h in headers}
+            writer.writerow(out)
+
+
+# State management for installer (used by both app and installer)
+def load_state(state_file, key, default=""):
+    """Load a value from install state."""
+    if not os.path.exists(state_file):
+        return default
+    try:
+        with open(state_file) as f:
+            data = json.load(f)
+        return data.get(key, default)
+    except Exception:
+        return default
+
+
+def save_state(state_file, data_dir, key, value):
+    """Save a value to install state."""
+    os.makedirs(data_dir, exist_ok=True)
+    data = {}
+    if os.path.exists(state_file):
+        try:
+            with open(state_file) as f:
+                data = json.load(f)
+        except Exception:
+            pass
+    data[key] = value
+    with open(state_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_profiles_data(profiles_file):
+    """
+    Load profiles data (profiles + mappings) from JSON file.
+    Returns a dict with 'profiles' and 'mappings' keys.
+    """
+    if not os.path.exists(profiles_file):
+        return {"profiles": {}, "mappings": {}}
+    try:
+        with open(profiles_file) as f:
+            data = json.load(f)
+            if not isinstance(data, dict):
+                return {"profiles": {}, "mappings": {}}
+            # Ensure keys exist
+            if "profiles" not in data:
+                data["profiles"] = {}
+            if "mappings" not in data:
+                data["mappings"] = {}
+            return data
+    except Exception:
+        return {"profiles": {}, "mappings": {}}
+
+
+def save_profiles_data(profiles_file, data_dir, data):
+    """Save profiles data to JSON file."""
+    os.makedirs(data_dir, exist_ok=True)
+    with open(profiles_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load_json_file(json_file):
+    """
+    Generic JSON file loader.
+    Returns the loaded data or None if file doesn't exist or is invalid.
+    """
+    if not os.path.exists(json_file):
+        return None
+    try:
+        with open(json_file) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_json_file(json_file, data_dir, data):
+    """
+    Generic JSON file saver.
+    Creates directory if needed.
+    """
+    os.makedirs(data_dir, exist_ok=True)
+    with open(json_file, "w") as f:
+        json.dump(data, f, indent=2)

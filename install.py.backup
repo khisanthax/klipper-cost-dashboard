@@ -1,0 +1,2211 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Print Cost Dashboard Installer
+
+This interactive installer:
+- Remembers your last master URL and API key to speed up repeat installs.
+- Warns if you try to use 127.0.0.1 / 'localhost' as the master URL so remote clients don't break.
+- Can install the MASTER dashboard (Docker), local CLIENTs, or remote CLIENTs (via SSH).
+"""
+
+import os
+import sys
+import json
+import secrets
+import textwrap
+import shutil
+import subprocess
+import tempfile
+import time
+import installer_macro
+
+# Directories and files
+DATA_DIR = "data"
+SECRET_FILE = os.path.join(DATA_DIR, "secret.json")
+STATE_FILE = os.path.join(DATA_DIR, "install_state.json")
+
+# Docker defaults
+DEFAULT_PORT = 6060            # host port
+DEFAULT_SERVICE_NAME = "print-cost-dashboard"
+DEFAULT_CONTAINER_PORT = 5000  # Flask inside container runs on 5000
+
+
+# -----------------------------
+# Utility and state helpers
+# -----------------------------
+
+def println(msg=""):
+    print(msg)
+    sys.stdout.flush()
+
+
+def ensure_data_dir():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def load_state(key, default=""):
+    if not os.path.exists(STATE_FILE):
+        return default
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+        return state.get(key, default)
+    except Exception:
+        return default
+
+
+def save_state(key, value):
+    ensure_data_dir()
+    state = {}
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+    state[key] = value
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def prompt_int(prompt, default):
+    val = input(f"{prompt} (press Enter for default {default}): ").strip()
+    if not val:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        println("Invalid number, using default.")
+        return default
+
+
+def prompt_str(prompt, default):
+    val = input(f"{prompt} (press Enter for default '{default}'): ").strip()
+    return val or default
+
+
+def get_master_url_default():
+    """
+    Reconstruct a default master URL based on stored host/port,
+    but prefer an explicitly saved master_url.
+    """
+    stored_port = load_state("master_port", DEFAULT_PORT)
+    stored_host = load_state("master_host", "127.0.0.1")
+    fallback = f"http://{stored_host}:{stored_port}"
+    return load_state("master_url", fallback)
+
+
+def prompt_master_url(master_url_default=None, allow_back=False, for_remote=False):
+    """
+    Centralized master URL prompt:
+
+    - Uses stored master_host/master_port if no default is provided.
+    - Prefers the last explicitly used master_url from state.
+    - Warns against 127.0.0.1 / localhost.
+    - If allow_back=True, 'b' returns None to the caller.
+    """
+    # Build a base default if caller didn't supply one
+    if master_url_default is None:
+        master_url_default = get_master_url_default()
+
+    # Prefer last explicitly-used URL if present
+    saved_master_url = load_state("master_url", "")
+    if saved_master_url:
+        master_url_default = saved_master_url
+
+    println()
+    println("=== Configure Master URL ===")
+    if for_remote:
+        println("This is the URL that REMOTE 3D printer hosts will use to reach the dashboard.")
+    else:
+        println("This is the URL that THIS printer host will use to reach the dashboard.")
+    println()
+    println("NOTE: Avoid using 127.0.0.1 or 'localhost' unless the client")
+    println("      is running on the *same* machine as the master.")
+    println()
+
+    while True:
+        if allow_back:
+            prompt_text = f"Enter master URL [{master_url_default}] (or 'b' to go back): "
+        else:
+            prompt_text = f"Enter master URL [{master_url_default}]: "
+
+        master_url_input = input(prompt_text).strip()
+
+        if allow_back and master_url_input.lower() == "b":
+            println("Cancelled.")
+            return None
+
+        if not master_url_input:
+            master_url = master_url_default
+        else:
+            master_url = master_url_input
+
+        if not master_url:
+            println("Master URL cannot be empty. Please enter a valid URL.")
+            continue
+
+        # Add scheme if missing
+        if not (master_url.startswith("http://") or master_url.startswith("https://")):
+            master_url = "http://" + master_url
+
+        # Warn about 127.0.0.1 / localhost
+        lowered = master_url.lower()
+        if "127.0.0.1" in lowered or "localhost" in lowered:
+            println()
+            println("WARNING: You entered a loopback address (127.0.0.1 / localhost).")
+            if for_remote:
+                println("Remote printers will NOT be able to reach the master with this URL")
+                println("unless they are on the same machine. Use the master's LAN hostname or IP instead.")
+            else:
+                println("Clients on other machines will NOT be able to reach the master")
+                println("with this URL. Use the master's LAN hostname or IP instead.")
+            confirm = input("Use this URL anyway? [y/N]: ").strip().lower()
+            if confirm not in ("y", "yes"):
+                println("Okay, let's try again with a network-reachable host.")
+                println()
+                continue
+
+        # Looks good – remember it and return
+        save_state("master_url", master_url)
+        println(f"Using master URL: {master_url}")
+        return master_url
+
+
+# -----------------------------
+# API key helpers
+# -----------------------------
+
+def get_api_key_default():
+    """
+    Read API key from secret.json if present, syncing it into state.
+    If secret.json is missing or broken, fall back to state.
+    This is read-only (won't generate a new key).
+    """
+    if os.path.exists(SECRET_FILE):
+        try:
+            with open(SECRET_FILE, "r") as f:
+                data = json.load(f)
+            api_key = data.get("api_key")
+            if api_key:
+                save_state("api_key", api_key)
+                return api_key
+        except Exception:
+            pass
+    return load_state("api_key", "")
+
+
+def ensure_api_key(existing_key=None):
+    """
+    Ensure data/secret.json exists and return API key.
+    If existing_key is provided, use that.
+    Otherwise, generate a new key.
+    Also sync it into install_state.json for convenience.
+    """
+    ensure_data_dir()
+
+    # If secret file exists and no override requested, reuse that
+    if existing_key is None and os.path.exists(SECRET_FILE):
+        try:
+            with open(SECRET_FILE, "r") as f:
+                data = json.load(f)
+            api_key = data.get("api_key")
+            if api_key:
+                save_state("api_key", api_key)
+                return api_key
+        except Exception:
+            pass
+
+    # Use provided key or generate a new one
+    if existing_key:
+        api_key = existing_key
+    else:
+        api_key = secrets.token_hex(16)
+
+    with open(SECRET_FILE, "w") as f:
+        json.dump({"api_key": api_key}, f, indent=2)
+    save_state("api_key", api_key)
+    return api_key
+
+
+# -----------------------------
+# Auto-discovery of local printer dirs
+# -----------------------------
+
+def find_printer_dirs():
+    """
+    Look for:
+      - /home/<user>/printer_data/config
+      - /home/<user>/* where dir name starts with 'printer' OR ends with '_data',
+        and that dir has a 'config' subfolder.
+    Plus any previously saved printer_dir, if it still exists.
+    """
+    candidates = []
+
+    if os.path.isdir("/home"):
+        for user in os.listdir("/home"):
+            user_home = os.path.join("/home", user)
+            if not os.path.isdir(user_home):
+                continue
+
+            # Classic Klipper layout: /home/<user>/printer_data/config
+            cfg_path = os.path.join(user_home, "printer_data", "config")
+            if os.path.isdir(cfg_path):
+                candidates.append(cfg_path)
+
+            # Also scan immediate subdirs under /home/<user> for printer_* or *_data
+            try:
+                for item in os.listdir(user_home):
+                    item_path = os.path.join(user_home, item)
+                    if not os.path.isdir(item_path):
+                        continue
+                    # e.g. /home/khisanthax/printer_Ender3S1_data/
+                    if item.startswith("printer") or item.endswith("_data"):
+                        cfg2 = os.path.join(item_path, "config")
+                        if os.path.isdir(cfg2):
+                            candidates.append(cfg2)
+            except PermissionError:
+                # Skip home dirs we can't list
+                continue
+
+    # Add stored choice if present
+    stored = load_state("printer_dir", "")
+    if stored and os.path.isdir(stored):
+        candidates.append(stored)
+
+    # Deduplicate
+    return sorted(set(candidates))
+
+
+def choose_printer_dir(auto_mode=False):
+    """
+    Interactive chooser for local printer config directory.
+    Returns the path or None if user goes back.
+    If auto_mode=True and only one directory is found, auto-selects it.
+    """
+    while True:
+        dirs = find_printer_dirs()
+        if not dirs:
+            println("No printer directories found automatically.")
+            path = input("Enter printer config directory manually (or 'b' to go back): ").strip()
+            if path.lower() == "b":
+                return None
+            if path:
+                return path
+            println("Path required.")
+            continue
+
+        # Auto mode: if only one directory, use it automatically
+        if auto_mode and len(dirs) == 1:
+            println(f"✓ Auto-selected printer directory: {dirs[0]}")
+            return dirs[0]
+
+        println("\nAvailable printer directories:")
+        for i, d in enumerate(dirs, 1):
+            println(f"{i}. {d}")
+        println(f"{len(dirs) + 1}. Enter manually")
+        choice = input("Select option (or 'b' to go back): ").strip()
+
+        if choice.lower() == "b":
+            return None
+
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(dirs):
+                return dirs[idx - 1]
+            elif idx == len(dirs) + 1:
+                path = input("Enter printer config directory (or 'b' to go back): ").strip()
+                if path.lower() == "b":
+                    return None
+                if path:
+                    return path
+                println("Path required.")
+                continue
+
+        println("Invalid choice. Try again.")
+
+
+# -----------------------------
+# Config and script generation
+# -----------------------------
+
+def make_print_cost_cfg(printer_name, script_path):
+    """
+    Return the contents of print_cost.cfg using the given printer_name
+    and command path for send_print_cost.
+
+    NOTE: We deliberately use MSG="{{msg}}" / PARAMS="{{params}}" here so that
+    the generated file contains MSG="{msg}" and PARAMS="{params}" — which is
+    what Klipper expects for single-brace expansion.
+    """
+    return textwrap.dedent(
+        f"""
+        # Auto-generated by print cost installer
+        [gcode_shell_command send_print_cost]
+        command: {script_path}
+        timeout: 15.0
+        verbose: True
+
+        [gcode_macro PRINT_COST_TEST]
+        description: Test sending dummy cost data to dashboard
+        gcode:
+            {{% set printer_name = "{printer_name}" %}}
+            {{% set fname = "test_file.gcode" %}}
+            {{% set dur = 3600 %}}
+            {{% set filament = 10000 %}}
+            {{% set msg = "Sending cost test: printer=" ~ printer_name ~ ", file=" ~ fname ~ ", dur=" ~ dur ~ ", mm=" ~ filament %}}
+            RESPOND PREFIX="COST" MSG="{{msg}}"
+            {{% set params = printer_name ~ " " ~ fname ~ " " ~ dur ~ " " ~ filament %}}
+            RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{{params}}"
+        """
+    ).lstrip()
+
+
+def make_client_script_contents(master_url, api_key):
+    """
+    Return the contents of send_print_cost.sh.
+    Uses set -euo pipefail and posts JSON to /log-print.
+    """
+    return textwrap.dedent(
+        f"""
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        MASTER_URL="{master_url}"
+        API_KEY="{api_key}"
+
+        TS=$(date +%s)
+        PRINTER="$1"
+        FILENAME="$2"
+        DURATION_SEC="$3"
+        FILAMENT_MM="$4"
+
+        JSON=$(cat <<EOF
+        {{
+          "timestamp": $TS,
+          "printer": "$PRINTER",
+          "filename": "$FILENAME",
+          "duration_seconds": $DURATION_SEC,
+          "filament_mm": $FILAMENT_MM
+        }}
+        EOF
+        )
+
+        curl -s -X POST "$MASTER_URL/log-print" \\
+            -H "Content-Type: application/json" \\
+            -H "X-API-Key: $API_KEY" \\
+            -d "$JSON"
+        """
+    ).lstrip()
+
+
+def write_local_client_script(script_path, master_url, api_key):
+    """
+    Write send_print_cost.sh locally and make it executable.
+    """
+    script_dir = os.path.dirname(script_path)
+    if script_dir and not os.path.exists(script_dir):
+        os.makedirs(script_dir, exist_ok=True)
+
+    content = make_client_script_contents(master_url, api_key)
+    with open(script_path, "w") as f:
+        f.write(content)
+    os.chmod(script_path, 0o755)
+    println(f"Wrote {script_path}")
+    save_state("script_path", script_path)
+
+
+def ensure_include_at_top(printer_cfg_path, include_line="[include print_cost.cfg]"):
+    """
+    Ensure include_line is present at the top of printer.cfg.
+    """
+    if not os.path.exists(printer_cfg_path):
+        println(f"printer.cfg not found at {printer_cfg_path}, please add {include_line} manually.")
+        return
+
+    try:
+        with open(printer_cfg_path, "r") as f:
+            text = f.read()
+    except Exception as e:
+        println(f"Failed to read {printer_cfg_path}: {e}")
+        return
+
+    if include_line in text:
+        println("printer.cfg already includes print_cost.cfg")
+        return
+
+    new_text = include_line + "\n" + text
+    try:
+        with open(printer_cfg_path, "w") as f:
+            f.write(new_text)
+        println(f"Added {include_line} at TOP of printer.cfg")
+    except Exception as e:
+        println(f"Failed to modify printer.cfg: {e}")
+
+
+# -----------------------------
+# Docker files for master
+# -----------------------------
+
+def write_dockerfile():
+    if os.path.exists("Dockerfile"):
+        println("Dockerfile already exists, skipping.")
+        return
+
+    content = textwrap.dedent(
+        """
+        FROM python:3.11-slim
+
+        WORKDIR /app
+
+        RUN pip install --no-cache-dir flask
+
+        COPY app.py /app/app.py
+        COPY report_utils.py /app/report_utils.py
+        COPY templates /app/templates
+
+        RUN mkdir -p /app/data
+
+        EXPOSE 5000
+
+        CMD ["python", "app.py"]
+        """
+    ).lstrip()
+
+    with open("Dockerfile", "w") as f:
+        f.write(content)
+
+    println("Created Dockerfile.")
+
+
+def write_docker_compose(port, service_name):
+    if os.path.exists("docker-compose.yml"):
+        println("docker-compose.yml already exists, skipping.")
+        return
+
+    content = textwrap.dedent(
+        f"""
+        version: "3.8"
+
+        services:
+          {service_name}:
+            build: .
+            container_name: {service_name}
+            restart: unless-stopped
+            ports:
+              - "{port}:{DEFAULT_CONTAINER_PORT}"
+            volumes:
+              - ./data:/app/data
+        """
+    ).lstrip()
+
+    with open("docker-compose.yml", "w") as f:
+        f.write(content)
+
+    println("Created docker-compose.yml.")
+
+
+# -----------------------------
+# SSH helpers for remote client
+# -----------------------------
+
+def run_subprocess(cmd):
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except Exception as e:
+        return 1, "", str(e)
+
+
+def ssh_run(remote, remote_cmd):
+    return run_subprocess(["ssh", remote, remote_cmd])
+
+
+def scp_copy(local_path, remote, remote_path):
+    return run_subprocess(["scp", local_path, f"{remote}:{remote_path}"])
+
+
+def remote_find_printer_data(remote):
+    """
+    Try to find printer_data dirs on remote host.
+    """
+    code, home_out, err = ssh_run(remote, "echo $HOME")
+    if code != 0 or not home_out:
+        println(f"Could not determine remote HOME: {err}")
+        return []
+
+    home = home_out.strip()
+    find_cmd = f'find "{home}" -maxdepth 5 -type d -name printer_data 2>/dev/null'
+    code, out, err = ssh_run(remote, find_cmd)
+    if code != 0:
+        println(f"Remote find command failed: {err}")
+        return []
+
+    candidates = [line.strip() for line in out.splitlines() if line.strip()]
+    return candidates
+
+
+def remote_write_file(remote, path, content, mode=0o644):
+    """
+    Write small file to remote using scp via a temp local file, then chmod it.
+    """
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+    except Exception as e:
+        println(f"Failed to create temp file: {e}")
+        return False
+
+    try:
+        code, out, err = scp_copy(tmp_path, remote, path)
+        if code != 0:
+            println(f"SCP to {remote}:{path} failed: {err}")
+            return False
+
+        code, out, err = ssh_run(remote, f"chmod {oct(mode)[2:]} '{path}'")
+        if code != 0:
+            println(f"chmod on remote failed: {err}")
+        return True
+    finally:
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+def remote_append_line_if_missing(remote, file_path, line):
+    """
+    Ensure a line is present at the top of a remote file.
+    """
+    code, out, err = ssh_run(remote, f"test -f '{file_path}' && echo EXISTS || echo MISSING")
+    if code != 0:
+        println(f"Failed to check remote file {file_path}: {err}")
+        return False
+
+    exists = (out.strip() == "EXISTS")
+    if not exists:
+        create_cmd = f"echo '{line}' > '{file_path}'"
+        code, out2, err2 = ssh_run(remote, create_cmd)
+        if code != 0:
+            println(f"Failed to create {file_path}: {err2}")
+            return False
+        return True
+
+    grep_cmd = f"grep -F '{line}' '{file_path}' >/dev/null 2>&1 && echo PRESENT || echo ABSENT"
+    code, out2, err2 = ssh_run(remote, grep_cmd)
+    if code != 0:
+        println(f"Failed to grep remote file {file_path}: {err2}")
+        return False
+    if out2.strip() == "PRESENT":
+        println(f"Line already present in {file_path}, not adding again.")
+        return True
+
+    cmd = (
+        "tmpfile=$(mktemp) && "
+        f"printf '%s\\n' '{line}' > \"$tmpfile\" && "
+        f"cat '{file_path}' >> \"$tmpfile\" && "
+        f"mv \"$tmpfile\" '{file_path}'"
+    )
+    code, out3, err3 = ssh_run(remote, cmd)
+    if code != 0:
+        println(f"Failed to prepend to {file_path}: {err3}")
+        return False
+
+    return True
+
+
+def ensure_local_ssh_key():
+    """
+    Ensure we have an SSH key at ~/.ssh/id_ed25519.pub.
+    Generate one with no passphrase if missing.
+    """
+    ssh_dir = os.path.expanduser("~/.ssh")
+    os.makedirs(ssh_dir, exist_ok=True)
+    key_path = os.path.join(ssh_dir, "id_ed25519")
+    pub_path = key_path + ".pub"
+
+    if os.path.exists(pub_path):
+        return pub_path
+
+    println("No SSH key found at ~/.ssh/id_ed25519.pub, generating a new ed25519 key (no passphrase)...")
+    code, out, err = run_subprocess(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", key_path])
+    if code != 0:
+        println(f"Failed to generate SSH key: {err}")
+        return None
+    return pub_path
+
+
+def setup_ssh_key_for_remote(remote):
+    """
+    Use ssh-copy-id to install our public key on the remote host.
+    """
+    if not shutil.which("ssh-copy-id"):
+        println("ssh-copy-id is not installed, cannot automatically install SSH keys.")
+        println("You can install SSH keys manually later if you like.")
+        return False
+
+    pub_path = ensure_local_ssh_key()
+    if not pub_path:
+        return False
+
+    println(f"Setting up SSH key-based login for {remote}.")
+    println("You may be prompted once for the SSH password and to confirm the host key.\n")
+    code, out, err = run_subprocess(["ssh-copy-id", "-i", pub_path, remote])
+    if code != 0:
+        println(f"ssh-copy-id failed: {err or out}")
+        return False
+
+    println("SSH key installed for remote host; subsequent ssh/scp should not ask for a password.")
+    return True
+
+
+# -----------------------------
+# Master setup
+# -----------------------------
+
+def master_setup(master_and_client=False):
+    println("=== Master Setup (Dashboard host) ===")
+    println("This will configure Docker files and an API key for running the dashboard on THIS machine.\n")
+
+    docker_path = shutil.which("docker")
+    if not docker_path:
+        println("ERROR: docker is not installed or not in PATH.")
+        println("Please install Docker first, then re-run this script.")
+        return
+
+    # Basic Docker settings
+    port = prompt_int("HTTP port to expose on host", DEFAULT_PORT)
+    service_name = prompt_str("Service name (for container)", DEFAULT_SERVICE_NAME)
+    save_state("master_port", port)
+    save_state("master_service_name", service_name)
+
+    # Hostname/IP that clients will use to reach this master
+    default_host = load_state("master_host", "127.0.0.1")
+    master_host = prompt_str(
+        "Hostname or IP that CLIENTS will use to reach this master",
+        default_host,
+    )
+    save_state("master_host", master_host)
+
+    # API key handling
+    existing_api = get_api_key_default()
+    if existing_api:
+        println(f"Existing API key detected: {existing_api}")
+        use = input("Use this existing API key? [Y/n or 'b' to go back]: ").strip().lower()
+        if use == "b":
+            println("Cancelled.")
+            return
+        if use in ("n", "no"):
+            # Allow custom or brand-new key
+            custom = input("Enter a custom API key, or press Enter to generate a new one: ").strip()
+            if custom:
+                api_key = ensure_api_key(existing_key=custom)
+                println("Using custom API key (saved to secret.json).")
+            else:
+                new_key = secrets.token_hex(16)
+                api_key = ensure_api_key(existing_key=new_key)
+                println(f"Generated new API key: {api_key}")
+        else:
+            api_key = ensure_api_key(existing_key=existing_api)
+            println("Reusing existing API key (saved to secret.json).")
+    else:
+        api_key = ensure_api_key()
+        println(f"Generated API key: {api_key}")
+
+    # Write Docker artifacts
+    write_dockerfile()
+    write_docker_compose(port, service_name)
+
+    println("\nMaster setup files created.")
+    println(f"- API key stored in {SECRET_FILE}")
+    println("- Dockerfile")
+    println("- docker-compose.yml")
+
+    dashboard_url = f"http://{master_host}:{port}"
+    save_state("master_url", dashboard_url)
+
+    # Offer to start the dashboard now
+    start_now = input("\nStart the dashboard now with 'docker compose up -d'? [Y/n]: ").strip().lower()
+    if start_now in ("", "y", "yes"):
+        println("Starting dashboard with 'docker compose up -d'...")
+        code, out, err = run_subprocess(["docker", "compose", "up", "-d"])
+        if code != 0:
+            println("docker compose failed, trying 'docker-compose up -d'...")
+            code2, out2, err2 = run_subprocess(["docker-compose", "up", "-d"])
+            if code2 != 0:
+                println(f"Failed to start dashboard. Error:\n{err or err2}")
+            else:
+                println("Dashboard started with docker-compose.")
+        else:
+            println("Dashboard started with docker compose.")
+    else:
+        println("\nYou can start the service later with:")
+        println("  docker compose up -d")
+
+    println(f"\nDashboard will be at: {dashboard_url}\n")
+
+    # If user chose "Master + Client" in the menu, run the local client installer
+    if master_and_client:
+        println("Now setting up a CLIENT on THIS machine that points to this master.\n")
+        # Pass the exact URL + API key as defaults to the client installer
+        install_client_local(master_url_default=dashboard_url, api_key_default=api_key)
+
+
+# -----------------------------
+# Local client-only setup
+# -----------------------------
+
+def install_client_local(master_url_default=None, api_key_default=None):
+    println("=== Client Setup (Local 3D printer host) ===")
+    println("This mode creates send_print_cost.sh and print_cost.cfg for a printer on THIS machine.\n")
+
+    # Check for registered local clients
+    clients = get_client_registry()
+    local_clients = [c for c in clients if c.get("type") == "local"]
+    
+    use_registered = False
+    selected_client = None
+    
+    if local_clients:
+        println("Found registered local clients:")
+        for i, client in enumerate(local_clients, 1):
+            name = client.get("printer_name", "Unknown")
+            cfg_dir = client.get("cfg_dir", "Unknown")
+            println(f"  {i}) {name} ({cfg_dir})")
+        println(f"  {len(local_clients) + 1}) Enter new printer")
+        
+        choice = input(f"Select option [1-{len(local_clients) + 1}] (or 'b' to go back): ").strip()
+        if choice.lower() == "b":
+            println("Cancelled.")
+            return
+        
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(local_clients):
+                selected_client = local_clients[idx - 1]
+                use_registered = True
+                println(f"\nUsing registered client: {selected_client.get('printer_name')}")
+        except ValueError:
+            pass
+    
+    if use_registered and selected_client:
+        # Use registered client info
+        printer_name = selected_client.get("printer_name")
+        cfg_dir = selected_client.get("cfg_dir")
+        script_path = selected_client.get("script_path")
+        
+        # Still need master URL and API key
+        if master_url_default is None:
+            master_url_default = get_master_url_default()
+        
+        master_url = prompt_master_url(master_url_default=master_url_default, allow_back=True, for_remote=False)
+        if master_url is None:
+            return
+        
+        if api_key_default is None:
+            api_key_default = get_api_key_default()
+        
+        api_key = input(f"Enter API key [{api_key_default}] (or 'b' to go back): ").strip()
+        if api_key.lower() == "b":
+            println("Cancelled.")
+            return
+        if not api_key:
+            if api_key_default:
+                api_key = api_key_default
+            else:
+                println("API key required.")
+                return
+    else:
+        # New printer flow
+        printer_name = input("Enter printer name label for this host (e.g. SV08, SV07) or 'b' to go back: ").strip()
+        if printer_name.lower() == "b":
+            println("Cancelled.")
+            return
+        if not printer_name:
+            println("Printer name required.")
+            return
+
+        # Build base default (may be overridden by prompt_master_url's saved state)
+        if master_url_default is None:
+            base_default = get_master_url_default()
+        else:
+            base_default = master_url_default
+
+        master_url = prompt_master_url(master_url_default=base_default, allow_back=True, for_remote=False)
+        if master_url is None:
+            # User chose 'b'
+            return
+
+        if api_key_default is None:
+            api_key_default = get_api_key_default()
+
+        api_key = input(f"Enter API key [{api_key_default}] (or 'b' to go back): ").strip()
+        if api_key.lower() == "b":
+            println("Cancelled.")
+            return
+        if not api_key:
+            if api_key_default:
+                api_key = api_key_default
+            else:
+                println("API key required.")
+                return
+
+    # Ask about automatic mode
+    println("\n" + "="*60)
+    println("AUTOMATIC MODE")
+    println("="*60)
+    println("Run in automatic mode? This will:")
+    println("  • Answer YES to all confirmation prompts")
+    println("  • Auto-select printer directory if only one is found")
+    println("  • Perform all available actions without stopping")
+    println("  • Only pause if manual input is required")
+    println("="*60)
+    auto_mode_input = input("Enable automatic mode? [Y/n]: ").strip().lower()
+    auto_mode = auto_mode_input not in ("n", "no")
+    
+    if auto_mode:
+        println("\n✓ AUTOMATIC MODE ENABLED")
+        println("The installer will proceed automatically.\n")
+        println("─" * 60)
+
+    if not use_registered:
+        cfg_dir = choose_printer_dir(auto_mode=auto_mode)
+        if cfg_dir is None:
+            println("Cancelled.")
+            return
+
+    os.makedirs(cfg_dir, exist_ok=True)
+    cfg_path = os.path.join(cfg_dir, "print_cost.cfg")
+    if not use_registered:
+        script_path = os.path.join(cfg_dir, "send_print_cost.sh")
+
+    println("Writing local client configuration...")
+    cfg_content = make_print_cost_cfg(printer_name, script_path)
+    with open(cfg_path, "w") as f:
+        f.write(cfg_content)
+    println(f"Wrote {cfg_path}")
+
+    write_local_client_script(script_path, master_url, api_key)
+
+    printer_cfg_path = os.path.join(cfg_dir, "printer.cfg")
+    ensure_include_at_top(printer_cfg_path)
+
+    save_state("printer_dir", cfg_dir)
+    
+    # Phase 6.1: Automatic Macro Integration
+    if auto_mode:
+        println("\nScanning for PRINT_END macro and patching...")
+    
+    installer_macro.prompt_macro_insertion(printer_name, cfg_dir)
+    
+    # Register client in registry (Phase 3)
+    register_client("local", printer_name=printer_name, cfg_dir=cfg_dir, script_path=script_path)
+    
+    if auto_mode:
+        println("\n" + "─" * 60)
+        println("✓ Local client install complete!")
+        println("\nReminder: Restart Klipper from the web UI to load changes.")
+    else:
+        println("Local client install complete.")
+        println("Reminder: restart Klipper/the printer from the web UI so it loads print_cost.cfg.")
+
+
+# -----------------------------
+# Remote client setup via SSH
+# -----------------------------
+
+def install_client_remote():
+    println("=== Remote Client Setup (SSH into 3D printer host) ===")
+    println("This mode connects over SSH to another 3D printer host, creates send_print_cost.sh,")
+    println("and can also drop a basic print_cost.cfg and include line for you.\n")
+
+    # Check for registered remote clients
+    clients = get_client_registry()
+    remote_clients = [c for c in clients if c.get("type") == "remote"]
+    
+    use_registered = False
+    selected_client = None
+    
+    if remote_clients:
+        println("Found registered remote clients:")
+        for i, client in enumerate(remote_clients, 1):
+            name = client.get("printer_name", "Unknown")
+            host = client.get("host", "Unknown")
+            println(f"  {i}) {name} ({host})")
+        println(f"  {len(remote_clients) + 1}) Enter new remote host")
+        
+        choice = input(f"Select option [1-{len(remote_clients) + 1}] (or 'b' to go back): ").strip()
+        if choice.lower() == "b":
+            println("Cancelled.")
+            return
+        
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(remote_clients):
+                selected_client = remote_clients[idx - 1]
+                use_registered = True
+                println(f"\nUsing registered client: {selected_client.get('printer_name')} ({selected_client.get('host')})")
+        except ValueError:
+            pass
+    
+    if use_registered and selected_client:
+        # Use registered client info
+        remote = selected_client.get("host")
+        config_dir = selected_client.get("config_dir")
+        printer_name = selected_client.get("printer_name")
+        script_path = selected_client.get("script_path")
+        
+        # Still need API key and master URL
+        api_key_default = get_api_key_default()
+        if not api_key_default:
+            api_key_default = ensure_api_key()
+        
+        master_url = prompt_master_url(master_url_default=None, allow_back=True, for_remote=True)
+        if master_url is None:
+            return
+        
+        api_key = api_key_default
+        
+    else:
+        # Original flow for new remote host
+        # Make sure secret.json and state are synced
+        api_key_default = get_api_key_default()
+        if not api_key_default:
+            # None yet, generate and persist
+            api_key_default = ensure_api_key()
+
+        # Central URL prompt with warning + remembering; remote context
+        master_url = prompt_master_url(master_url_default=None, allow_back=True, for_remote=True)
+        if master_url is None:
+            # User chose 'b'
+            return
+
+        remote = input("Remote 3D printer host (ssh_login@printer_ip, e.g. biqu@192.168.2.56) or 'b' to go back: ").strip()
+        if remote.lower() == "b" or not remote:
+            println("Cancelled.")
+            return
+    
+    # Ask about automatic mode (for both registered and new hosts)
+    println("\n" + "="*60)
+    println("AUTOMATIC MODE")
+    println("="*60)
+    println("Run in automatic mode? This will:")
+    println("  • Answer YES to all confirmation prompts")
+    println("  • Use default values where possible")
+    println("  • Perform all available actions without stopping")
+    println("  • Only pause if manual input is required")
+    println("  • Show progress indicators for each step")
+    println("="*60)
+    auto_mode_input = input("Enable automatic mode? [Y/n]: ").strip().lower()
+    auto_mode = auto_mode_input not in ("n", "no")
+    
+    if auto_mode:
+        println("\n✓ AUTOMATIC MODE ENABLED")
+        println("The installer will proceed automatically using stored settings.")
+        println("You will only be prompted if manual input is required.\n")
+        println("─" * 60)
+
+    if not use_registered:
+        if auto_mode:
+            println("\n[1/6] Setting up SSH connection...")
+            # Auto mode: always set up SSH keys
+            println("      • Setting up SSH key-based login...")
+            setup_ssh_key_for_remote(remote)
+        else:
+            println("\nIf this is the first time connecting FROM THIS MACHINE to that 3D printer host,")
+            println("SSH will ask you to confirm the host key (type 'yes') and then prompt for the SSH password.")
+            println("To reduce repeated password prompts, you can let this installer set up SSH key-based login.\n")
+
+            ans_keys = input("Set up SSH key-based login for this remote host now? [Y/n or 'b' to go back]: ").strip().lower()
+            if ans_keys == "b":
+                println("Cancelled.")
+                return
+            if ans_keys in ("", "y", "yes"):
+                setup_ssh_key_for_remote(remote)
+            else:
+                println("Skipping automatic SSH key setup. You may see multiple password prompts.\n")
+
+        if auto_mode:
+            println("      • Discovering printer directories...")
+        else:
+            println("Trying to discover printer_data directories on remote...")
+        
+        candidates = remote_find_printer_data(remote)
+        chosen_printer_data = None
+
+        if candidates:
+            if auto_mode:
+                # Auto mode: use first candidate
+                chosen_printer_data = candidates[0]
+                println(f"      ✓ Using: {chosen_printer_data}")
+            else:
+                println("Found the following printer_data directories:")
+                for idx, c in enumerate(candidates, start=1):
+                    println(f"  {idx}) {c}")
+                println("  0) Enter a custom path")
+                choice = input("Select a printer_data directory by number (press Enter for 1, or 'b' to go back): ").strip()
+                if choice.lower() == "b":
+                    println("Cancelled.")
+                    return
+                if not choice:
+                    choice = "1"
+                try:
+                    num = int(choice)
+                except ValueError:
+                    num = 1
+                if num == 0:
+                    chosen_printer_data = input("Enter full path to printer_data on remote (or 'b' to go back): ").strip()
+                    if chosen_printer_data.lower() == "b":
+                        println("Cancelled.")
+                        return
+                else:
+                    if 1 <= num <= len(candidates):
+                        chosen_printer_data = candidates[num - 1]
+                    else:
+                        chosen_printer_data = candidates[0]
+        else:
+            if auto_mode:
+                println("      ⚠ No printer_data directories found automatically")
+                println("      Manual input required:")
+            else:
+                println("No printer_data directories found automatically.")
+            
+            chosen_printer_data = input("Enter full path to printer_data on remote (e.g. /home/biqu/printer_data, or 'b' to go back): ").strip()
+            if chosen_printer_data.lower() == "b":
+                println("Cancelled.")
+                return
+
+        if not chosen_printer_data:
+            println("ERROR: printer_data path is required.")
+            return
+
+        api_key = api_key_default
+
+        config_dir = os.path.join(chosen_printer_data, "config")
+        default_script_path = os.path.join(config_dir, "send_print_cost.sh")
+        
+        if auto_mode:
+            script_path = default_script_path
+        else:
+            script_path = input(f"Remote path for send_print_cost.sh [{default_script_path}] (or 'b' to go back): ").strip()
+            if script_path.lower() == "b":
+                println("Cancelled.")
+                return
+            if not script_path:
+                script_path = default_script_path
+
+    # Step 1: Write client script
+    if auto_mode:
+        println("\n[1/6] Writing client script to remote...")
+    
+    script_content = make_client_script_contents(master_url, api_key)
+    if not auto_mode:
+        println(f"\nWriting client script to {remote}:{script_path} ...")
+    
+    ok = remote_write_file(remote, script_path, script_content, mode=0o755)
+    if not ok:
+        if auto_mode:
+            println("      ✗ Failed to write client script")
+        println("\nRemote client script deployment failed.")
+        println("You can fall back by copying install.py to that host and running local client setup there.")
+        return
+
+    # Save last remote script path
+    save_state("remote_script_path", script_path)
+    
+    # Register client in registry (Phase 3) - even if config files aren't created yet
+    register_client("remote", printer_name=None, host=remote, config_dir=config_dir, script_path=script_path)
+
+    if auto_mode:
+        println("      ✓ Successfully wrote send_print_cost.sh")
+    else:
+        println("\nRemote client script created successfully.")
+
+    # Step 2: Create config files
+    if auto_mode:
+        println("\n[2/6] Creating print_cost.cfg on remote...")
+        cfg_ans = "y"  # Auto mode always creates config
+    else:
+        cfg_ans = input("Create print_cost.cfg and add [include print_cost.cfg] to printer.cfg on remote? [y/N or 'b' to cancel]: ").strip().lower()
+        if cfg_ans == "b":
+            println("Cancelled additional config; client script remains installed.")
+            return
+
+    if cfg_ans in ("y", "yes"):
+        if not use_registered:
+            printer_name = prompt_str("Printer name label for this remote host (e.g. SV08)", "SV08")
+            if printer_name.lower() == "b":
+                println("Cancelled additional config; client script remains installed.")
+                return
+        # else: printer_name already set from registered client
+        
+        cfg_path = os.path.join(config_dir, "print_cost.cfg")
+        cfg_content = make_print_cost_cfg(printer_name, script_path)
+
+        if not auto_mode:
+            println(f"Writing print_cost.cfg to {remote}:{cfg_path} ...")
+        
+        ok_cfg = remote_write_file(remote, cfg_path, cfg_content, mode=0o644)
+        if not ok_cfg:
+            if auto_mode:
+                println("      ✗ Failed to write print_cost.cfg")
+            else:
+                println("Failed to write print_cost.cfg on remote.")
+        else:
+            if auto_mode:
+                println("      ✓ Successfully wrote print_cost.cfg")
+            else:
+                println("print_cost.cfg written successfully.")
+
+        # Step 3: Ensure include line
+        if auto_mode:
+            println("\n[3/6] Ensuring [include print_cost.cfg] in printer.cfg...")
+        
+        printer_cfg = os.path.join(config_dir, "printer.cfg")
+        include_line = "[include print_cost.cfg]"
+        
+        if not auto_mode:
+            println(f"Ensuring {include_line} is present at TOP of {remote}:{printer_cfg} ...")
+        
+        ok_inc = remote_append_line_if_missing(remote, printer_cfg, include_line)
+        if ok_inc:
+            if auto_mode:
+                println("      ✓ Include line ensured")
+            else:
+                println("Include line ensured in remote printer.cfg.")
+        else:
+            if auto_mode:
+                println("      ✗ Failed to ensure include line")
+            else:
+                println("Failed to ensure include line in remote printer.cfg. You may need to add it manually.")
+        
+        # Update registry with printer name now that we have it
+        register_client("remote", printer_name=printer_name, host=remote, config_dir=config_dir, script_path=script_path)
+
+    if not auto_mode:
+        println("Reminder: on that remote printer, restart Klipper/the printer from the web UI")
+        println("(for example, 'Save & Restart') so it sees the new send_print_cost command and macros.\n")
+    
+    # Phase 6.1: Remote Macro Integration
+    if auto_mode:
+        println("\n[4/6] Scanning for PRINT_END macro and patching...")
+        ans_macro = "y"  # Auto mode always attempts macro integration
+    else:
+        println("=== Remote Macro Integration ===")
+        ans_macro = input("Scan remote config for PRINT_END macro and insert command? [Y/n]: ").strip().lower()
+    
+    if ans_macro not in ("n", "no"):
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                if auto_mode:
+                    println("      • Downloading remote configs...")
+                else:
+                    println(f"Downloading remote configs from {remote}:{config_dir}/*.cfg to temp dir...")
+                
+                # SCP *.cfg from remote to tmp_dir
+                # Note: scp user@host:/path/*.cfg local_dir/ might fail if no matches or shell expansion issues.
+                # Safer to copy the whole config dir or just printer.cfg?
+                # Let's try to copy all .cfg files.
+                # We need to quote the wildcard for the remote shell to expand it, or just copy the dir.
+                # Copying the whole config dir might be too much (backups etc).
+                # Let's try fetching just .cfg files.
+                
+                # scp -r remote:dir/*.cfg local_dir/
+                code, out, err = run_subprocess(["scp", f"{remote}:{config_dir}/*.cfg", tmp_dir])
+                if code != 0:
+                    if auto_mode:
+                        println("      ✗ Failed to download config files")
+                    else:
+                        println(f"Failed to download config files: {err}")
+                        println("Skipping remote macro integration.")
+                else:
+                    # Run the interactive macro installer on the temp dir
+                    if auto_mode:
+                        println("      • Scanning downloaded config files...")
+                    else:
+                        println("Scanning downloaded config files...")
+                    
+                    installer_macro.prompt_macro_insertion(printer_name, tmp_dir)
+                    
+                    # Now we need to see what changed and upload it back.
+                    # A simple way is to upload ALL .cfg files back, but that's risky if they changed on remote in the meantime (unlikely in seconds).
+                    # Better: check modification times or just upload the one that was modified?
+                    # installer_macro doesn't return the modified file path easily to us here without changing it.
+                    # But we can just upload all .cfg files back.
+                    
+                    if auto_mode:
+                        println("      • Uploading patched config files back to remote...")
+                    else:
+                        println("Uploading patched config files back to remote...")
+                    
+                    # Use glob to expand *.cfg locally before scp
+                    import glob as glob_module
+                    cfg_files = glob_module.glob(os.path.join(tmp_dir, "*.cfg"))
+                    if cfg_files:
+                        # scp file1 file2 file3 remote:dir/
+                        scp_cmd = ["scp"] + cfg_files + [f"{remote}:{config_dir}/"]
+                        code, out, err = run_subprocess(scp_cmd)
+                        if code != 0:
+                            if auto_mode:
+                                println("      ✗ Failed to upload patched files")
+                            else:
+                                println(f"Failed to upload patched files: {err}")
+                        else:
+                            if auto_mode:
+                                println("      ✓ Successfully updated remote configuration")
+                            else:
+                                println("Successfully updated remote configuration.")
+                    else:
+                        if auto_mode:
+                            println("      ⚠ No .cfg files found in temp dir to upload")
+                        else:
+                            println("No .cfg files found in temp dir to upload.")
+                        
+        except Exception as e:
+            if auto_mode:
+                println(f"      ✗ Error during remote macro integration: {e}")
+            else:
+                println(f"Error during remote macro integration: {e}")
+
+    if auto_mode:
+        println("\n" + "─" * 60)
+        println("✓ Remote client setup complete!")
+        println("\nReminder: Restart Klipper on the remote printer to load changes.")
+    else:
+        println("Remote client setup complete.")
+
+
+# -----------------------------
+# Uninstall helpers
+# -----------------------------
+
+def uninstall_master():
+    println("=== Uninstall MASTER dashboard on THIS machine ===")
+    confirm = input("This will stop containers and optionally delete data and Docker files. Continue? [y/N or 'b' to cancel]: ").strip().lower()
+    if confirm in ("b", "back"):
+        println("Master uninstall cancelled.")
+        return
+    if confirm not in ("y", "yes"):
+        println("Master uninstall cancelled.")
+        return
+
+    if os.path.exists("docker-compose.yml"):
+        println("Stopping dashboard containers with 'docker compose down' (and fallback to 'docker-compose down')...")
+        code, out, err = run_subprocess(["docker", "compose", "down"])
+        if code != 0:
+            code2, out2, err2 = run_subprocess(["docker-compose", "down"])
+            if code2 != 0:
+                println(f"Failed to run docker compose down: {err or err2}")
+            else:
+                println("Dashboard containers stopped with docker-compose.")
+        else:
+            println("Dashboard containers stopped with docker compose.")
+        
+        # Offer to remove Docker images and volumes
+        ans_cleanup = input("Remove Docker images and volumes? [y/N or 'b' to cancel]: ").strip().lower()
+        if ans_cleanup in ("b", "back"):
+            println("Skipping Docker image/volume cleanup.")
+        elif ans_cleanup in ("y", "yes"):
+            println("Removing Docker images and volumes...")
+            code, out, err = run_subprocess(["docker", "compose", "down", "--rmi", "all", "--volumes", "--remove-orphans"])
+            if code != 0:
+                code2, out2, err2 = run_subprocess(["docker-compose", "down", "--rmi", "all", "--volumes", "--remove-orphans"])
+                if code2 != 0:
+                    println(f"Failed to remove images/volumes: {err or err2}")
+                else:
+                    println("Docker images and volumes removed with docker-compose.")
+            else:
+                println("Docker images and volumes removed with docker compose.")
+    else:
+        println("No docker-compose.yml found, skipping container stop.")
+
+    ans = input("Remove Docker files (Dockerfile, docker-compose.yml) and data directory (including API key)? [y/N or 'b' to cancel]: ").strip().lower()
+    if ans in ("b", "back"):
+        println("Leaving Docker files and data in place.")
+    elif ans in ("y", "yes"):
+        # Offer backup before deletion
+        if os.path.isdir(DATA_DIR):
+            ans_backup = input("Backup data directory before removal? [Y/n]: ").strip().lower()
+            if ans_backup not in ("n", "no"):
+                backup_path = f"{DATA_DIR}_backup_{int(time.time())}"
+                try:
+                    shutil.copytree(DATA_DIR, backup_path)
+                    println(f"Backed up data directory to {backup_path}")
+                except Exception as e:
+                    println(f"Failed to backup data directory: {e}")
+                    continue_backup = input("Continue with deletion anyway? [y/N]: ").strip().lower()
+                    if continue_backup not in ("y", "yes"):
+                        println("Cancelled deletion.")
+                        return
+        
+        for path in ["Dockerfile", "docker-compose.yml"]:
+            if os.path.exists(path):
+                os.remove(path)
+                println(f"Removed {path}")
+                # Verify removal
+                if os.path.exists(path):
+                    println(f"WARNING: {path} still exists after removal attempt!")
+                else:
+                    println(f"✓ Verified {path} removed")
+        if os.path.isdir(DATA_DIR):
+            shutil.rmtree(DATA_DIR)
+            println(f"Removed {DATA_DIR}/ directory and state.")
+            # Verify removal
+            if os.path.exists(DATA_DIR):
+                println(f"WARNING: {DATA_DIR} still exists after removal attempt!")
+            else:
+                println(f"✓ Verified {DATA_DIR} removed")
+    else:
+        println("Leaving Docker files and data in place.")
+
+    # Optional removal of installer state file
+    if os.path.exists(STATE_FILE):
+        ans2 = input("Also delete installer state file data/install_state.json? [y/N]: ").strip().lower()
+        if ans2 in ("y", "yes"):
+            try:
+                os.remove(STATE_FILE)
+                println("Removed data/install_state.json.")
+                # Verify removal
+                if os.path.exists(STATE_FILE):
+                    println(f"WARNING: {STATE_FILE} still exists after removal attempt!")
+                else:
+                    println(f"✓ Verified {STATE_FILE} removed")
+            except Exception as e:
+                println(f"Failed to remove install_state.json: {e}")
+        else:
+            println("Keeping installer state file.")
+
+    println("Master uninstall complete.")
+
+
+def uninstall_local_client():
+    println("=== Uninstall CLIENT config on THIS machine ===")
+    default_script = load_state("script_path", "")
+    if not default_script:
+        default_script = "/home/biqu/printer_data/config/send_print_cost.sh"
+
+    while True:
+        path = input(f"Local path to send_print_cost.sh [{default_script}] (or 'b' to go back): ").strip()
+        if path.lower() == "b":
+            println("Cancelled.")
+            return
+        if not path:
+            path = default_script
+        if not path:
+            println("No stored path. Enter a path or 'b' to go back.")
+            continue
+
+        cfg_dir = os.path.dirname(path)
+        printer_cfg = os.path.join(cfg_dir, "printer.cfg")
+        
+        # Unregister client from registry (Phase 3)
+        unregister_client("local", script_path=path)
+        
+        # Backup printer.cfg before editing
+        if os.path.exists(printer_cfg):
+            ans_backup = input("Backup printer.cfg before modification? [Y/n]: ").strip().lower()
+            if ans_backup not in ("n", "no"):
+                backup_cfg = f"{printer_cfg}.backup.{int(time.time())}"
+                try:
+                    shutil.copy2(printer_cfg, backup_cfg)
+                    println(f"Backed up printer.cfg to {backup_cfg}")
+                except Exception as e:
+                    println(f"Failed to backup printer.cfg: {e}")
+                    continue_backup = input("Continue with modification anyway? [y/N]: ").strip().lower()
+                    if continue_backup not in ("y", "yes"):
+                        println("Cancelled modification.")
+                        return
+
+        if os.path.exists(path):
+            os.remove(path)
+            println(f"Removed {path}")
+            # Verify removal
+            if os.path.exists(path):
+                println(f"WARNING: {path} still exists after removal attempt!")
+            else:
+                println(f"✓ Verified {path} removed")
+        else:
+            println(f"Script not found at {path}")
+
+        if os.path.exists(printer_cfg):
+            try:
+                with open(printer_cfg, "r") as f:
+                    lines = f.readlines()
+                original_count = len(lines)
+                with open(printer_cfg, "w") as f:
+                    for line in lines:
+                        if "include print_cost.cfg" not in line:
+                            f.write(line)
+                # Verify modification
+                with open(printer_cfg, "r") as f:
+                    new_lines = f.readlines()
+                removed_count = original_count - len(new_lines)
+                if removed_count > 0:
+                    println(f"Removed {removed_count} include line(s) from printer.cfg")
+                    println(f"✓ Verified printer.cfg modified")
+                else:
+                    println("No include lines found in printer.cfg (may have been already removed)")
+            except Exception as e:
+                println(f"Failed to modify printer.cfg: {e}")
+
+        cfg_path = os.path.join(cfg_dir, "print_cost.cfg")
+        if os.path.exists(cfg_path):
+            os.remove(cfg_path)
+            println("Removed print_cost.cfg")
+            # Verify removal
+            if os.path.exists(cfg_path):
+                println(f"WARNING: {cfg_path} still exists after removal attempt!")
+            else:
+                println(f"✓ Verified {cfg_path} removed")
+
+        println("Local client uninstall complete.")
+        return
+
+
+def uninstall_remote_client():
+    println("=== Uninstall CLIENT config on a REMOTE 3D printer host ===")
+    default_script = load_state("remote_script_path", "")
+
+    while True:
+        path = input(f"Remote path to send_print_cost.sh [{default_script}] (or 'b' to go back): ").strip()
+        if path.lower() == "b":
+            println("Cancelled.")
+            return
+        if not path:
+            path = default_script
+        if not path:
+            println("No stored path. Enter a path or 'b' to go back.")
+            continue
+
+        host = input("Enter remote host (e.g. user@ip) or 'b' to go back: ").strip()
+        if host.lower() == "b":
+            println("Cancelled.")
+            return
+        if not host:
+            println("Remote host required.")
+            continue
+
+        cfg_dir = os.path.dirname(path)
+        printer_cfg = os.path.join(cfg_dir, "printer.cfg")
+        cfg_path = os.path.join(cfg_dir, "print_cost.cfg")
+        
+        # Unregister client from registry (Phase 3)
+        unregister_client("remote", script_path=path, host=host)
+        
+        # Test SSH connection first
+        println("Testing SSH connection...")
+        code, out, err = ssh_run(host, "echo 'Connection test'")
+        if code != 0:
+            println(f"Failed to connect to {host}: {err}")
+            println("Please verify SSH access and try again.")
+            continue
+        println("✓ SSH connection successful")
+        
+        # Backup printer.cfg before editing
+        code, out, err = ssh_run(host, f"test -f '{printer_cfg}' && echo EXISTS || echo MISSING")
+        if code == 0 and out.strip() == "EXISTS":
+            ans_backup = input("Backup printer.cfg before modification? [Y/n]: ").strip().lower()
+            if ans_backup not in ("n", "no"):
+                backup_cfg = f"{printer_cfg}.backup.{int(time.time())}"
+                code, out, err = ssh_run(host, f"cp '{printer_cfg}' '{backup_cfg}'")
+                if code == 0:
+                    println(f"Backed up printer.cfg to {backup_cfg}")
+                else:
+                    println(f"Failed to backup printer.cfg: {err}")
+                    continue_backup = input("Continue with modification anyway? [y/N]: ").strip().lower()
+                    if continue_backup not in ("y", "yes"):
+                        println("Cancelled modification.")
+                        return
+
+        println("Running remote uninstall...")
+        
+        # Remove send_print_cost.sh
+        code, out, err = ssh_run(host, f"rm -f '{path}'")
+        if code == 0:
+            # Verify removal
+            code_check, out_check, err_check = ssh_run(host, f"test -f '{path}' && echo EXISTS || echo MISSING")
+            if code_check == 0 and out_check.strip() == "EXISTS":
+                println(f"WARNING: {path} still exists on remote host after removal attempt!")
+            else:
+                println(f"✓ Removed and verified {path}")
+        else:
+            println(f"Failed to remove {path}: {err}")
+        
+        # Remove print_cost.cfg
+        code, out, err = ssh_run(host, f"rm -f '{cfg_path}'")
+        if code == 0:
+            # Verify removal
+            code_check, out_check, err_check = ssh_run(host, f"test -f '{cfg_path}' && echo EXISTS || echo MISSING")
+            if code_check == 0 and out_check.strip() == "EXISTS":
+                println(f"WARNING: {cfg_path} still exists on remote host after removal attempt!")
+            else:
+                println(f"✓ Removed and verified {cfg_path}")
+        else:
+            println(f"Note: {cfg_path} may not have existed: {err}")
+        
+        # Remove include line from printer.cfg
+        code, out, err = ssh_run(host, f"test -f '{printer_cfg}' && echo EXISTS || echo MISSING")
+        if code == 0 and out.strip() == "EXISTS":
+            # Use sed to remove include line (properly escaped)
+            sed_cmd = f"sed -i '/include print_cost.cfg/d' '{printer_cfg}'"
+            code, out, err = ssh_run(host, sed_cmd)
+            if code == 0:
+                # Verify modification by checking if line still exists
+                grep_cmd = f"grep -F 'include print_cost.cfg' '{printer_cfg}' >/dev/null 2>&1 && echo PRESENT || echo ABSENT"
+                code_check, out_check, err_check = ssh_run(host, grep_cmd)
+                if code_check == 0 and out_check.strip() == "PRESENT":
+                    println(f"WARNING: Include line may still exist in {printer_cfg}")
+                else:
+                    println(f"✓ Removed include line from {printer_cfg}")
+            else:
+                println(f"Failed to modify {printer_cfg}: {err}")
+        else:
+            println(f"printer.cfg not found at {printer_cfg}, skipping include line removal")
+
+        println("Remote client uninstall complete.")
+        return
+
+
+def uninstall_client_menu():
+    println("=== Uninstall CLIENT Menu ===")
+    println("  1) Uninstall local client (THIS machine)")
+    println("  2) Uninstall remote client (via SSH)")
+    println("  3) Back")
+    choice = input("Select option [1-3] (or 'b' to go back): ").strip()
+    if choice == "1":
+        uninstall_local_client()
+    elif choice == "2":
+        uninstall_remote_client()
+    elif choice == "3" or choice.lower() == "b":
+        return
+    else:
+        println("Invalid choice.")
+
+
+def uninstall_main_menu():
+    println("=== Uninstall Menu ===")
+    println("  1) Uninstall MASTER (dashboard on THIS machine)")
+    println("  2) Uninstall CLIENT")
+    println("  3) Back")
+    choice = input("Select option [1-3] (or 'b' to go back): ").strip()
+    if choice == "1":
+        uninstall_master()
+    elif choice == "2":
+        uninstall_client_menu()
+    elif choice == "3" or choice.lower() == "b":
+        return
+    else:
+        println("Invalid choice.")
+
+
+# -----------------------------
+# Install submenus
+# -----------------------------
+
+def master_install_menu():
+    println("=== Master Install Menu ===")
+    println("  1) Master only")
+    println("  2) Master + Client on THIS machine")
+    println("  3) Back")
+    choice = input("Select option [1-3] (or 'b' to go back): ").strip()
+    if choice == "1":
+        master_setup(master_and_client=False)
+    elif choice == "2":
+        master_setup(master_and_client=True)
+    elif choice == "3" or choice.lower() == "b":
+        return
+    else:
+        println("Invalid choice.")
+
+
+def client_install_menu():
+    println("=== Client Install Menu ===")
+    println("  1) Client on THIS machine (local 3D printer host)")
+    println("  2) Client on REMOTE 3D printer host (via SSH)")
+    println("  3) Back")
+    choice = input("Select option [1-3] (or 'b' to go back): ").strip()
+    if choice == "1":
+        install_client_local()
+    elif choice == "2":
+        install_client_remote()
+    elif choice == "3" or choice.lower() == "b":
+        return
+    else:
+        println("Invalid choice.")
+
+
+# -----------------------------
+# Client Registry (Phase 3 - Propagation)
+# -----------------------------
+
+def get_client_registry():
+    """
+    Get the list of registered clients from install_state.json.
+    Returns a list of client dictionaries.
+    """
+    clients = load_state("clients", [])
+    if not isinstance(clients, list):
+        return []
+    return clients
+
+
+def save_client_registry(clients):
+    """
+    Save the client registry to install_state.json.
+    """
+    save_state("clients", clients)
+
+
+def register_client(client_type, printer_name=None, cfg_dir=None, script_path=None, host=None, config_dir=None):
+    """
+    Register a new client installation.
+    
+    Args:
+        client_type: "local" or "remote"
+        printer_name: Printer name label (for both types)
+        cfg_dir: Local config directory (for local clients)
+        script_path: Path to send_print_cost.sh
+        host: Remote host (user@ip) for remote clients
+        config_dir: Remote config directory (for remote clients)
+    """
+    clients = get_client_registry()
+    
+    # Check if this client already exists (by script_path for local, by host+script_path for remote)
+    for i, client in enumerate(clients):
+        if client_type == "local" and client.get("type") == "local":
+            if client.get("script_path") == script_path:
+                # Update existing local client
+                clients[i] = {
+                    "type": "local",
+                    "printer_name": printer_name,
+                    "cfg_dir": cfg_dir,
+                    "script_path": script_path,
+                }
+                save_client_registry(clients)
+                return
+        elif client_type == "remote" and client.get("type") == "remote":
+            if client.get("host") == host and client.get("script_path") == script_path:
+                # Update existing remote client
+                clients[i] = {
+                    "type": "remote",
+                    "printer_name": printer_name,
+                    "host": host,
+                    "config_dir": config_dir,
+                    "script_path": script_path,
+                }
+                save_client_registry(clients)
+                return
+    
+    # Add new client
+    if client_type == "local":
+        clients.append({
+            "type": "local",
+            "printer_name": printer_name,
+            "cfg_dir": cfg_dir,
+            "script_path": script_path,
+        })
+    elif client_type == "remote":
+        clients.append({
+            "type": "remote",
+            "printer_name": printer_name,
+            "host": host,
+            "config_dir": config_dir,
+            "script_path": script_path,
+        })
+    
+    save_client_registry(clients)
+
+
+def unregister_client(client_type, script_path=None, host=None):
+    """
+    Remove a client from the registry.
+    """
+    clients = get_client_registry()
+    filtered = []
+    
+    for client in clients:
+        if client_type == "local" and client.get("type") == "local":
+            if client.get("script_path") != script_path:
+                filtered.append(client)
+        elif client_type == "remote" and client.get("type") == "remote":
+            if client.get("host") != host or client.get("script_path") != script_path:
+                filtered.append(client)
+        else:
+            # Keep clients of different type
+            filtered.append(client)
+    
+    save_client_registry(filtered)
+
+
+def list_registered_clients():
+    """
+    Display all registered clients.
+    """
+    clients = get_client_registry()
+    if not clients:
+        println("No registered clients found.")
+        return
+    
+    println(f"\nRegistered Clients ({len(clients)}):")
+    for i, client in enumerate(clients, 1):
+        if client.get("type") == "local":
+            println(f"  {i}. LOCAL: {client.get('printer_name', 'Unknown')}")
+            println(f"     Config: {client.get('cfg_dir', 'N/A')}")
+            println(f"     Script: {client.get('script_path', 'N/A')}")
+        elif client.get("type") == "remote":
+            println(f"  {i}. REMOTE: {client.get('printer_name', 'Unknown')}")
+            println(f"     Host: {client.get('host', 'N/A')}")
+            println(f"     Config: {client.get('config_dir', 'N/A')}")
+            println(f"     Script: {client.get('script_path', 'N/A')}")
+    println()
+
+
+def propagate_to_all_clients(master_url=None, api_key=None, printer_name_updates=None):
+    """
+    Propagate settings changes to all registered clients.
+    
+    Args:
+        master_url: New master URL (None to skip)
+        api_key: New API key (None to skip)
+        printer_name_updates: Dict mapping script_path to new printer_name (None to skip)
+    """
+    clients = get_client_registry()
+    if not clients:
+        println("No registered clients to update.")
+        return
+    
+    if master_url is None and api_key is None and printer_name_updates is None:
+        println("No changes to propagate.")
+        return
+    
+    println(f"\nPropagating changes to {len(clients)} registered client(s)...")
+    
+    updated_count = 0
+    failed_count = 0
+    
+    for client in clients:
+        client_type = client.get("type")
+        script_path = client.get("script_path")
+        
+        if client_type == "local":
+            # Update local client
+            if not script_path or not os.path.exists(script_path):
+                println(f"  ⚠ Skipping local client (script not found: {script_path})")
+                failed_count += 1
+                continue
+            
+            # Update script if URL or API key changed
+            if master_url is not None or api_key is not None:
+                current_url = master_url if master_url else get_master_url_default()
+                current_key = api_key if api_key else get_api_key_default()
+                try:
+                    write_local_client_script(script_path, current_url, current_key)
+                    println(f"  ✓ Updated local client script: {script_path}")
+                    updated_count += 1
+                except Exception as e:
+                    println(f"  ✗ Failed to update local client: {e}")
+                    failed_count += 1
+            
+            # Update print_cost.cfg if printer name changed
+            if printer_name_updates and script_path in printer_name_updates:
+                new_name = printer_name_updates[script_path]
+                cfg_dir = client.get("cfg_dir")
+                if cfg_dir:
+                    cfg_path = os.path.join(cfg_dir, "print_cost.cfg")
+                    try:
+                        cfg_content = make_print_cost_cfg(new_name, script_path)
+                        with open(cfg_path, "w") as f:
+                            f.write(cfg_content)
+                        println(f"  ✓ Updated print_cost.cfg for {new_name}")
+                        # Update registry with new name
+                        client["printer_name"] = new_name
+                        updated_count += 1
+                    except Exception as e:
+                        println(f"  ✗ Failed to update print_cost.cfg: {e}")
+                        failed_count += 1
+        
+        elif client_type == "remote":
+            # Update remote client
+            host = client.get("host")
+            if not host or not script_path:
+                println(f"  ⚠ Skipping remote client (missing host or script path)")
+                failed_count += 1
+                continue
+            
+            # Test SSH connection
+            code, out, err = ssh_run(host, "echo 'Connection test'")
+            if code != 0:
+                println(f"  ⚠ Skipping remote client {host} (SSH connection failed)")
+                failed_count += 1
+                continue
+            
+            # Update script if URL or API key changed
+            if master_url is not None or api_key is not None:
+                current_url = master_url if master_url else get_master_url_default()
+                current_key = api_key if api_key else get_api_key_default()
+                content = make_client_script_contents(current_url, current_key)
+                try:
+                    ok = remote_write_file(host, script_path, content, mode=0o755)
+                    if ok:
+                        println(f"  ✓ Updated remote client script: {host}:{script_path}")
+                        updated_count += 1
+                    else:
+                        println(f"  ✗ Failed to update remote client script: {host}:{script_path}")
+                        failed_count += 1
+                except Exception as e:
+                    println(f"  ✗ Failed to update remote client: {e}")
+                    failed_count += 1
+            
+            # Update print_cost.cfg if printer name changed
+            if printer_name_updates and script_path in printer_name_updates:
+                new_name = printer_name_updates[script_path]
+                config_dir = client.get("config_dir")
+                if config_dir:
+                    cfg_path = os.path.join(config_dir, "print_cost.cfg")
+                    cfg_content = make_print_cost_cfg(new_name, script_path)
+                    try:
+                        ok = remote_write_file(host, cfg_path, cfg_content, mode=0o644)
+                        if ok:
+                            println(f"  ✓ Updated remote print_cost.cfg for {new_name} on {host}")
+                            client["printer_name"] = new_name
+                            updated_count += 1
+                        else:
+                            println(f"  ✗ Failed to update remote print_cost.cfg on {host}")
+                            failed_count += 1
+                    except Exception as e:
+                        println(f"  ✗ Failed to update remote print_cost.cfg: {e}")
+                        failed_count += 1
+    
+    # Save updated registry
+    save_client_registry(clients)
+    
+    println(f"\nPropagation complete: {updated_count} updated, {failed_count} failed")
+
+
+# -----------------------------
+# Settings helpers
+# -----------------------------
+
+def show_current_settings():
+    println("=== Current Installer Settings ===")
+    master_url = get_master_url_default()
+    api_key = get_api_key_default()
+    printer_dir = load_state("printer_dir", "")
+    script_path = load_state("script_path", "")
+    remote_script_path = load_state("remote_script_path", "")
+    master_host = load_state("master_host", "")
+    master_port = load_state("master_port", DEFAULT_PORT)
+    service_name = load_state("master_service_name", DEFAULT_SERVICE_NAME)
+
+    println(f"Master URL      : {master_url or '<not set>'}")
+    println(f"Master host     : {master_host or '<not set>'}")
+    println(f"Master port     : {master_port}")
+    println(f"Service name    : {service_name}")
+    println(f"API key         : {api_key or '<not set>'}")
+    println(f"Local printer dir: {printer_dir or '<not set>'}")
+    println(f"Local script path: {script_path or '<not set>'}")
+    println(f"Remote script path: {remote_script_path or '<not set>'}")
+    println()
+
+
+def update_local_client_script(master_url=None, api_key=None):
+    script_path = load_state("script_path", "")
+    if not script_path:
+        println("No stored local client script path in installer state.")
+        return False
+    if not os.path.exists(script_path):
+        println(f"Local client script not found at {script_path}.")
+        return False
+
+    if master_url is None:
+        master_url = get_master_url_default()
+    if api_key is None:
+        api_key = get_api_key_default()
+
+    println(f"Updating local client script at {script_path} ...")
+    write_local_client_script(script_path, master_url, api_key)
+    println("Local client script updated.")
+    return True
+
+
+def update_remote_client_script(master_url=None, api_key=None):
+    remote_script_path = load_state("remote_script_path", "")
+    if not remote_script_path:
+        println("No stored remote script path in installer state.")
+        return False
+
+    remote = input("Remote host (user@ip) for existing remote client (or 'b' to cancel): ").strip()
+    if remote.lower() == "b" or not remote:
+        println("Cancelled remote update.")
+        return False
+
+    if master_url is None:
+        master_url = get_master_url_default()
+    if api_key is None:
+        api_key = get_api_key_default()
+
+    content = make_client_script_contents(master_url, api_key)
+    println(f"Updating remote client script at {remote}:{remote_script_path} ...")
+    ok = remote_write_file(remote, remote_script_path, content, mode=0o755)
+    if ok:
+        println("Remote client script updated.")
+        return True
+    else:
+        println("Failed to update remote client script.")
+        return False
+
+
+def change_master_url_settings():
+    println("=== Change Master URL ===")
+    current = get_master_url_default()
+    println(f"Current master URL: {current or '<not set>'}")
+    new_url = input(f"New master URL [{current}] (or 'b' to cancel): ").strip()
+    if new_url.lower() == "b":
+        println("Cancelled.")
+        return
+    if not new_url:
+        new_url = current
+
+    if not new_url:
+        println("Master URL cannot be empty.")
+        return
+
+    if not (new_url.startswith("http://") or new_url.startswith("https://")):
+        new_url = "http://" + new_url
+
+    # Best-effort parse of host:port
+    host_part = new_url
+    if "://" in new_url:
+        host_part = new_url.split("://", 1)[1]
+    host_only = host_part.split("/", 1)[0]
+    host = host_only
+    port = DEFAULT_PORT
+    if ":" in host_only:
+        h, p = host_only.split(":", 1)
+        host = h
+        try:
+            port = int(p)
+        except ValueError:
+            port = DEFAULT_PORT
+
+    save_state("master_url", new_url)
+    save_state("master_host", host)
+    save_state("master_port", port)
+    println(f"Updated master URL to {new_url}")
+    println(f"master_host={host}, master_port={port}")
+
+    # Phase 3: Propagate to all registered clients
+    clients = get_client_registry()
+    if clients:
+        println(f"\nFound {len(clients)} registered client(s).")
+        ans_propagate = input("Update all registered clients with new master URL? [Y/n]: ").strip().lower()
+        if ans_propagate not in ("n", "no"):
+            propagate_to_all_clients(master_url=new_url)
+        else:
+            println("Skipping client updates.")
+    else:
+        # Fallback to old behavior if no registry
+        ans_local = input("Update local client script to use this new URL? [y/N]: ").strip().lower()
+        if ans_local in ("y", "yes"):
+            update_local_client_script(master_url=new_url)
+
+        ans_remote = input("Update remote client script to use this new URL? [y/N]: ").strip().lower()
+        if ans_remote in ("y", "yes"):
+            update_remote_client_script(master_url=new_url)
+
+
+def change_api_key_settings():
+    println("=== Change API Key ===")
+    current = get_api_key_default()
+    println(f"Current API key: {current or '<not set>'}")
+    new_key = input("Enter new API key (leave blank to generate a new random one, or 'b' to cancel): ").strip()
+    if new_key.lower() == "b":
+        println("Cancelled.")
+        return
+    if not new_key:
+        new_key = secrets.token_hex(16)
+        println(f"Generated new API key: {new_key}")
+
+    ensure_api_key(existing_key=new_key)
+    println("Updated API key in data/secret.json and installer state.")
+
+    # Phase 3: Propagate to all registered clients
+    clients = get_client_registry()
+    if clients:
+        println(f"\nFound {len(clients)} registered client(s).")
+        ans_propagate = input("Update all registered clients with new API key? [Y/n]: ").strip().lower()
+        if ans_propagate not in ("n", "no"):
+            propagate_to_all_clients(api_key=new_key)
+        else:
+            println("Skipping client updates.")
+    else:
+        # Fallback to old behavior if no registry
+        ans_local = input("Update local client script to use this new API key? [y/N]: ").strip().lower()
+        if ans_local in ("y", "yes"):
+            update_local_client_script(api_key=new_key)
+
+        ans_remote = input("Update remote client script to use this new API key? [y/N]: ").strip().lower()
+        if ans_remote in ("y", "yes"):
+            update_remote_client_script(api_key=new_key)
+
+
+# -----------------------------
+# Settings menu
+# -----------------------------
+
+
+
+def change_printer_dir_settings():
+    println("=== Change Local Printer Directory ===")
+    current = load_state("printer_dir", "")
+    println(f"Current printer directory: {current or '<not set>'}")
+    new_dir = input(f"New printer directory [{current}] (or 'b' to cancel): ").strip()
+    if new_dir.lower() == "b":
+        println("Cancelled.")
+        return
+    if not new_dir:
+        new_dir = current
+    
+    if not new_dir:
+        println("Printer directory cannot be empty.")
+        return
+
+    if not os.path.isdir(new_dir):
+        println(f"WARNING: The directory '{new_dir}' does not exist.")
+        confirm = input("Use this path anyway? [y/N]: ").strip().lower()
+        if confirm not in ("y", "yes"):
+            println("Cancelled.")
+            return
+
+    save_state("printer_dir", new_dir)
+    println(f"Updated printer directory to {new_dir}")
+
+
+def change_remote_script_path_settings():
+    println("=== Change Remote Script Path ===")
+    current = load_state("remote_script_path", "")
+    println(f"Current remote script path: {current or '<not set>'}")
+    new_path = input(f"New remote script path [{current}] (or 'b' to cancel): ").strip()
+    if new_path.lower() == "b":
+        println("Cancelled.")
+        return
+    if not new_path:
+        new_path = current
+    
+    if not new_path:
+        println("Remote script path cannot be empty.")
+        return
+
+    save_state("remote_script_path", new_path)
+    println(f"Updated remote script path to {new_path}")
+
+
+def change_service_name_settings():
+    println("=== Change Docker Service Name ===")
+    current = load_state("master_service_name", DEFAULT_SERVICE_NAME)
+    println(f"Current service name: {current}")
+    new_name = input(f"New service name [{current}] (or 'b' to cancel): ").strip()
+    if new_name.lower() == "b":
+        println("Cancelled.")
+        return
+    if not new_name:
+        new_name = current
+    
+    save_state("master_service_name", new_name)
+    println(f"Updated service name to {new_name}")
+    println("Note: You will need to re-run 'Install MASTER' to apply this change to docker-compose.yml.")
+
+
+def reset_install_state():
+    println("=== Reset Installer State ===")
+    println("This will clear all remembered paths, URLs, and API keys from data/install_state.json.")
+    println("It will NOT delete your data/print_costs.csv or data/settings.json.")
+    confirm = input("Are you sure? [y/N]: ").strip().lower()
+    if confirm in ("y", "yes"):
+        if os.path.exists(STATE_FILE):
+            try:
+                os.remove(STATE_FILE)
+                println("Installer state reset.")
+            except Exception as e:
+                println(f"Failed to reset state: {e}")
+        else:
+            println("State file does not exist.")
+    else:
+        println("Cancelled.")
+
+
+# -----------------------------
+# Settings menu
+# -----------------------------
+
+def settings_menu():
+    while True:
+        println("=== Settings Menu ===")
+        println("  1) Show current settings")
+        println("  2) Change master URL (and update clients)")
+        println("  3) Change API key (and update clients)")
+        println("  4) Change local printer directory")
+        println("  5) Change remote script path")
+        println("  6) Change Docker service name")
+        println("  7) List registered clients")
+        println("  8) Reset installer state")
+        println("  9) Back")
+        choice = input("Select option [1-9] (or 'b' to go back): ").strip()
+
+        if choice == "1":
+            show_current_settings()
+        elif choice == "2":
+            change_master_url_settings()
+        elif choice == "3":
+            change_api_key_settings()
+        elif choice == "4":
+            change_printer_dir_settings()
+        elif choice == "5":
+            change_remote_script_path_settings()
+        elif choice == "6":
+            change_service_name_settings()
+        elif choice == "7":
+            list_registered_clients()
+        elif choice == "8":
+            reset_install_state()
+        elif choice == "9" or choice.lower() == "b":
+            return
+        else:
+            println("Invalid choice. Try again.")
+
+
+# -----------------------------
+# Main menu
+# -----------------------------
+
+def main():
+    println("=== Print Cost Dashboard Installer ===")
+    println("Note: For most questions, you can just press Enter to accept the default shown.\n")
+    while True:
+        println("\nMain Menu")
+        println("  1) Install MASTER on THIS machine (dashboard)")
+        println("  2) Install CLIENT (local or remote)")
+        println("  3) Uninstall (master or client)")
+        println("  4) Settings")
+        println("  5) Exit")
+        choice = input("Select option [1-5] (or 'b' to exit): ").strip()
+
+        if choice == "1":
+            master_install_menu()
+        elif choice == "2":
+            client_install_menu()
+        elif choice == "3":
+            uninstall_main_menu()
+        elif choice == "4":
+            settings_menu()
+        elif choice == "5" or choice.lower() == "b":
+            println("Goodbye.")
+            break
+        else:
+            println("Invalid choice. Try again.")
+
+
+if __name__ == "__main__":
+    main()
