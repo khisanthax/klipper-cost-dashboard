@@ -524,26 +524,66 @@ def install_client_remote() -> None:
     Relies on helper functions in installer.remote to write files and
     patch printer.cfg on the remote host.
     """
-    println("\n=== Remote Client Installation ===")
+    println("
+=== Remote Client Installation ===")
+
+    use_auto = input("Use auto mode (use saved master settings and known remote printers)? [Y/n]: ").strip().lower()
+    auto_mode = use_auto in ("", "y", "yes")
 
     master_url = load_state("master_url", "http://localhost:5000")
     state_api = load_state("api_key", "")
     secret_api = _load_secret_api_key()
     default_api = state_api or secret_api or secrets.token_hex(16)
 
-    println(f"Current master URL: {master_url}")
-    master_url = input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
-    api_key = input(f"API key for this printer [{default_api}]: ").strip() or default_api
+    if auto_mode and master_url and default_api:
+        println(f"Using saved master URL: {master_url}")
+        api_key = default_api
+    else:
+        if auto_mode and (not master_url or not default_api):
+            println("Saved master URL/API missing; falling back to manual entry.")
+        auto_mode = False
+        println(f"Current master URL: {master_url}")
+        master_url = input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
+        api_key = input(f"API key for this printer [{default_api}]: ").strip() or default_api
 
-    remote = input("Remote host (user@hostname): ").strip()
-    if not remote:
-        println("Remote host is required; aborting.")
-        return
+    remote = ""
+    printer_name = ""
+    printer_dir = ""
 
-    printer_name = input("Printer name for dashboard (e.g., SV08): ").strip()
-    if not printer_name:
-        println("Printer name is required; aborting.")
-        return
+    registry = get_client_registry()
+    remote_clients = [c for c in registry if c.get("type") == "remote"]
+
+    if auto_mode and remote_clients:
+        println("
+Registered remote printers:")
+        for i, c in enumerate(remote_clients, 1):
+            println(f"  {i}) {c.get('printer_name')} @ {c.get('host')} ({c.get('config_dir')})")
+        choice = input(f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: ").strip()
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(remote_clients):
+                entry = remote_clients[idx - 1]
+                remote = entry.get("host", "")
+                printer_name = entry.get("printer_name", "")
+                printer_dir = entry.get("config_dir", "")
+            else:
+                auto_mode = False
+        else:
+            auto_mode = False
+    elif auto_mode:
+        println("No registered remote printers found; falling back to manual setup.")
+        auto_mode = False
+
+    if not auto_mode:
+        remote = input("Remote host (user@hostname): ").strip()
+        if not remote:
+            println("Remote host is required; aborting.")
+            return
+
+        printer_name = input("Printer name for dashboard (e.g., SV08): ").strip()
+        if not printer_name:
+            println("Printer name is required; aborting.")
+            return
 
     # Discover remote printer_data dirs
     try:
@@ -552,26 +592,27 @@ def install_client_remote() -> None:
         println(f"ERROR: Failed to import installer.remote: {e}")
         return
 
-    candidates: List[str] = []
-    try:
-        candidates = r.remote_find_printer_data(remote)
-    except Exception as e:
-        println(f"WARNING: Failed to scan remote for printer_data dirs: {e}")
+    if not printer_dir:
+        candidates: list[str] = []
+        try:
+            candidates = r.remote_find_printer_data(remote)
+        except Exception as e:
+            println(f"WARNING: Failed to scan remote for printer_data dirs: {e}")
 
-    printer_dir = ""
-    if candidates:
-        println("\nFound the following remote printer_data/config candidates:")
-        for i, path in enumerate(candidates, 1):
-            println(f"  {i}) {path}")
-        choice = input(f"Select [1-{len(candidates)}] or enter a custom path: ").strip()
-        if choice.isdigit():
-            idx = int(choice)
-            if 1 <= idx <= len(candidates):
-                printer_dir = candidates[idx - 1]
-        if not printer_dir:
-            printer_dir = choice or candidates[0]
-    else:
-        printer_dir = input("Remote printer config dir (folder with printer.cfg): ").strip()
+        if candidates:
+            println("
+Found the following remote printer_data/config candidates:")
+            for i, path in enumerate(candidates, 1):
+                println(f"  {i}) {path}")
+            choice = input(f"Select [1-{len(candidates)}] or enter a custom path: ").strip()
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(candidates):
+                    printer_dir = candidates[idx - 1]
+            if not printer_dir:
+                printer_dir = choice or candidates[0]
+        else:
+            printer_dir = input("Remote printer config dir (folder with printer.cfg): ").strip()
 
     if not printer_dir:
         println("No remote config directory provided; aborting.")
@@ -611,10 +652,12 @@ def install_client_remote() -> None:
         "config_dir": printer_dir,
     })
 
-    println("\nRemote client installation complete.")
+    println("
+Remote client installation complete.")
     println(f"  Printer: {printer_name}")
     println(f"  Remote: {remote}")
     println(f"  Remote config dir: {printer_dir}")
     println(f"  print_cost.cfg: {remote_cfg_path}")
     println(f"  Job-start script: {remote_job_start}")
     println(f"  Cost script: {remote_end_script}")
+
