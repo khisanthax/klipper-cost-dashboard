@@ -524,8 +524,7 @@ def install_client_remote() -> None:
     Relies on helper functions in installer.remote to write files and
     patch printer.cfg on the remote host.
     """
-    println("
-=== Remote Client Installation ===")
+    println("\n=== Remote Client Installation ===")
 
     use_auto = input("Use auto mode (use saved master settings and known remote printers)? [Y/n]: ").strip().lower()
     auto_mode = use_auto in ("", "y", "yes")
@@ -554,8 +553,7 @@ def install_client_remote() -> None:
     remote_clients = [c for c in registry if c.get("type") == "remote"]
 
     if auto_mode and remote_clients:
-        println("
-Registered remote printers:")
+        println("\nRegistered remote printers:")
         for i, c in enumerate(remote_clients, 1):
             println(f"  {i}) {c.get('printer_name')} @ {c.get('host')} ({c.get('config_dir')})")
         choice = input(f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: ").strip()
@@ -660,4 +658,3 @@ Remote client installation complete.")
     println(f"  print_cost.cfg: {remote_cfg_path}")
     println(f"  Job-start script: {remote_job_start}")
     println(f"  Cost script: {remote_end_script}")
-
