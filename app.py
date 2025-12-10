@@ -328,7 +328,12 @@ def index():
                 continue
         rows = filtered
 
-    summary = compute_summary(rows)
+    summary = compute_summary(rows) or {}
+    # Ensure expected keys exist to avoid template errors
+    summary.setdefault("total_prints", 0)
+    summary.setdefault("total_hours", 0.0)
+    summary.setdefault("total_meters", 0.0)
+    summary.setdefault("total_cost", 0.0)
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     visible_cols = display_settings.get("visible_columns", HEADERS)
 
@@ -415,7 +420,11 @@ def reports_page():
 
     monthly = compute_monthly_breakdown(rows)
     top_printers = compute_top_printers(rows, limit=5)
-    summary = compute_summary(rows)
+    summary = compute_summary(rows) or {}
+    summary.setdefault("total_prints", 0)
+    summary.setdefault("total_hours", 0.0)
+    summary.setdefault("total_meters", 0.0)
+    summary.setdefault("total_cost", 0.0)
     
     # Aggregate by material and profile
     material_summary = aggregate_by_material(rows)
