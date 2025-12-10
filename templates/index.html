@@ -215,6 +215,10 @@
                                 <span class="text-muted"> / </span>
                                 <span class="fw-semibold">${{ "%.2f"|format(summary.today_cost) }}</span>
                             </div>
+                            <div class="mt-2">
+                                <div class="text-muted small mb-1">Filament: {{ summary.active_filament_name or 'Default' }}</div>
+                                <div class="text-muted small">Rate: {{ summary.active_rate_name or 'Base rate' }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>

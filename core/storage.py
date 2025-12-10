@@ -5,7 +5,11 @@ import os
 import csv
 import json
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 
 
 def ensure_settings_exists(settings_file, default_pricing):
@@ -149,9 +153,7 @@ def load_rows_raw(csv_file):
                         ts_float = float(ts)
                         # Keep raw timestamp for filtering
                         r["timestamp_raw"] = ts_float
-                        r["timestamp"] = datetime.fromtimestamp(ts_float).strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
+                        r["timestamp"] = ts_to_local_dt(ts_float).strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
                         r["timestamp_raw"] = None
                 else:
@@ -231,6 +233,40 @@ def save_profiles_data(profiles_file, data_dir, data):
     os.makedirs(data_dir, exist_ok=True)
     with open(profiles_file, "w") as f:
         json.dump(data, f, indent=2)
+
+
+# ----------------------------------------------------------------------
+# Timezone helpers
+# ----------------------------------------------------------------------
+
+_DEFAULT_TZ_NAME = os.getenv("TZ", "America/New_York")
+if ZoneInfo:
+    try:
+        _TIMEZONE_OBJ = ZoneInfo(_DEFAULT_TZ_NAME)
+    except Exception:
+        _TIMEZONE_OBJ = timezone.utc
+else:  # pragma: no cover
+    _TIMEZONE_OBJ = timezone.utc
+
+
+def ts_to_local_dt(ts: float, tz_name: str = None) -> datetime:
+    """
+    Convert a POSIX timestamp to a timezone-aware datetime.
+    """
+    if tz_name is None:
+        tz_obj = _TIMEZONE_OBJ
+    else:
+        if ZoneInfo:
+            try:
+                tz_obj = ZoneInfo(tz_name)
+            except Exception:
+                tz_obj = timezone.utc
+        else:
+            tz_obj = timezone.utc
+    try:
+        return datetime.fromtimestamp(float(ts), tz=tz_obj)
+    except Exception:
+        return datetime.fromtimestamp(float(ts))
 
 
 def load_json_file(json_file):

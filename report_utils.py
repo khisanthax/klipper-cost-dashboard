@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta
+from core.storage import ts_to_local_dt
 
 def _parse_date(s):
     """Parse YYYY-MM-DD string to datetime object."""
     if not s:
         return None
     try:
-        return datetime.strptime(s, "%Y-%m-%d")
+        return datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=ts_to_local_dt(0).tzinfo)
     except ValueError:
         return None
 
@@ -26,7 +27,7 @@ def get_date_range_from_params(args):
     
     # If quick range is selected, it overrides manual dates
     if quick_range:
-        now = datetime.now()
+        now = ts_to_local_dt(datetime.now().timestamp())
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
         if quick_range == "last7":
@@ -68,7 +69,7 @@ def compute_monthly_breakdown(rows):
         if not ts_raw:
             continue
         try:
-            dt = datetime.fromtimestamp(float(ts_raw))
+            dt = ts_to_local_dt(float(ts_raw))
         except Exception:
             continue
             

@@ -2,6 +2,11 @@
 Configuration and constants for Print Cost Dashboard.
 """
 import os
+from datetime import timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 from core.storage import ensure_api_key
 
 # Directories and files
@@ -70,6 +75,17 @@ PRINTER_COLORS = {
     "SV07": "#d4edda",    # light green
     "Ender5P": "#ffeeba", # light yellow
 }
+
+# Timezone configuration
+DEFAULT_TIMEZONE = "America/New_York"
+_TZ_ENV = os.getenv("TZ", DEFAULT_TIMEZONE)
+if ZoneInfo:
+    try:
+        TIMEZONE_OBJ = ZoneInfo(_TZ_ENV)
+    except Exception:
+        TIMEZONE_OBJ = timezone.utc
+else:
+    TIMEZONE_OBJ = timezone.utc
 
 # Ensure data directory exists
 os.makedirs(DATA_DIR, exist_ok=True)

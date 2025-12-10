@@ -6,11 +6,11 @@ Refactored to use modular core package.
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
-    DEFAULT_PRICING, SETTINGS_FILE, DISPLAY_FILE, DATA_DIR
+    DEFAULT_PRICING, SETTINGS_FILE, DISPLAY_FILE, DATA_DIR, TIMEZONE_OBJ
 )
 from core.storage import (
     load_settings, save_settings, load_display_settings, save_display_settings,
-    append_row, load_rows_raw, rewrite_csv_without_indices
+    append_row, load_rows_raw, rewrite_csv_without_indices, ts_to_local_dt
 )
 from core.pricing import (
     compute_costs, get_known_printers, rename_printer, merge_printers,
@@ -114,7 +114,7 @@ def health():
     
     status = {
         "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
         "api_key_configured": bool(API_KEY),
         "csv_exists": os.path.exists(CSV_FILE),
     }
@@ -318,8 +318,7 @@ def index():
             if not ts_raw:
                 continue
             try:
-                from datetime import datetime
-                row_dt = datetime.fromtimestamp(float(ts_raw))
+                row_dt = ts_to_local_dt(float(ts_raw))
                 if start_dt and row_dt < start_dt:
                     continue
                 if end_dt and row_dt > end_dt:
@@ -354,6 +353,17 @@ def index():
     # Compute printer summaries for status cards
     from core.reports import compute_printer_summaries
     printer_summaries = compute_printer_summaries(rows, active_jobs)
+
+    # Enrich printer summaries with active filament/rate profile names
+    all_profiles = profiles.get_all_profiles()
+    printer_mappings = profiles.get_all_printer_mappings()
+    rate_profiles = rates.list_rate_profiles()
+    settings = load_settings(SETTINGS_FILE)
+    for pname, summary in printer_summaries.items():
+        pid = printer_mappings.get(pname)
+        summary["active_filament_name"] = all_profiles.get(pid, {}).get("name") if pid else None
+        rate_id = settings.get(pname, {}).get("active_rate_profile_id")
+        summary["active_rate_name"] = rate_profiles.get(rate_id, {}).get("name") if rate_id else None
 
     return render_template(
         "index.html",
@@ -393,8 +403,7 @@ def reports_page():
             if not ts_raw:
                 continue
             try:
-                from datetime import datetime
-                row_dt = datetime.fromtimestamp(float(ts_raw))
+                row_dt = ts_to_local_dt(float(ts_raw))
                 if start_dt and row_dt < start_dt:
                     continue
                 if end_dt and row_dt > end_dt:
