@@ -598,8 +598,7 @@ def install_client_remote() -> None:
             println(f"WARNING: Failed to scan remote for printer_data dirs: {e}")
 
         if candidates:
-            println("
-Found the following remote printer_data/config candidates:")
+            println("\nFound the following remote printer_data/config candidates:")
             for i, path in enumerate(candidates, 1):
                 println(f"  {i}) {path}")
             choice = input(f"Select [1-{len(candidates)}] or enter a custom path: ").strip()
@@ -650,8 +649,7 @@ Found the following remote printer_data/config candidates:")
         "config_dir": printer_dir,
     })
 
-    println("
-Remote client installation complete.")
+    println("\nRemote client installation complete.")
     println(f"  Printer: {printer_name}")
     println(f"  Remote: {remote}")
     println(f"  Remote config dir: {printer_dir}")
