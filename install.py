@@ -8,8 +8,16 @@ Refactored to use modular installer package.
 from installer.utils import println, load_state, save_state
 from installer.setup import master_setup, install_client_local, install_client_remote
 from installer.utils import (
-    get_client_registry, DATA_DIR, STATE_FILE,
-    DEFAULT_PORT, DEFAULT_SERVICE_NAME
+    get_client_registry,
+    DATA_DIR,
+    STATE_FILE,
+    DEFAULT_PORT,
+    DEFAULT_SERVICE_NAME,
+    uninstall_master,
+    uninstall_client_local,
+    uninstall_client_remote,
+    update_client_local,
+    update_client_remote,
 )
 import os
 import sys
@@ -90,12 +98,57 @@ def client_install_menu():
 
 
 def uninstall_main_menu():
-    """Uninstall menu."""
-    println("\n=== Uninstall ===")
-    println("Uninstall features are available in install.py.backup")
-    println("For now, manually remove files or use Docker commands:")
-    println("  docker compose down")
-    println("  rm -rf data/ Dockerfile docker-compose.yml")
+    """Uninstall / update menu."""
+    def pick_client(client_type: str):
+        clients = [c for c in get_client_registry() if c.get("type") == client_type]
+        if not clients:
+            println(f"No registered {client_type} clients found.")
+            return None
+        println(f"\nRegistered {client_type} clients:")
+        for i, c in enumerate(clients, 1):
+            desc = c.get("printer_name", "Unknown")
+            extra = c.get("cfg_dir") if client_type == "local" else c.get("host")
+            println(f"  {i}) {desc} ({extra})")
+        choice = input(f"Select [1-{len(clients)}] (or Enter to cancel): ").strip()
+        if not choice or not choice.isdigit():
+            return None
+        idx = int(choice)
+        if 1 <= idx <= len(clients):
+            return clients[idx - 1].get("printer_name")
+        return None
+
+    while True:
+        println("\n=== Uninstall / Update ===")
+        println("  1) Uninstall MASTER on THIS machine")
+        println("  2) Uninstall LOCAL client")
+        println("  3) Uninstall REMOTE client")
+        println("  4) Update LOCAL client")
+        println("  5) Update REMOTE client")
+        println("  6) Back")
+        choice = input("Select option [1-6]: ").strip()
+
+        if choice == "1":
+            uninstall_master()
+        elif choice == "2":
+            pname = pick_client("local")
+            if pname:
+                uninstall_client_local(pname)
+        elif choice == "3":
+            pname = pick_client("remote")
+            if pname:
+                uninstall_client_remote(pname)
+        elif choice == "4":
+            pname = pick_client("local")
+            if pname:
+                update_client_local(pname)
+        elif choice == "5":
+            pname = pick_client("remote")
+            if pname:
+                update_client_remote(pname)
+        elif choice == "6" or choice.lower() == "b":
+            return
+        else:
+            println("Invalid choice.")
 
 
 def settings_menu():
