@@ -530,21 +530,21 @@ def install_client_remote() -> None:
     auto_mode = use_auto in ("", "y", "yes")
 
     master_url = load_state("master_url", "http://localhost:5000")
+    master_url = load_state("master_url", "http://localhost:5000")
     state_api = load_state("api_key", "")
     secret_api = _load_secret_api_key()
     default_api = state_api or secret_api or secrets.token_hex(16)
 
     if auto_mode and master_url and default_api:
-        println(f"Using saved master URL: {master_url}")
+        println(f"[auto] Using saved master URL: {master_url}")
         api_key = default_api
     else:
         if auto_mode and (not master_url or not default_api):
-            println("Saved master URL/API missing; falling back to manual entry.")
+            println("[auto] Saved master URL/API missing; falling back to manual entry.")
         auto_mode = False
         println(f"Current master URL: {master_url}")
-        master_url = input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
-        api_key = input(f"API key for this printer [{default_api}]: ").strip() or default_api
-
+        master_url = input(f"Master URL for dashboard [{master_url}]: " ).strip() or master_url
+        api_key = input(f"API key for this printer [{default_api}]: " ).strip() or default_api
     remote = ""
     printer_name = ""
     printer_dir = ""
@@ -553,10 +553,10 @@ def install_client_remote() -> None:
     remote_clients = [c for c in registry if c.get("type") == "remote"]
 
     if auto_mode and remote_clients:
-        println("\nRegistered remote printers:")
+        println("\n[auto] Registered remote printers:")
         for i, c in enumerate(remote_clients, 1):
             println(f"  {i}) {c.get('printer_name')} @ {c.get('host')} ({c.get('config_dir')})")
-        choice = input(f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: ").strip()
+        choice = input(f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: " ).strip()
         if choice.isdigit():
             idx = int(choice)
             if 1 <= idx <= len(remote_clients):
@@ -569,7 +569,7 @@ def install_client_remote() -> None:
         else:
             auto_mode = False
     elif auto_mode:
-        println("No registered remote printers found; falling back to manual setup.")
+        println("[auto] No registered remote printers found; falling back to manual setup.")
         auto_mode = False
 
     if not auto_mode:
@@ -598,6 +598,7 @@ def install_client_remote() -> None:
             println(f"WARNING: Failed to scan remote for printer_data dirs: {e}")
 
         if candidates:
+            println("[auto] Scanning remote for printer_data directories...")
             println("\nFound the following remote printer_data/config candidates:")
             for i, path in enumerate(candidates, 1):
                 println(f"  {i}) {path}")
@@ -632,10 +633,17 @@ def install_client_remote() -> None:
     if not (ok1 and ok2 and ok3):
         println("ERROR: Failed to write one or more files on the remote host; aborting.")
         return
+    if auto_mode:
+        println(f"[auto] Deployed print_cost.cfg to {remote_cfg_path}")
+        println(f"[auto] Deployed kcd_job_start.sh to {remote_job_start}")
+        println(f"[auto] Deployed send_print_cost.sh to {remote_end_script}")
+
 
     include_line = "[include print_cost.cfg]"
     if not r.remote_append_line_if_missing(remote, remote_printer_cfg, include_line):
         println("WARNING: Failed to ensure include line in remote printer.cfg; please check manually.")
+    elif auto_mode:
+        println("[auto] Verified [include print_cost.cfg] in printer.cfg.")
 
     # Persist master settings for future clients
     save_state("master_url", master_url)
