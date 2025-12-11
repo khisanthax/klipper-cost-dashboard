@@ -62,6 +62,16 @@ def remote_find_printer_data(remote):
 
     candidates = [line.strip() for line in out.splitlines() if line.strip()]
     return candidates
+def remote_list_cfg_files(remote, config_dir):
+    """
+    Return a list of .cfg files in the given remote config_dir (non-recursive).
+    """
+    code, out, err = ssh_run(remote, f"cd \'{config_dir}\' && ls *.cfg 2>/dev/null || true")
+    if code != 0:
+        println(f"Failed to list .cfg files in {config_dir}: {err or out}")
+        return []
+    files = [line.strip() for line in out.splitlines() if line.strip()]
+    return [os.path.join(config_dir, f) for f in files]
 
 
 def remote_write_file(remote, path, content, mode=0o644):
@@ -177,3 +187,4 @@ def setup_ssh_key_for_remote(remote):
 
     println("SSH key installed for remote host; subsequent ssh/scp should not ask for a password.")
     return True
+
