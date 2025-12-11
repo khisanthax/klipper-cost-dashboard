@@ -23,6 +23,7 @@ from core.reports import (
 )
 from core import profiles
 from core import rates
+from core import live
 
 app = Flask(__name__)
 
@@ -304,8 +305,16 @@ def job_end():
 def index():
     """Main dashboard page."""
     if request.method == "POST":
-        # Handle row deletion
         action = request.form.get("action")
+
+        # Clear a stuck / wrong live job without logging history
+        if action == "clear_live_job":
+            printer_name = request.form.get("printer_name", "").strip()
+            if printer_name:
+                live.end_job(printer_name)
+            return redirect(url_for("index"))
+
+        # Handle row deletion
         if action in ("delete_rows", "delete"):
             indices_raw = request.form.getlist("delete_rows")
             if indices_raw:
@@ -360,8 +369,6 @@ def index():
         chart_hours_per_printer["labels"] = sorted_printers
         chart_hours_per_printer["values"] = [summary["per_printer"][p]["hours"] for p in sorted_printers]
 
-    # Load active jobs for "Now Printing" section
-    from core import live
     active_jobs = live.list_active_jobs()
     
     # Compute printer summaries for status cards
