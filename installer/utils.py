@@ -14,7 +14,7 @@ import tempfile
 import shutil
 from typing import Any, Dict, List
 from . import remote as r
-from . import installer_macro
+import installer_macro
 
 from core.config import DATA_DIR
 from core.storage import (
@@ -887,6 +887,7 @@ def update_client_remote(printer_name: str) -> None:
     })
 
     println(f"Remote client update complete for '{printer_name}'.")
+
 
 
 
