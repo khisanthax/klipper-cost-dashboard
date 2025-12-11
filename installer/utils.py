@@ -115,10 +115,10 @@ description: Notify dashboard that a print has started
 gcode:
     # KCD: log job start to dashboard
     {% set printer_name = "__PRINTER_NAME__" %}
-    {% set fname = printer.print_stats.filename|string %}
+    {% set filename = printer.print_stats.filename|string %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
-    {% set params = printer_name ~ " " ~ fname ~ " " ~ est_dur ~ " " ~ est_filament %}
+    {% set params = printer_name ~ " " ~ filename ~ " " ~ est_dur ~ " " ~ est_filament %}
     RUN_SHELL_COMMAND CMD=kcd_job_start PARAMS="{{params}}"
 
 [gcode_macro PRINT_COST_TEST]
@@ -150,12 +150,12 @@ set -euo pipefail
 MASTER_URL="{master_url}"
 API_KEY="{api_key}"
 
-PRINTER="${{1:-}}"
+PRINTER_NAME="${{1:-}}"
 FILENAME="${{2:-}}"
-DUR="${{3:-0}}"
-FILAMENT="${{4:-0}}"
+EST_DURATION="${{3:-0}}"
+EST_FILAMENT="${{4:-0}}"
 
-export PRINTER FILENAME DUR FILAMENT
+export PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT
 
 JSON=$(python - <<'PY'
 import json, os
@@ -163,10 +163,10 @@ def to_float(v):
     try: return float(v)
     except: return 0.0
 data = {{
-    "printer_name": os.environ.get("PRINTER", ""),
+    "printer_name": os.environ.get("PRINTER_NAME", ""),
     "filename": os.environ.get("FILENAME", ""),
-    "estimated_duration": to_float(os.environ.get("DUR", "0")),
-    "estimated_filament_mm": to_float(os.environ.get("FILAMENT", "0")),
+    "estimated_duration": to_float(os.environ.get("EST_DURATION", "0")),
+    "estimated_filament_mm": to_float(os.environ.get("EST_FILAMENT", "0")),
 }}
 print(json.dumps(data))
 PY
@@ -611,10 +611,10 @@ description: Notify dashboard that a print has started
 gcode:
     # KCD: log job start to dashboard
     {% set printer_name = "__PRINTER_NAME__" %}
-    {% set fname = printer.print_stats.filename|string %}
+    {% set filename = printer.print_stats.filename|string %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
-    {% set params = printer_name ~ " " ~ fname ~ " " ~ est_dur ~ " " ~ est_filament %}
+    {% set params = printer_name ~ " " ~ filename ~ " " ~ est_dur ~ " " ~ est_filament %}
     RUN_SHELL_COMMAND CMD=kcd_job_start PARAMS="{{params}}"
 
 [gcode_macro PRINT_COST_TEST]

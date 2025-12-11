@@ -144,6 +144,13 @@ def job_start():
     data = request.get_json() or request.form.to_dict()
     printer_name = data.get("printer_name")
     filename = data.get("filename")
+
+    # Guard against swapped arguments (some clients may send filename as printer_name)
+    if printer_name and isinstance(printer_name, str):
+        lower = printer_name.lower()
+        if lower.endswith((".gcode", ".gco", ".g")):
+            # Likely swapped: printer_name looks like a file, so swap with filename
+            printer_name, filename = filename, printer_name
     
     if not printer_name or not filename:
         return jsonify({"success": False, "error": "Missing required fields: printer_name, filename"}), 400
