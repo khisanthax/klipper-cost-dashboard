@@ -304,3 +304,102 @@ def merge_printers(names_to_merge, merged_name):
             writer.writeheader()
             for row in rows:
                 writer.writerow(row)
+
+
+def list_printers():
+    """Return a sorted list of printer names from settings.json."""
+    settings = load_settings(SETTINGS_FILE)
+    return sorted(settings.keys())
+
+
+def delete_printer(printer_name, delete_csv=False):
+    """
+    Remove a printer from settings, client registry, and optionally CSV.
+    Intended for cleaning up bogus printers like '*.gcode'.
+    """
+    from core.config import DATA_DIR
+
+    # Remove from settings.json
+    settings = load_settings(SETTINGS_FILE)
+    if printer_name in settings:
+        settings.pop(printer_name, None)
+        save_settings(SETTINGS_FILE, DATA_DIR, settings)
+
+    # Remove from client registry in install_state.json
+    state_file = os.path.join(DATA_DIR, "install_state.json")
+    registry = load_state(state_file, "clients", [])
+    new_registry = [entry for entry in registry if entry.get("printer_name") != printer_name]
+    if len(new_registry) != len(registry):
+        save_state(state_file, DATA_DIR, "clients", new_registry)
+
+    # Optionally remove rows from CSV
+    if delete_csv and os.path.exists(CSV_FILE):
+        rows, _ = load_rows_raw(CSV_FILE)
+        rows = [row for row in rows if row.get("printer") != printer_name]
+        with open(CSV_FILE, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADERS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+
+
+def clean_gcode_printers(delete_csv=False):
+    """
+    Delete any printers in settings.json that look like '.gcode' filenames.
+    If delete_csv is True, also remove their rows from print_costs.csv.
+    """
+    settings = load_settings(SETTINGS_FILE)
+    names = list(settings.keys())
+    gcode_like = [
+        name for name in names
+        if ".gcode" in name.lower() or name.lower().endswith(".gco")
+    ]
+
+    if not gcode_like:
+        print("No .gcode-like printers found in settings.json.")
+        return
+
+    print("Removing these .gcode-like printers:")
+    for name in gcode_like:
+        print(f"  - {name}")
+        delete_printer(name, delete_csv=delete_csv)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Printer management utilities.")
+    parser.add_argument("--list", action="store_true",
+                        help="List all printers from settings.json.")
+    parser.add_argument("--rename", nargs=2, metavar=("OLD", "NEW"),
+                        help="Rename a printer (updates settings, clients, and CSV).")
+    parser.add_argument("--delete", metavar="NAME",
+                        help="Delete a printer from settings and clients, optionally CSV.")
+    parser.add_argument("--clean-gcode", action="store_true",
+                        help="Delete printers whose names look like '.gcode' filenames.")
+    parser.add_argument("--delete-csv", action="store_true",
+                        help="When deleting/cleaning, also remove matching rows from CSV.")
+
+    args = parser.parse_args()
+
+    if args.list:
+        printers = list_printers()
+        if not printers:
+            print("No printers found in settings.json.")
+        else:
+            print("Printers in settings.json:")
+            for name in printers:
+                print(f"  - {name}")
+
+    if args.rename:
+        old_name, new_name = args.rename
+        update_csv = not args.delete_csv  # reuse flag: if delete-csv is set, skip CSV update here
+        rename_printer(old_name, new_name, update_csv=update_csv)
+        print(f"Renamed printer '{old_name}' -> '{new_name}' (CSV updated={update_csv}).")
+
+    if args.delete:
+        delete_printer(args.delete, delete_csv=args.delete_csv)
+        print(f"Deleted printer '{args.delete}' (CSV rows deleted={args.delete_csv}).")
+
+    if args.clean_gcode:
+        clean_gcode_printers(delete_csv=args.delete_csv)

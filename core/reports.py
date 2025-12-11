@@ -4,8 +4,8 @@ Reporting utilities for Print Cost Dashboard.
 Merged from report_utils.py + additional reporting functions from app.py.
 """
 from datetime import datetime, timedelta
-from core.config import DEFAULT_TIMEZONE
-from core.storage import ts_to_local_dt
+from core.config import DEFAULT_TIMEZONE, SETTINGS_FILE
+from core.storage import ts_to_local_dt, load_settings
 
 
 def _parse_date(s):
@@ -253,12 +253,20 @@ def compute_printer_summaries(rows, live_jobs_list):
     
     summaries = {}
     
-    # Get all known printers
-    printers = set()
+    # Get all known printers:
+    # 1) Persistent printers from settings.json
+    # 2) Printers from historical CSV rows
+    # 3) Printers from current live jobs
+    settings = load_settings(SETTINGS_FILE)
+    printers = set(settings.keys())
+
     for r in rows:
-        printers.add(r.get("printer", "Unknown"))
+        pname = r.get("printer") or "Unknown"
+        printers.add(pname)
+
     for job in live_jobs_list:
-        printers.add(job.get("printer_name", "Unknown"))
+        pname = job.get("printer_name") or "Unknown"
+        printers.add(pname)
     
     # Compute for each printer
     today_start = ts_to_local_dt(datetime.now().timestamp()).replace(hour=0, minute=0, second=0, microsecond=0)
