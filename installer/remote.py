@@ -33,6 +33,17 @@ def scp_copy(local_path, remote, remote_path):
     return run_subprocess(["scp", local_path, f"{remote}:{remote_path}"])
 
 
+def remote_read_file(remote, path):
+    """
+    Read a remote file and return its contents as text. Returns None on failure.
+    """
+    code, out, err = ssh_run(remote, f"cat '{path}'")
+    if code != 0:
+        println(f"Failed to read remote file {path}: {err or out}")
+        return None
+    return out
+
+
 def remote_find_printer_data(remote):
     """
     Try to find printer_data dirs on remote host.

@@ -10,6 +10,8 @@
 import os
 import json
 import secrets
+import tempfile
+import shutil
 from typing import Any, Dict, List
 
 from core.config import DATA_DIR
@@ -573,6 +575,49 @@ def install_client_remote() -> None:
         println("WARNING: Failed to ensure include line in remote printer.cfg; please check manually.")
     elif auto_mode:
         println("[auto] Verified [include print_cost.cfg] in printer.cfg.")
+
+    # Run macro insertion on remote configs (download, patch locally, upload back)
+    tmpdir = tempfile.mkdtemp(prefix="kcd_remote_cfg_")
+    try:
+        cfg_files = []
+        # fetch list of cfg files
+        code, out, err = r.ssh_run(remote, f"cd '{printer_dir}' && ls *.cfg")
+        if code == 0:
+            for fname in out.splitlines():
+                fname = fname.strip()
+                if not fname:
+                    continue
+                remote_path = os.path.join(printer_dir, fname)
+                content = r.remote_read_file(remote, remote_path)
+                if content is None:
+                    continue
+                local_path = os.path.join(tmpdir, fname)
+                with open(local_path, "w") as f:
+                    f.write(content)
+                cfg_files.append((fname, local_path))
+        else:
+            println(f"WARNING: Could not list remote cfg files: {err or out}")
+
+        if cfg_files:
+            from installer import installer_macro
+            installer_macro.prompt_macro_insertion(printer_name, tmpdir)
+            installer_macro.prompt_start_macro_insertion(printer_name, tmpdir)
+
+            # upload patched files back
+            for fname, local_path in cfg_files:
+                try:
+                    with open(local_path, "r") as f:
+                        updated = f.read()
+                    remote_path = os.path.join(printer_dir, fname)
+                    r.remote_write_file(remote, remote_path, updated, mode=0o644)
+                except Exception as e:
+                    println(f"WARNING: Failed to upload patched {fname}: {e}")
+        else:
+            println("WARNING: No remote cfg files fetched for macro integration; skipping.")
+    except Exception as e:
+        println(f"WARNING: Remote macro integration failed: {e}")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     save_state("master_url", master_url)
     save_state("api_key", api_key)
