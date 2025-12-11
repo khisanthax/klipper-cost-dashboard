@@ -190,7 +190,7 @@
     </div>
     <div class="card-body">
         <div class="row g-3">
-            {% for printer_name, summary in printer_summaries.items() %}
+            {% for printer_name, ps in printer_summaries.items() %}
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100 bg-light">
                     <div class="card-body">
@@ -200,24 +200,24 @@
                                 {{ printer_name }}
                             </span>
                             <span
-                                class="badge {% if summary.status == 'printing' %}bg-success{% elif summary.status == 'paused' %}bg-warning text-dark{% elif summary.status == 'failed' or summary.status == 'canceled' %}bg-danger{% else %}bg-secondary{% endif %}">
-                                {{ summary.status|upper }}
+                                class="badge {% if ps.status == 'printing' %}bg-success{% elif ps.status == 'paused' %}bg-warning text-dark{% elif ps.status == 'failed' or ps.status == 'canceled' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                {{ ps.status|upper }}
                             </span>
                         </h6>
                         <div class="card-text small mt-3">
                             <div class="mb-2">
                                 <span class="text-muted">Last Job:</span>
-                                <span class="fw-semibold">{{ summary.last_job_name[:30] }}{% if summary.last_job_name|length > 30 %}...{% endif %}</span>
+                                <span class="fw-semibold">{{ ps.last_job_name[:30] }}{% if ps.last_job_name|length > 30 %}...{% endif %}</span>
                             </div>
                             <div>
                                 <span class="text-muted">Today:</span>
-                                <span class="fw-semibold">{{ "%.1f"|format(summary.today_hours) }}h</span>
+                                <span class="fw-semibold">{{ "%.1f"|format(ps.today_hours) }}h</span>
                                 <span class="text-muted"> / </span>
-                                <span class="fw-semibold">${{ "%.2f"|format(summary.today_cost) }}</span>
+                                <span class="fw-semibold">${{ "%.2f"|format(ps.today_cost) }}</span>
                             </div>
                             <div class="mt-2">
-                                <div class="text-muted small mb-1">Filament: {{ summary.active_filament_name or 'Default' }}</div>
-                                <div class="text-muted small">Rate: {{ summary.active_rate_name or 'Base rate' }}</div>
+                                <div class="text-muted small mb-1">Filament: {{ ps.active_filament_name or 'Default' }}</div>
+                                <div class="text-muted small">Rate: {{ ps.active_rate_name or 'Base rate' }}</div>
                             </div>
                         </div>
                     </div>
