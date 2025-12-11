@@ -23,6 +23,7 @@ from core.reports import (
 )
 from core import profiles
 from core import rates
+from core import pricing
 from core import live
 
 app = Flask(__name__)
@@ -471,6 +472,12 @@ def settings_page():
     """Settings page for printer pricing configuration."""
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+
+        if action == "delete_printer":
+            printer = request.form.get("printer", "").strip()
+            if printer:
+                pricing.delete_printer(printer, delete_csv=False)
+            return redirect(url_for("settings_page"))
 
         if action == "save_printer_defaults":
             printer = request.form.get("printer")
