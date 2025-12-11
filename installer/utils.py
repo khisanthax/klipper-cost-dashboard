@@ -425,7 +425,7 @@ def install_client_local() -> None:
         println("[auto] Checked [include print_cost.cfg] in printer.cfg")
 
     try:
-        from installer import installer_macro
+        import installer_macro
         installer_macro.run_macro_integration(printer_name, printer_dir)
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
@@ -667,7 +667,7 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
             println("Failed to download any remote .cfg files; skipping macro integration.")
             return
 
-        from installer import installer_macro
+        import installer_macro
         installer_macro.run_macro_integration(printer_name, tmp_dir)
 
         for remote_path, local_path in local_paths:
@@ -825,7 +825,7 @@ def update_client_local(printer_name: str) -> None:
     _ensure_include_in_printer_cfg(cfg_dir, "print_cost.cfg")
 
     try:
-        from installer import installer_macro
+        import installer_macro
         installer_macro.run_macro_integration(printer_name, cfg_dir)
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
