@@ -426,8 +426,7 @@ def install_client_local() -> None:
 
     try:
         from installer import installer_macro
-        installer_macro.prompt_macro_insertion(printer_name, printer_dir)
-        installer_macro.prompt_start_macro_insertion(printer_name, printer_dir)
+        installer_macro.run_macro_integration(printer_name, printer_dir)
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
         println("You may need to add KCD blocks to your macros manually.")
@@ -576,49 +575,11 @@ def install_client_remote() -> None:
     elif auto_mode:
         println("[auto] Verified [include print_cost.cfg] in printer.cfg.")
 
-    # Run macro insertion on remote configs (download, patch locally, upload back)
-    tmpdir = tempfile.mkdtemp(prefix="kcd_remote_cfg_")
     try:
-        cfg_files = []
-        # fetch list of cfg files
-        code, out, err = r.ssh_run(remote, f"cd '{printer_dir}' && ls *.cfg")
-        if code == 0:
-            for fname in out.splitlines():
-                fname = fname.strip()
-                if not fname:
-                    continue
-                remote_path = os.path.join(printer_dir, fname)
-                content = r.remote_read_file(remote, remote_path)
-                if content is None:
-                    continue
-                local_path = os.path.join(tmpdir, fname)
-                with open(local_path, "w") as f:
-                    f.write(content)
-                cfg_files.append((fname, local_path))
-        else:
-            println(f"WARNING: Could not list remote cfg files: {err or out}")
-
-        if cfg_files:
-            from installer import installer_macro
-            installer_macro.prompt_macro_insertion(printer_name, tmpdir)
-            installer_macro.prompt_start_macro_insertion(printer_name, tmpdir)
-
-            # upload patched files back
-            for fname, local_path in cfg_files:
-                try:
-                    with open(local_path, "r") as f:
-                        updated = f.read()
-                    remote_path = os.path.join(printer_dir, fname)
-                    r.remote_write_file(remote, remote_path, updated, mode=0o644)
-                except Exception as e:
-                    println(f"WARNING: Failed to upload patched {fname}: {e}")
-        else:
-            println("WARNING: No remote cfg files fetched for macro integration; skipping.")
+        run_remote_macro_integration(printer_name, remote, printer_dir)
     except Exception as e:
         println(f"WARNING: Remote macro integration failed: {e}")
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
+        println("You may need to add KCD blocks to your macros on the remote host manually.")
     save_state("master_url", master_url)
     save_state("api_key", api_key)
 
@@ -677,6 +638,46 @@ gcode:
     RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{params}"
 """
     return template.replace("__PRINTER_DIR__", printer_dir).replace("__PRINTER_NAME__", printer_name)
+
+
+def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: str) -> None:
+    """
+    Download .cfg files from remote printer_dir, run local macro integration, upload back.
+    """
+    tmp_dir = tempfile.mkdtemp(prefix="kcd_remote_cfg_")
+    try:
+        from installer import remote as r
+        cfg_files = r.remote_list_cfg_files(remote, printer_dir)
+        if not cfg_files:
+            println(f"No .cfg files found in remote dir {printer_dir}; skipping macro integration.")
+            return
+
+        local_paths = []
+        for remote_path in cfg_files:
+            fname = os.path.basename(remote_path)
+            local_path = os.path.join(tmp_dir, fname)
+            content = r.remote_read_file(remote, remote_path)
+            if not content:
+                continue
+            with open(local_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            local_paths.append((remote_path, local_path))
+
+        if not local_paths:
+            println("Failed to download any remote .cfg files; skipping macro integration.")
+            return
+
+        from installer import installer_macro
+        installer_macro.run_macro_integration(printer_name, tmp_dir)
+
+        for remote_path, local_path in local_paths:
+            with open(local_path, "r", encoding="utf-8") as f:
+                updated = f.read()
+            r.remote_write_file(remote, remote_path, updated, mode=0o644)
+
+        println("Remote macro integration completed successfully.")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # ----------------------------------------------------------------------
@@ -825,8 +826,7 @@ def update_client_local(printer_name: str) -> None:
 
     try:
         from installer import installer_macro
-        installer_macro.prompt_macro_insertion(printer_name, cfg_dir)
-        installer_macro.prompt_start_macro_insertion(printer_name, cfg_dir)
+        installer_macro.run_macro_integration(printer_name, cfg_dir)
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
 
@@ -902,3 +902,4 @@ def update_client_remote(printer_name: str) -> None:
     })
 
     println(f"Remote client update complete for '{printer_name}'.")
+
