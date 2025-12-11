@@ -129,7 +129,7 @@ def compute_top_printers(rows, limit=5):
 def compute_summary(rows):
     """
     Compute summary statistics for a list of print rows.
-    Returns dict with total_prints, total_hours, total_meters, total_cost.
+    Always returns a dict with totals and empty per_day/per_printer maps.
     """
     total_prints = len(rows)
     total_hours = 0.0
@@ -138,17 +138,19 @@ def compute_summary(rows):
 
     for r in rows:
         try:
-            total_hours += float(r.get("duration_hours") or 0)
-            total_meters += float(r.get("filament_meters") or 0)
-            total_cost += float(r.get("total_cost") or 0)
-        except ValueError:
-            pass
+            total_hours += float(r.get("duration_hours") or 0.0)
+            total_meters += float(r.get("filament_meters") or 0.0)
+            total_cost += float(r.get("total_cost") or 0.0)
+        except (TypeError, ValueError):
+            continue
 
     return {
         "total_prints": total_prints,
         "total_hours": total_hours,
         "total_meters": total_meters,
         "total_cost": total_cost,
+        "per_day": {},
+        "per_printer": {},
     }
 
 

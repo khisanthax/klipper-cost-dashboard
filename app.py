@@ -334,6 +334,8 @@ def index():
     summary.setdefault("total_hours", 0.0)
     summary.setdefault("total_meters", 0.0)
     summary.setdefault("total_cost", 0.0)
+    summary.setdefault("per_day", {})
+    summary.setdefault("per_printer", {})
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     visible_cols = display_settings.get("visible_columns", HEADERS)
 
@@ -425,6 +427,8 @@ def reports_page():
     summary.setdefault("total_hours", 0.0)
     summary.setdefault("total_meters", 0.0)
     summary.setdefault("total_cost", 0.0)
+    summary.setdefault("per_day", {})
+    summary.setdefault("per_printer", {})
     
     # Aggregate by material and profile
     material_summary = aggregate_by_material(rows)
