@@ -366,11 +366,11 @@ def index():
     printer_mappings = profiles.get_all_printer_mappings()
     rate_profiles = rates.list_rate_profiles()
     settings = load_settings(SETTINGS_FILE)
-    for pname, summary in printer_summaries.items():
+    for pname, ps in printer_summaries.items():
         pid = printer_mappings.get(pname)
-        summary["active_filament_name"] = all_profiles.get(pid, {}).get("name") if pid else None
+        ps["active_filament_name"] = all_profiles.get(pid, {}).get("name") if pid else None
         rate_id = settings.get(pname, {}).get("active_rate_profile_id")
-        summary["active_rate_name"] = rate_profiles.get(rate_id, {}).get("name") if rate_id else None
+        ps["active_rate_name"] = rate_profiles.get(rate_id, {}).get("name") if rate_id else None
 
     return render_template(
         "index.html",
