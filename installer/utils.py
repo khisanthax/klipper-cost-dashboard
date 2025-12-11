@@ -13,6 +13,8 @@ import secrets
 import tempfile
 import shutil
 from typing import Any, Dict, List
+from . import remote as r
+from . import installer_macro
 
 from core.config import DATA_DIR
 from core.storage import (
@@ -425,7 +427,6 @@ def install_client_local() -> None:
         println("[auto] Checked [include print_cost.cfg] in printer.cfg")
 
     try:
-        import installer_macro
         installer_macro.run_macro_integration(printer_name, printer_dir)
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
@@ -515,11 +516,6 @@ def install_client_remote() -> None:
             println("Printer name is required; aborting.")
             return
 
-    try:
-        from installer import remote as r
-    except Exception as e:
-        println(f"ERROR: Failed to import installer.remote: {e}")
-        return
 
     if not printer_dir:
         candidates: list[str] = []
@@ -646,7 +642,6 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
     """
     tmp_dir = tempfile.mkdtemp(prefix="kcd_remote_cfg_")
     try:
-        from installer import remote as r
         cfg_files = r.remote_list_cfg_files(remote, printer_dir)
         if not cfg_files:
             println(f"No .cfg files found in remote dir {printer_dir}; skipping macro integration.")
@@ -667,7 +662,6 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
             println("Failed to download any remote .cfg files; skipping macro integration.")
             return
 
-        import installer_macro
         installer_macro.run_macro_integration(printer_name, tmp_dir)
 
         for remote_path, local_path in local_paths:
@@ -754,11 +748,7 @@ def uninstall_client_remote(printer_name: str) -> None:
     if not host or not config_dir:
         println(f"Remote entry incomplete for '{printer_name}'.")
     else:
-        try:
-            from installer import remote as r
-        except Exception as e:
-            println(f"Failed to import installer.remote: {e}")
-            return
+
 
         remote_files = [
             os.path.join(config_dir, "print_cost.cfg"),
@@ -825,7 +815,6 @@ def update_client_local(printer_name: str) -> None:
     _ensure_include_in_printer_cfg(cfg_dir, "print_cost.cfg")
 
     try:
-        import installer_macro
         installer_macro.run_macro_integration(printer_name, cfg_dir)
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
@@ -869,11 +858,7 @@ def update_client_remote(printer_name: str) -> None:
     job_start_script = generate_job_start_script(master_url, api_key)
     end_script = generate_job_end_script(master_url, api_key)
 
-    try:
-        from installer import remote as r
-    except Exception as e:
-        println(f"Failed to import installer.remote: {e}")
-        return
+
 
     remote_cfg_path = os.path.join(config_dir, "print_cost.cfg")
     remote_job_start = os.path.join(config_dir, "kcd_job_start.sh")
@@ -902,4 +887,13 @@ def update_client_remote(printer_name: str) -> None:
     })
 
     println(f"Remote client update complete for '{printer_name}'.")
+
+
+
+
+
+
+
+
+
 
