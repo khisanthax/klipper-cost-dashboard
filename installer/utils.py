@@ -155,14 +155,22 @@ set -euo pipefail
 MASTER_URL="{master_url}"
 API_KEY="{api_key}"
 
-PRINTER_NAME="${{1:-}}"
-FILENAME="${{2:-}}"
-EST_DURATION="${{3:-0}}"
-EST_FILAMENT="${{4:-0}}"
+PARAMS="${{*:-}}"
+IFS='|' read -r PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT <<< "$PARAMS"
+PRINTER_NAME="${{PRINTER_NAME:-}}"
+FILENAME="${{FILENAME:-}}"
+EST_DURATION="${{EST_DURATION:-0}}"
+EST_FILAMENT="${{EST_FILAMENT:-0}}"
 
 export PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT
 
-JSON=$(python - <<'PY'
+PYBIN="$(command -v python3 || command -v python || true)"
+if [ -z "$PYBIN" ]; then
+  echo "ERROR: python3/python not found; install python3 or update script to not require python."
+  exit 1
+fi
+
+JSON=$("$PYBIN" - <<'PY'
 import json, os
 def to_float(v):
     try: return float(v)
@@ -192,14 +200,22 @@ MASTER_URL="{master_url}"
 API_KEY="{api_key}"
 
 TS=$(date +%s)
-PRINTER="${{1:-}}"
-FILENAME="${{2:-}}"
-DUR="${{3:-0}}"
-FILAMENT="${{4:-0}}"
+PARAMS="${{*:-}}"
+IFS='|' read -r PRINTER FILENAME DUR FILAMENT <<< "$PARAMS"
+PRINTER="${{PRINTER:-}}"
+FILENAME="${{FILENAME:-}}"
+DUR="${{DUR:-0}}"
+FILAMENT="${{FILAMENT:-0}}"
 
 export TS PRINTER FILENAME DUR FILAMENT
 
-JSON=$(python - <<'PY'
+PYBIN="$(command -v python3 || command -v python || true)"
+if [ -z "$PYBIN" ]; then
+  echo "ERROR: python3/python not found; install python3 or update script to not require python."
+  exit 1
+fi
+
+JSON=$("$PYBIN" - <<'PY'
 import json, os, time
 def to_float(v):
     try: return float(v)
