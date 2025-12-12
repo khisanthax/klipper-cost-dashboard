@@ -659,3 +659,12 @@ def prompt_start_macro_insertion(printer_name, config_dir, default_macro=None, d
         return None, None
 
     return target_macro, target_file
+
+def run_macro_integration(printer_name: str, config_dir: str) -> None:
+    """
+    Run both END and START macro integration for a given config directory.
+
+    Thin wrapper over prompt_macro_insertion and prompt_start_macro_insertion.
+    """
+    prompt_macro_insertion(printer_name, config_dir)
+    prompt_start_macro_insertion(printer_name, config_dir)
