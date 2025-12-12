@@ -22,14 +22,15 @@
     {
       "type": "remote",
       "printer_name": "SV07",
-      "cfg_dir": null,
-      "script_path": "/home/biqu/printer_data/config/send_print_cost.sh",
       "host": "biqu@192.168.2.114",
-      "config_dir": "/home/biqu/printer_data/config",
-      "end_macro_name": "END_PRINT",
-      "end_macro_file": "sovol-macros.cfg",
-      "start_macro_name": "START_PRINT",
-      "start_macro_file": "sovol-macros.cfg"
+      "config_dir": "/home/biqu/printer_data/config"
+    },
+    {
+      "type": "local",
+      "printer_name": "Ender5P",
+      "cfg_dir": "/home/khisanthax/printer_Ender3S1_data/config",
+      "script_path": "/home/khisanthax/printer_Ender3S1_data/config/send_print_cost.sh"
     }
-  ]
+  ],
+  "printer_name": "Ender5P"
 }
