@@ -118,8 +118,11 @@ verbose: True
 description: Notify dashboard that a print has started
 gcode:
     # KCD: log job start to dashboard
-    {% set printer_name = printer.name|string %}
-    {% set fname = printer.print_stats.filename|string %}
+    {# Prefer Klipper’s printer.name, but fall back to installer-provided name if empty #}
+    {% set printer_name = printer.name|default("__PRINTER_NAME__", true)|string %}
+
+    {# Prefer print_stats.filename, but fall back to "unknown.gcode" if empty #}
+    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
     {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}
@@ -161,6 +164,8 @@ PRINTER_NAME="${{PRINTER_NAME:-}}"
 FILENAME="${{FILENAME:-}}"
 EST_DURATION="${{EST_DURATION:-0}}"
 EST_FILAMENT="${{EST_FILAMENT:-0}}"
+
+echo "KCD_JOB_START DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' EST_DURATION='$EST_DURATION' EST_FILAMENT='$EST_FILAMENT'"
 
 export PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT
 
@@ -629,8 +634,11 @@ verbose: True
 description: Notify dashboard that a print has started
 gcode:
     # KCD: log job start to dashboard
-    {% set printer_name = printer.name|string %}
-    {% set fname = printer.print_stats.filename|string %}
+    {# Prefer Klipper’s printer.name, but fall back to installer-provided name if empty #}
+    {% set printer_name = printer.name|default("__PRINTER_NAME__", true)|string %}
+
+    {# Prefer print_stats.filename, but fall back to "unknown.gcode" if empty #}
+    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
     {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}
@@ -903,7 +911,6 @@ def update_client_remote(printer_name: str) -> None:
     })
 
     println(f"Remote client update complete for '{printer_name}'.")
-
 
 
 
