@@ -118,24 +118,24 @@ verbose: True
 description: Notify dashboard that a print has started
 gcode:
     # KCD: log job start to dashboard
-    {% set printer_name = printer.name %}
+    {% set printer_name = printer.name|string %}
     {% set fname = printer.print_stats.filename|string %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
-    {% set params = printer_name ~ " " ~ fname ~ " " ~ est_dur ~ " " ~ est_filament %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}
     RUN_SHELL_COMMAND CMD=kcd_job_start PARAMS="{params}"
 
 [gcode_macro PRINT_COST_TEST]
 description: Test sending dummy cost data to dashboard
 gcode:
     # KCD: dummy payload for dashboard test
-    {% set printer_name = printer.name %}
+    {% set printer_name = printer.name|string %}
     {% set fname = "test_file.gcode" %}
     {% set dur = 3600 %}
     {% set filament = 10000 %}
     {% set msg = "Sending cost test: printer=" ~ printer_name ~ ", file=" ~ fname ~ ", dur=" ~ dur ~ ", mm=" ~ filament %}
     RESPOND PREFIX="COST" MSG="{msg}"
-    {% set params = printer_name ~ " " ~ fname ~ " " ~ dur ~ " " ~ filament %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ dur ~ "|" ~ filament %}
     RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{params}"
 """
     cfg = template.replace("__PRINTER_DIR__", printer_dir).replace("__PRINTER_NAME__", printer_name)
@@ -613,24 +613,24 @@ verbose: True
 description: Notify dashboard that a print has started
 gcode:
     # KCD: log job start to dashboard
-    {% set printer_name = printer.name %}
+    {% set printer_name = printer.name|string %}
     {% set fname = printer.print_stats.filename|string %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
-    {% set params = printer_name ~ " " ~ fname ~ " " ~ est_dur ~ " " ~ est_filament %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}
     RUN_SHELL_COMMAND CMD=kcd_job_start PARAMS="{params}"
 
 [gcode_macro PRINT_COST_TEST]
 description: Test sending dummy cost data to dashboard
 gcode:
     # KCD: dummy payload for dashboard test
-    {% set printer_name = printer.name %}
+    {% set printer_name = printer.name|string %}
     {% set fname = "test_file.gcode" %}
     {% set dur = 3600 %}
     {% set filament = 10000 %}
     {% set msg = "Sending cost test: printer=" ~ printer_name ~ ", file=" ~ fname ~ ", dur=" ~ dur ~ ", mm=" ~ filament %}
     RESPOND PREFIX="COST" MSG="{msg}"
-    {% set params = printer_name ~ " " ~ fname ~ " " ~ dur ~ " " ~ filament %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ dur ~ "|" ~ filament %}
     RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{params}"
 """
     return template.replace("__PRINTER_DIR__", printer_dir).replace("__PRINTER_NAME__", printer_name)
@@ -887,6 +887,8 @@ def update_client_remote(printer_name: str) -> None:
     })
 
     println(f"Remote client update complete for '{printer_name}'.")
+
+
 
 
 
