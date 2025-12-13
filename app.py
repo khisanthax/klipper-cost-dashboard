@@ -491,6 +491,7 @@ def projects_page():
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+        redirect_args = {}
         try:
             if action == "create_project":
                 name = request.form.get("name", "").strip()
@@ -622,7 +623,12 @@ def projects_page():
             elif action == "convert_plan_to_manual":
                 project_id = request.form.get("project_id", "").strip()
                 plan_id = request.form.get("plan_id", "").strip()
-                projects.convert_plan_item_to_manual(project_id=project_id, plan_id=plan_id)
+                mj = projects.convert_plan_item_to_manual(project_id=project_id, plan_id=plan_id)
+                redirect_args = {
+                    "msg": "Converted planned item to manual job.",
+                    "edit_project": project_id,
+                    "edit_manual": mj.manual_job_id,
+                }
 
             # Always cleanup after any mutation
             projects.recalculate_all()
@@ -635,7 +641,7 @@ def projects_page():
 
         if error:
             return redirect(url_for("projects_page", error=error))
-        return redirect(url_for("projects_page"))
+        return redirect(url_for("projects_page", **redirect_args))
 
     # GET
     rows, rows_error = load_rows_raw(CSV_FILE)
@@ -643,6 +649,9 @@ def projects_page():
         error = rows_error
 
     error = request.args.get("error") or error
+    message = request.args.get("msg", "").strip()
+    edit_project = request.args.get("edit_project", "").strip()
+    edit_manual = request.args.get("edit_manual", "").strip()
 
     try:
         projects_map, assignments, manual_jobs_by_project, plans_by_project = projects.recalculate_all()
@@ -731,6 +740,9 @@ def projects_page():
     return render_template(
         "projects.html",
         error=error,
+        message=message,
+        edit_project=edit_project,
+        edit_manual=edit_manual,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
         projects_by_id={p["id"]: p for p in project_rows},

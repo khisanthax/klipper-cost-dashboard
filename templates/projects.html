@@ -34,6 +34,12 @@
 </div>
 {% endif %}
 
+{% if message %}
+<div class="alert alert-success" role="alert">
+    {{ message }}
+</div>
+{% endif %}
+
 <!-- Create Project -->
 <div class="card mb-4">
     <div class="card-header">
@@ -245,7 +251,7 @@
                                                     <input type="hidden" name="action" value="delete_manual_job">
                                                     <input type="hidden" name="manual_job_id" value="{{ mj.manual_job_id }}">
                                                 </form>
-                                                <tr>
+                                                <tr id="mj_row_{{ mj.manual_job_id }}">
                                                     <td>
                                                         <div class="mb-1">
                                                             <input form="mj_update_{{ mj.manual_job_id }}" type="text"
@@ -361,7 +367,7 @@
                                             </thead>
                                             <tbody>
                                                 {% for pl in p.planned_items %}
-                                                <tr class="{% if pl.status != 'active' %}table-secondary{% endif %}">
+                                                <tr class="{% if pl.status != 'active' %}table-secondary{% endif %}{% if pl.status != 'active' or pl.converted_to_manual_job_id %} opacity-75{% endif %}">
                                                     <td class="text-break">
                                                         {{ pl.filename }}
                                                         {% if pl.source %}
@@ -398,7 +404,7 @@
                                                                 <input type="hidden" name="plan_id" value="{{ pl.plan_id }}">
                                                                 <button type="submit" class="btn btn-sm btn-outline-success">Fulfill</button>
                                                             </form>
-                                                            <form method="post" class="m-0">
+                                                            <form method="post" class="m-0" onsubmit="this.querySelector('button').disabled=true;">
                                                                 <input type="hidden" name="action" value="convert_plan_to_manual">
                                                                 <input type="hidden" name="project_id" value="{{ p.id }}">
                                                                 <input type="hidden" name="plan_id" value="{{ pl.plan_id }}">
@@ -406,6 +412,12 @@
                                                                     Convert → Manual
                                                                 </button>
                                                             </form>
+                                                            {% endif %}
+                                                            {% if pl.converted_to_manual_job_id %}
+                                                            <a class="btn btn-sm btn-outline-primary"
+                                                                href="{{ url_for('projects_page', edit_project=p.id, edit_manual=pl.converted_to_manual_job_id, msg='Converted planned item to manual job.') }}">
+                                                                Edit Manual
+                                                            </a>
                                                             {% endif %}
                                                             <form method="post" class="m-0">
                                                                 <input type="hidden" name="action" value="delete_plan_item">
@@ -498,3 +510,25 @@
     </div>
 </div>
 {% endblock %}
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const editProject = "{{ (edit_project or '')|e }}";
+        const editManual = "{{ (edit_manual or '')|e }}";
+        if (!editProject || !editManual) return;
+
+        const collapseEl = document.getElementById("proj-" + editProject);
+        if (collapseEl && window.bootstrap && bootstrap.Collapse) {
+            try {
+                const c = bootstrap.Collapse.getOrCreateInstance(collapseEl, { toggle: false });
+                c.show();
+            } catch (e) { }
+        }
+
+        const target = document.getElementById("mj_row_" + editManual);
+        if (target) {
+            target.classList.add("table-warning");
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    });
+</script>
