@@ -532,7 +532,7 @@ def projects_page():
                 filament_g = request.form.get("filament_g", "").strip()
                 cost_override = request.form.get("cost_override", "").strip()
                 notes = request.form.get("notes", "").strip()
-                projects.create_manual_job(
+                mj = projects.create_manual_job(
                     project_id=project_id,
                     title=title,
                     hours=hours,
@@ -540,9 +540,11 @@ def projects_page():
                     cost_override=cost_override,
                     notes=notes,
                 )
+                redirect_args = {"msg": "Manual job added.", "edit_project": project_id}
 
             elif action == "update_manual_job":
                 manual_job_id = request.form.get("manual_job_id", "").strip()
+                project_id = request.form.get("project_id", "").strip()
                 title = request.form.get("title", "").strip()
                 hours = request.form.get("hours", "").strip()
                 filament_g = request.form.get("filament_g", "").strip()
@@ -556,10 +558,12 @@ def projects_page():
                     cost_override=cost_override,
                     notes=notes,
                 )
+                redirect_args = {"msg": "Manual job updated.", "edit_project": project_id, "edit_manual_job_id": manual_job_id}
 
             elif action == "delete_manual_job":
                 manual_job_id = request.form.get("manual_job_id", "").strip()
                 projects.delete_manual_job(manual_job_id)
+                redirect_args = {"msg": "Manual job deleted."}
 
             elif action == "upload_plan_gcode":
                 project_id = request.form.get("project_id", "").strip()
@@ -628,7 +632,7 @@ def projects_page():
                 redirect_args = {
                     "msg": "Converted planned item to manual job.",
                     "edit_project": project_id,
-                    "edit_manual": mj.manual_job_id,
+                    "edit_manual_job_id": mj.manual_job_id,
                 }
 
             # Always cleanup after any mutation
@@ -652,7 +656,7 @@ def projects_page():
     error = request.args.get("error") or error
     message = request.args.get("msg", "").strip()
     edit_project = request.args.get("edit_project", "").strip()
-    edit_manual = request.args.get("edit_manual", "").strip()
+    edit_manual_job_id = request.args.get("edit_manual_job_id", "").strip() or request.args.get("edit_manual", "").strip()
 
     try:
         projects_map, assignments, manual_jobs_by_project, plans_by_project = projects.recalculate_all()
@@ -686,6 +690,7 @@ def projects_page():
                     "cost_override": mj.cost_override,
                     "computed_cost": projects.compute_manual_job_cost(mj),
                     "created_at": mj.created_at,
+                    "updated_at": mj.updated_at,
                     "notes": mj.notes,
                 }
             )
@@ -743,7 +748,7 @@ def projects_page():
         error=error,
         message=message,
         edit_project=edit_project,
-        edit_manual=edit_manual,
+        edit_manual_job_id=edit_manual_job_id,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
         projects_by_id={p["id"]: p for p in project_rows},

@@ -191,38 +191,12 @@
 
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
                                         <h6 class="mb-0">Manual Jobs</h6>
-                                        <span class="text-muted small">Cost is time-only unless an override is set.</span>
-                                    </div>
-
-                                    <div class="card mb-3">
-                                        <div class="card-body">
-                                            <form method="post" class="row g-2 align-items-end">
-                                                <input type="hidden" name="action" value="create_manual_job">
-                                                <input type="hidden" name="project_id" value="{{ p.id }}">
-                                                <div class="col-md-4">
-                                                    <label class="form-label">Description</label>
-                                                    <input type="text" class="form-control" name="title" required>
-                                                </div>
-                                                <div class="col-md-2">
-                                                    <label class="form-label">Hours</label>
-                                                    <input type="text" class="form-control" name="hours" placeholder="1.5" required>
-                                                </div>
-                                                <div class="col-md-2">
-                                                    <label class="form-label">Filament (g)</label>
-                                                    <input type="text" class="form-control" name="filament_g" placeholder="optional">
-                                                </div>
-                                                <div class="col-md-2">
-                                                    <label class="form-label">Cost override ($)</label>
-                                                    <input type="text" class="form-control" name="cost_override" placeholder="optional">
-                                                </div>
-                                                <div class="col-md-2 d-flex">
-                                                    <button type="submit" class="btn btn-outline-primary w-100">Add Manual Job</button>
-                                                </div>
-                                                <div class="col-12">
-                                                    <label class="form-label">Notes (optional)</label>
-                                                    <input type="text" class="form-control" name="notes">
-                                                </div>
-                                            </form>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="text-muted small">Cost is time-only unless an override is set.</span>
+                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                data-kcd-manual-open="create" data-project-id="{{ p.id }}">
+                                                Add Manual Job
+                                            </button>
                                         </div>
                                     </div>
 
@@ -243,54 +217,49 @@
                                             </thead>
                                             <tbody>
                                                 {% for mj in p.manual_jobs %}
-                                                <form id="mj_update_{{ mj.manual_job_id }}" method="post" class="d-none">
-                                                    <input type="hidden" name="action" value="update_manual_job">
-                                                    <input type="hidden" name="manual_job_id" value="{{ mj.manual_job_id }}">
-                                                </form>
-                                                <form id="mj_delete_{{ mj.manual_job_id }}" method="post" class="d-none">
-                                                    <input type="hidden" name="action" value="delete_manual_job">
-                                                    <input type="hidden" name="manual_job_id" value="{{ mj.manual_job_id }}">
-                                                </form>
                                                 <tr id="mj_row_{{ mj.manual_job_id }}">
-                                                    <td>
-                                                        <div class="mb-1">
-                                                            <input form="mj_update_{{ mj.manual_job_id }}" type="text"
-                                                                class="form-control form-control-sm" name="title"
-                                                                value="{{ mj.title }}" required>
-                                                        </div>
-                                                        <div>
-                                                            <input form="mj_update_{{ mj.manual_job_id }}" type="text"
-                                                                class="form-control form-control-sm" name="notes"
-                                                                value="{{ mj.notes }}" placeholder="notes (optional)">
-                                                        </div>
+                                                    <td class="text-break">
+                                                        <div class="fw-semibold">{{ mj.title }}</div>
+                                                        {% if mj.notes %}
+                                                        <div class="text-muted small">{{ mj.notes }}</div>
+                                                        {% endif %}
                                                     </td>
-                                                    <td class="text-end" style="min-width: 90px;">
-                                                        <input form="mj_update_{{ mj.manual_job_id }}" type="text"
-                                                            class="form-control form-control-sm text-end" name="hours"
-                                                            value="{{ mj.hours }}">
+                                                    <td class="text-end text-nowrap">{{ "%.2f"|format(mj.hours|float) }}</td>
+                                                    <td class="text-end text-nowrap">
+                                                        {% if mj.filament_g and mj.filament_g > 0 %}
+                                                        {{ "%.1f"|format(mj.filament_g|float) }}
+                                                        {% else %}
+                                                        —
+                                                        {% endif %}
                                                     </td>
-                                                    <td class="text-end" style="min-width: 110px;">
-                                                        <input form="mj_update_{{ mj.manual_job_id }}" type="text"
-                                                            class="form-control form-control-sm text-end" name="filament_g"
-                                                            value="{{ mj.filament_g }}">
+                                                    <td class="text-end text-nowrap">
+                                                        ${{ "%.2f"|format(mj.computed_cost|float) }}
+                                                        {% if mj.cost_override is not none %}
+                                                        <div class="text-muted small">Override</div>
+                                                        {% endif %}
                                                     </td>
-                                                    <td class="text-end" style="min-width: 130px;">
-                                                        <div class="mb-1">
-                                                            <input form="mj_update_{{ mj.manual_job_id }}" type="text"
-                                                                class="form-control form-control-sm text-end" name="cost_override"
-                                                                value="{{ mj.cost_override if mj.cost_override is not none else '' }}"
-                                                                placeholder="override (optional)">
-                                                        </div>
-                                                        <div class="text-muted small">Used: ${{ "%.2f"|format(mj.computed_cost) }}</div>
-                                                    </td>
-                                                    <td class="text-nowrap" style="min-width: 180px;">{{ mj.created_at }}</td>
+                                                    <td class="text-nowrap">{{ mj.created_at }}</td>
                                                     <td class="text-nowrap">
                                                         <div class="d-flex gap-2">
-                                                            <button form="mj_update_{{ mj.manual_job_id }}" type="submit"
-                                                                class="btn btn-sm btn-outline-primary">Save</button>
-                                                            <button form="mj_delete_{{ mj.manual_job_id }}" type="submit"
-                                                                class="btn btn-sm btn-outline-danger"
-                                                                onclick="return confirm('Delete this manual job?')">Delete</button>
+                                                            <button type="button" class="btn btn-sm btn-outline-primary"
+                                                                data-kcd-manual-open="edit"
+                                                                data-project-id="{{ p.id }}"
+                                                                data-manual-job-id="{{ mj.manual_job_id }}"
+                                                                data-title="{{ mj.title|e }}"
+                                                                data-hours="{{ mj.hours }}"
+                                                                data-filament-g="{{ mj.filament_g }}"
+                                                                data-cost-override="{{ mj.cost_override if mj.cost_override is not none else '' }}"
+                                                                data-notes="{{ mj.notes|e }}">
+                                                                Edit
+                                                            </button>
+                                                            <form method="post" class="m-0">
+                                                                <input type="hidden" name="action" value="delete_manual_job">
+                                                                <input type="hidden" name="manual_job_id" value="{{ mj.manual_job_id }}">
+                                                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                                    onclick="return confirm('Delete this manual job?')">
+                                                                    Delete
+                                                                </button>
+                                                            </form>
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -333,16 +302,16 @@
                                                             <div class="fw-semibold">${{ "%.2f"|format(p.projected.cost) }}</div>
                                                         </div>
                                                         <div class="d-flex justify-content-between">
-                                                            <div class="text-muted small">Actual total (history)</div>
-                                                            <div class="fw-semibold">${{ "%.2f"|format(p.actual_tracked_cost) }}</div>
+                                                            <div class="text-muted small">Actual total (tracked + manual)</div>
+                                                            <div class="fw-semibold">${{ "%.2f"|format(p.totals.cost) }}</div>
                                                         </div>
                                                         <div class="d-flex justify-content-between">
                                                             <div class="text-muted small">Variance (Actual − Projected)</div>
-                                                            <div class="fw-semibold">${{ "%.2f"|format(p.actual_tracked_cost - p.projected.cost) }}</div>
+                                                            <div class="fw-semibold">${{ "%.2f"|format(p.totals.cost - p.projected.cost) }}</div>
                                                         </div>
-                                                        {% if p.actual_manual_cost and p.actual_manual_cost > 0 %}
-                                                        <div class="text-muted small mt-2">Manual jobs in project: ${{ "%.2f"|format(p.actual_manual_cost) }}</div>
-                                                        {% endif %}
+                                                        <div class="text-muted small mt-2">
+                                                            Tracked: ${{ "%.2f"|format(p.actual_tracked_cost) }} · Manual: ${{ "%.2f"|format(p.actual_manual_cost) }}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -415,7 +384,7 @@
                                                             {% endif %}
                                                             {% if pl.converted_to_manual_job_id %}
                                                             <a class="btn btn-sm btn-outline-primary"
-                                                                href="{{ url_for('projects_page', edit_project=p.id, edit_manual=pl.converted_to_manual_job_id, msg='Converted planned item to manual job.') }}">
+                                                                href="{{ url_for('projects_page', edit_project=p.id, edit_manual_job_id=pl.converted_to_manual_job_id) }}">
                                                                 Edit Manual
                                                             </a>
                                                             {% endif %}
@@ -509,13 +478,12 @@
         {% endif %}
     </div>
 </div>
-{% endblock %}
 
 <script>
     document.addEventListener("DOMContentLoaded", function () {
         const editProject = "{{ (edit_project or '')|e }}";
-        const editManual = "{{ (edit_manual or '')|e }}";
-        if (!editProject || !editManual) return;
+        const editManualJobId = "{{ (edit_manual_job_id or '')|e }}";
+        if (!editProject || !editManualJobId) return;
 
         const collapseEl = document.getElementById("proj-" + editProject);
         if (collapseEl && window.bootstrap && bootstrap.Collapse) {
@@ -525,10 +493,128 @@
             } catch (e) { }
         }
 
-        const target = document.getElementById("mj_row_" + editManual);
-        if (target) {
-            target.classList.add("table-warning");
-            target.scrollIntoView({ behavior: "smooth", block: "center" });
+        const editButton = document.querySelector(`[data-kcd-manual-open="edit"][data-manual-job-id="${editManualJobId}"]`);
+        if (editButton) {
+            editButton.click();
+        } else {
+            const target = document.getElementById("mj_row_" + editManualJobId);
+            if (target) {
+                target.classList.add("table-warning");
+                target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
         }
     });
 </script>
+
+<!-- Manual Job Modal -->
+<div class="modal fade" id="kcdManualJobModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form method="post" id="kcdManualJobForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="kcdManualJobTitle">Manual Job</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" id="kcdManualJobAction" value="create_manual_job">
+                    <input type="hidden" name="project_id" id="kcdManualProjectId" value="">
+                    <input type="hidden" name="manual_job_id" id="kcdManualJobId" value="">
+
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Description</label>
+                            <input type="text" class="form-control" name="title" id="kcdManualTitle" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Hours</label>
+                            <input type="text" class="form-control" name="hours" id="kcdManualHours" required>
+                            <div class="text-muted small">Must be &gt; 0</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Filament (g)</label>
+                            <input type="text" class="form-control" name="filament_g" id="kcdManualFilamentG" placeholder="optional">
+                            <div class="text-muted small">Optional; must be ≥ 0</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Cost override ($)</label>
+                            <input type="text" class="form-control" name="cost_override" id="kcdManualCostOverride" placeholder="optional">
+                            <div class="text-muted small">Optional; must be ≥ 0</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notes</label>
+                            <textarea class="form-control" name="notes" id="kcdManualNotes" rows="2" placeholder="optional"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="kcdManualSaveBtn">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        function getModal() {
+            const el = document.getElementById("kcdManualJobModal");
+            if (!el || !window.bootstrap || !bootstrap.Modal) return null;
+            return bootstrap.Modal.getOrCreateInstance(el, { focus: true });
+        }
+
+        function openManualModal(mode, data) {
+            const modal = getModal();
+            if (!modal) return;
+
+            const actionEl = document.getElementById("kcdManualJobAction");
+            const projectEl = document.getElementById("kcdManualProjectId");
+            const idEl = document.getElementById("kcdManualJobId");
+            const titleEl = document.getElementById("kcdManualTitle");
+            const hoursEl = document.getElementById("kcdManualHours");
+            const filamentEl = document.getElementById("kcdManualFilamentG");
+            const overrideEl = document.getElementById("kcdManualCostOverride");
+            const notesEl = document.getElementById("kcdManualNotes");
+            const headerEl = document.getElementById("kcdManualJobTitle");
+
+            projectEl.value = data.projectId || "";
+
+            if (mode === "edit") {
+                actionEl.value = "update_manual_job";
+                idEl.value = data.manualJobId || "";
+                headerEl.textContent = "Edit Manual Job";
+            } else {
+                actionEl.value = "create_manual_job";
+                idEl.value = "";
+                headerEl.textContent = "Add Manual Job";
+            }
+
+            titleEl.value = data.title || "";
+            hoursEl.value = (data.hours ?? "").toString();
+            filamentEl.value = (data.filamentG ?? "").toString();
+            overrideEl.value = (data.costOverride ?? "").toString();
+            notesEl.value = data.notes || "";
+
+            modal.show();
+            setTimeout(() => titleEl.focus(), 50);
+        }
+
+        document.addEventListener("click", function (e) {
+            const btn = e.target.closest("[data-kcd-manual-open]");
+            if (!btn) return;
+            const mode = btn.getAttribute("data-kcd-manual-open");
+            const data = {
+                projectId: btn.getAttribute("data-project-id") || "",
+                manualJobId: btn.getAttribute("data-manual-job-id") || "",
+                title: btn.getAttribute("data-title") || "",
+                hours: btn.getAttribute("data-hours") || "",
+                filamentG: btn.getAttribute("data-filament-g") || "",
+                costOverride: btn.getAttribute("data-cost-override") || "",
+                notes: btn.getAttribute("data-notes") || "",
+            };
+            openManualModal(mode, data);
+        });
+    })();
+</script>
+
+{% endblock %}

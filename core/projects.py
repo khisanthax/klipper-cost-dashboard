@@ -56,6 +56,7 @@ class ManualJob:
     filament_g: float = 0.0
     cost_override: Optional[float] = None
     created_at: str = ""
+    updated_at: str = ""
     notes: str = ""
 
 
@@ -206,6 +207,7 @@ def load_manual_jobs() -> Dict[str, List[ManualJob]]:
                 cost_override = None
 
         created_at = str(item.get("created_at") or "").strip()
+        updated_at = str(item.get("updated_at") or "").strip()
         notes = str(item.get("notes") or "")
 
         mj = ManualJob(
@@ -216,6 +218,7 @@ def load_manual_jobs() -> Dict[str, List[ManualJob]]:
             filament_g=filament_g,
             cost_override=cost_override,
             created_at=created_at,
+            updated_at=updated_at,
             notes=notes,
         )
         jobs_by_project.setdefault(pid, []).append(mj)
@@ -236,6 +239,7 @@ def _save_manual_jobs(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
                     "filament_g": float(j.filament_g or 0.0),
                     "cost_override": j.cost_override,
                     "created_at": j.created_at,
+                    "updated_at": j.updated_at,
                     "notes": j.notes,
                 }
             )
@@ -314,6 +318,8 @@ def create_manual_job(
             filament_f = float(filament_g)
         except (TypeError, ValueError):
             filament_f = 0.0
+    if filament_f < 0:
+        raise ValueError("Filament grams must be >= 0")
 
     override_f: Optional[float]
     if cost_override is None or str(cost_override).strip() == "":
@@ -323,6 +329,8 @@ def create_manual_job(
             override_f = float(cost_override)
         except (TypeError, ValueError):
             override_f = None
+    if override_f is not None and override_f < 0:
+        raise ValueError("Cost override must be >= 0")
 
     mj = ManualJob(
         manual_job_id=uuid.uuid4().hex,
@@ -332,6 +340,7 @@ def create_manual_job(
         filament_g=filament_f,
         cost_override=override_f,
         created_at=_iso_now(),
+        updated_at=_iso_now(),
         notes=str(notes or ""),
     )
 
@@ -370,6 +379,8 @@ def update_manual_job(
             filament_f = float(filament_g)
         except (TypeError, ValueError):
             filament_f = 0.0
+    if filament_f < 0:
+        raise ValueError("Filament grams must be >= 0")
 
     override_f: Optional[float]
     if cost_override is None or str(cost_override).strip() == "":
@@ -379,6 +390,8 @@ def update_manual_job(
             override_f = float(cost_override)
         except (TypeError, ValueError):
             override_f = None
+    if override_f is not None and override_f < 0:
+        raise ValueError("Cost override must be >= 0")
 
     jobs_by_project = load_manual_jobs()
     for pid, jobs in jobs_by_project.items():
@@ -392,6 +405,7 @@ def update_manual_job(
                     filament_g=filament_f,
                     cost_override=override_f,
                     created_at=j.created_at,
+                    updated_at=_iso_now(),
                     notes=str(notes or ""),
                 )
                 jobs[idx] = updated
