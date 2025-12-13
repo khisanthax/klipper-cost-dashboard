@@ -385,6 +385,9 @@
                                                         {% else %}
                                                         <span class="badge bg-secondary">Fulfilled</span>
                                                         {% endif %}
+                                                        {% if pl.converted_to_manual_job_id %}
+                                                        <div class="text-muted small">Converted</div>
+                                                        {% endif %}
                                                     </td>
                                                     <td class="text-nowrap">{{ pl.created_at }}</td>
                                                     <td class="text-nowrap">
@@ -394,6 +397,14 @@
                                                                 <input type="hidden" name="action" value="fulfill_plan_item">
                                                                 <input type="hidden" name="plan_id" value="{{ pl.plan_id }}">
                                                                 <button type="submit" class="btn btn-sm btn-outline-success">Fulfill</button>
+                                                            </form>
+                                                            <form method="post" class="m-0">
+                                                                <input type="hidden" name="action" value="convert_plan_to_manual">
+                                                                <input type="hidden" name="project_id" value="{{ p.id }}">
+                                                                <input type="hidden" name="plan_id" value="{{ pl.plan_id }}">
+                                                                <button type="submit" class="btn btn-sm btn-outline-primary">
+                                                                    Convert → Manual
+                                                                </button>
                                                             </form>
                                                             {% endif %}
                                                             <form method="post" class="m-0">

@@ -612,6 +612,11 @@ def projects_page():
                 if plan_id:
                     projects.delete_plan_item(plan_id)
 
+            elif action == "convert_plan_to_manual":
+                project_id = request.form.get("project_id", "").strip()
+                plan_id = request.form.get("plan_id", "").strip()
+                projects.convert_plan_item_to_manual(project_id=project_id, plan_id=plan_id)
+
             # Always cleanup after any mutation
             projects.recalculate_all()
         except projects.ProjectsDataError as e:
@@ -690,6 +695,7 @@ def projects_page():
                     "est_cost": pl.est_cost,
                     "status": pl.status,
                     "source": pl.source,
+                    "converted_to_manual_job_id": pl.converted_to_manual_job_id,
                 }
             )
 

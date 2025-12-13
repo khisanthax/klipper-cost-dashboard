@@ -71,6 +71,7 @@ class PlannedItem:
     status: str = "active"  # "active" | "fulfilled"
     source: str = ""
     notes: str = ""
+    converted_to_manual_job_id: Optional[str] = None
 
 
 def _ensure_data_dir() -> None:
@@ -461,6 +462,8 @@ def load_plans() -> Dict[str, List[PlannedItem]]:
         status = str(item.get("status") or "active").strip().lower()
         source = str(item.get("source") or "").strip()
         notes = str(item.get("notes") or "")
+        converted_to_manual_job_id = item.get("converted_to_manual_job_id", None)
+        converted_to_manual_job_id = str(converted_to_manual_job_id).strip() if converted_to_manual_job_id else None
         if status not in ("active", "fulfilled"):
             status = "active"
 
@@ -499,6 +502,7 @@ def load_plans() -> Dict[str, List[PlannedItem]]:
                 status=status,
                 source=source,
                 notes=notes,
+                converted_to_manual_job_id=converted_to_manual_job_id,
             )
         )
 
@@ -521,6 +525,7 @@ def _save_plans(by_project: Dict[str, List[PlannedItem]]) -> None:
                     "status": p.status,
                     "source": p.source,
                     "notes": p.notes,
+                    "converted_to_manual_job_id": p.converted_to_manual_job_id,
                 }
             )
     _write_json(PLANS_FILE, payload)
@@ -564,6 +569,7 @@ def create_plan_item(
         status="active",
         source=str(source or "").strip(),
         notes=str(notes or ""),
+        converted_to_manual_job_id=None,
     )
 
     plans = load_plans()
@@ -595,11 +601,96 @@ def set_plan_status(plan_id: str, status: str) -> None:
                     status=status,
                     source=it.source,
                     notes=it.notes,
+                    converted_to_manual_job_id=it.converted_to_manual_job_id,
                 )
                 changed = True
                 break
     if changed:
         _save_plans(plans)
+
+
+def _set_plan_converted(plan_id: str, manual_job_id: str) -> None:
+    pid = str(plan_id or "").strip()
+    if not pid:
+        return
+    manual_job_id = str(manual_job_id or "").strip()
+    if not manual_job_id:
+        return
+
+    plans = load_plans()
+    changed = False
+    for proj_id, items in plans.items():
+        for idx, it in enumerate(items):
+            if it.plan_id == pid:
+                items[idx] = PlannedItem(
+                    plan_id=it.plan_id,
+                    project_id=it.project_id,
+                    filename=it.filename,
+                    created_at=it.created_at,
+                    est_time_s=it.est_time_s,
+                    est_filament_g=it.est_filament_g,
+                    est_cost=it.est_cost,
+                    status="fulfilled",
+                    source=it.source,
+                    notes=it.notes,
+                    converted_to_manual_job_id=manual_job_id,
+                )
+                changed = True
+                break
+    if changed:
+        _save_plans(plans)
+
+
+def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
+    """
+    Convert a planned item into a manual job for the same project.
+
+    - Creates a manual job with hours derived from est_time_s.
+    - Uses planned filename as the title.
+    - Copies filament grams if present.
+    - Does not force cost_override (manual cost remains time-based unless overridden by user).
+    - Marks the planned item as fulfilled and stores converted_to_manual_job_id.
+
+    Idempotency:
+    - If planned item already has converted_to_manual_job_id, raises ValueError.
+    """
+    pid = str(project_id or "").strip()
+    if not pid:
+        raise ValueError("Project is required")
+    plan_id = str(plan_id or "").strip()
+    if not plan_id:
+        raise ValueError("Planned item is required")
+
+    projects_map = load_projects()
+    if pid not in projects_map:
+        raise ValueError("Project not found")
+
+    plans = load_plans()
+    plan: Optional[PlannedItem] = None
+    for it in plans.get(pid, []):
+        if it.plan_id == plan_id:
+            plan = it
+            break
+    if not plan:
+        raise ValueError("Planned item not found")
+    if plan.converted_to_manual_job_id:
+        raise ValueError("This planned item was already converted to a manual job.")
+
+    hours = float(plan.est_time_s or 0) / 3600.0
+    title = plan.filename
+    notes = f"Converted from planned item {plan.plan_id}"
+    mj = create_manual_job(
+        project_id=pid,
+        title=title,
+        hours=hours,
+        filament_g=plan.est_filament_g if plan.est_filament_g is not None else None,
+        cost_override=None,
+        notes=notes,
+    )
+
+    # Only mark the plan fulfilled if manual job creation succeeded.
+    _set_plan_converted(plan.plan_id, mj.manual_job_id)
+    return mj
 
 
 def delete_plan_item(plan_id: str) -> None:
