@@ -13,6 +13,7 @@ import re
 import secrets
 import tempfile
 import shutil
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
 import installer_macro
@@ -37,6 +38,56 @@ def println(msg: str = "") -> None:
     import sys
     print(msg)
     sys.stdout.flush()
+
+
+def _safe_input(prompt: str) -> str:
+    try:
+        return input(prompt)
+    except (EOFError, KeyboardInterrupt):
+        println("\nInput cancelled. Exiting.")
+        sys.exit(1)
+
+
+def _format_valid_options(options: list[int]) -> str:
+    if not options:
+        return ""
+    if len(options) == 1:
+        return str(options[0])
+    return ", ".join(map(str, options[:-1])) + f", or {options[-1]}"
+
+
+def prompt_yes_no(question: str, default: bool = True) -> bool:
+    prompt = "[Y/n]" if default else "[y/N]"
+    while True:
+        ans = _safe_input(f"{question} {prompt}: ").strip().lower()
+        if ans == "":
+            return default
+        if ans in ("y", "yes"):
+            return True
+        if ans in ("n", "no"):
+            return False
+        println("Invalid input. Please enter Y or N.")
+
+
+def prompt_choice(prompt: str, valid, allow_empty: bool = False, cancel_inputs: Optional[list[str]] = None) -> Optional[int]:
+    options = list(valid)
+    invalid_msg = f"That's not an option. Please choose {_format_valid_options(options)}."
+    cancel_set = {c.lower() for c in cancel_inputs} if cancel_inputs else set()
+
+    while True:
+        ans = _safe_input(prompt).strip()
+        if ans == "" and allow_empty:
+            return None
+        if ans.lower() in cancel_set:
+            return None
+        try:
+            choice = int(ans)
+        except ValueError:
+            println(invalid_msg)
+            continue
+        if choice in options:
+            return choice
+        println(invalid_msg)
 
 
 def load_state(key: str, default: Any = "") -> Any:
@@ -430,8 +481,7 @@ def _load_secret_api_key() -> str:
 def master_setup(master_and_client: bool = False) -> None:
     println("\n=== Master Setup ===")
 
-    use_auto = input("Use auto mode (reuse saved master settings)? [Y/n]: ").strip().lower()
-    auto_mode = use_auto in ("", "y", "yes")
+    auto_mode = prompt_yes_no("Use auto mode (reuse saved master settings)?", default=True)
 
     current_host = load_state("master_host", "localhost")
     current_port = str(load_state("master_port", DEFAULT_PORT))
@@ -455,12 +505,12 @@ def master_setup(master_and_client: bool = False) -> None:
         if auto_mode:
             println("[auto] Saved master settings missing; switching to manual input.")
         auto_mode = False
-        host = input(f"Master host [{current_host}]: ").strip() or current_host
-        port_str = input(f"Master port [{current_port}]: ").strip() or current_port
+        host = _safe_input(f"Master host [{current_host}]: ").strip() or current_host
+        port_str = _safe_input(f"Master port [{current_port}]: ").strip() or current_port
         url_default = current_url or f"http://{host}:{port_str}"
-        url = input(f"Master URL [{url_default}]: ").strip() or url_default
-        service_name = input(f"Service name [{current_service}]: ").strip() or current_service
-        api_key = input(f"API key for printers [{default_api}]: ").strip() or default_api
+        url = _safe_input(f"Master URL [{url_default}]: ").strip() or url_default
+        service_name = _safe_input(f"Service name [{current_service}]: ").strip() or current_service
+        api_key = _safe_input(f"API key for printers [{default_api}]: ").strip() or default_api
 
     try:
         port = int(port_str)
@@ -491,8 +541,7 @@ def master_setup(master_and_client: bool = False) -> None:
 def install_client_local() -> None:
     println("\n=== Local Client Installation ===")
 
-    use_auto = input("Use auto mode (reuse saved settings and printer dir)? [Y/n]: ").strip().lower()
-    auto_mode = use_auto in ("", "y", "yes")
+    auto_mode = prompt_yes_no("Use auto mode (reuse saved settings and printer dir)?", default=True)
 
     master_url = load_state("master_url", "http://localhost:5000")
     state_api = load_state("api_key", "")
@@ -512,15 +561,17 @@ def install_client_local() -> None:
             println("[auto] Saved settings incomplete; switching to manual input.")
             auto_mode = False
     if not auto_mode:
-        master_url = input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
-        api_key = input(f"API key for this printer [{default_api}]: ").strip() or default_api
+        master_url = _safe_input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
+        api_key = _safe_input(f"API key for this printer [{default_api}]: ").strip() or default_api
 
-        printer_name = input("Printer name for dashboard (e.g., SV08): ").strip()
+        printer_name = _safe_input("Printer name for dashboard (e.g., SV08): ").strip()
         if not printer_name:
             println("Printer name is required; aborting.")
             return
 
-        printer_dir = input(f"Printer config directory (folder with printer.cfg) [{default_dir}]: ").strip() or default_dir
+        printer_dir = _safe_input(
+            f"Printer config directory (folder with printer.cfg) [{default_dir}]: "
+        ).strip() or default_dir
         if not os.path.isdir(printer_dir):
             println(f"Directory does not exist: {printer_dir}")
             return
@@ -589,8 +640,9 @@ def install_client_remote() -> None:
     """
     println("\n=== Remote Client Installation ===")
 
-    use_auto = input("Use auto mode (use saved master settings and known remote printers)? [Y/n]: ").strip().lower()
-    auto_mode = use_auto in ("", "y", "yes")
+    auto_mode = prompt_yes_no(
+        "Use auto mode (use saved master settings and known remote printers)?", default=True
+    )
 
     master_url = load_state("master_url", "http://localhost:5000")
     state_api = load_state("api_key", "")
@@ -605,8 +657,8 @@ def install_client_remote() -> None:
             println("[auto] Saved master URL/API missing; falling back to manual entry.")
         auto_mode = False
         println(f"Current master URL: {master_url}")
-        master_url = input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
-        api_key = input(f"API key for this printer [{default_api}]: ").strip() or default_api
+        master_url = _safe_input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
+        api_key = _safe_input(f"API key for this printer [{default_api}]: ").strip() or default_api
 
     remote = ""
     printer_name = ""
@@ -619,16 +671,16 @@ def install_client_remote() -> None:
         println("\n[auto] Registered remote printers:")
         for i, c in enumerate(remote_clients, 1):
             println(f"  {i}) {c.get('printer_name')} @ {c.get('host')} ({c.get('config_dir')})")
-        choice = input(f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: ").strip()
-        if choice.isdigit():
-            idx = int(choice)
-            if 1 <= idx <= len(remote_clients):
-                entry = remote_clients[idx - 1]
-                remote = entry.get("host", "")
-                printer_name = entry.get("printer_name", "")
-                printer_dir = entry.get("config_dir", "")
-            else:
-                auto_mode = False
+        choice = prompt_choice(
+            f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: ",
+            range(1, len(remote_clients) + 1),
+            allow_empty=True,
+        )
+        if choice:
+            entry = remote_clients[choice - 1]
+            remote = entry.get("host", "")
+            printer_name = entry.get("printer_name", "")
+            printer_dir = entry.get("config_dir", "")
         else:
             auto_mode = False
     elif auto_mode:
@@ -636,12 +688,12 @@ def install_client_remote() -> None:
         auto_mode = False
 
     if not auto_mode:
-        remote = input("Remote host (user@hostname): ").strip()
+        remote = _safe_input("Remote host (user@hostname): ").strip()
         if not remote:
             println("Remote host is required; aborting.")
             return
 
-        printer_name = input("Printer name for dashboard (e.g., SV08): ").strip()
+        printer_name = _safe_input("Printer name for dashboard (e.g., SV08): ").strip()
         if not printer_name:
             println("Printer name is required; aborting.")
             return
@@ -660,15 +712,27 @@ def install_client_remote() -> None:
             println("\nFound the following remote printer_data/config candidates:")
             for i, path in enumerate(candidates, 1):
                 println(f"  {i}) {path}")
-            choice = input(f"Select [1-{len(candidates)}] or enter a custom path: ").strip()
-            if choice.isdigit():
-                idx = int(choice)
-                if 1 <= idx <= len(candidates):
-                    printer_dir = candidates[idx - 1]
-            if not printer_dir:
-                printer_dir = choice or candidates[0]
+            valid_range = list(range(1, len(candidates) + 1))
+            while True:
+                choice = _safe_input(
+                    f"Select [1-{len(candidates)}] or enter a custom path: "
+                ).strip()
+                if choice == "":
+                    printer_dir = candidates[0]
+                    break
+                if choice.isdigit():
+                    idx = int(choice)
+                    if idx in valid_range:
+                        printer_dir = candidates[idx - 1]
+                        break
+                    println(
+                        f"That's not an option. Please choose {_format_valid_options(valid_range)}."
+                    )
+                    continue
+                printer_dir = choice
+                break
         else:
-            printer_dir = input("Remote printer config dir (folder with printer.cfg): ").strip()
+            printer_dir = _safe_input("Remote printer config dir (folder with printer.cfg): ").strip()
 
     if not printer_dir:
         println("No remote config directory provided; aborting.")
@@ -857,8 +921,8 @@ def uninstall_master() -> None:
     Remove master-related installer state and optionally Docker/systemd artifacts.
     """
     println("\n=== Uninstall MASTER (dashboard) ===")
-    confirm = input("This will clear saved master settings. Continue? [y/N]: ").strip().lower()
-    if confirm not in ("y", "yes"):
+    confirm = prompt_yes_no("This will clear saved master settings. Continue?", default=False)
+    if not confirm:
         println("Master uninstall cancelled.")
         return
 
@@ -868,8 +932,8 @@ def uninstall_master() -> None:
     removed_files = []
     for candidate in ("docker-compose.yml", "docker-compose.yaml", "Dockerfile", "/etc/systemd/system/print-cost-dashboard.service"):
         if os.path.exists(candidate):
-            ans = input(f"Delete {candidate}? [y/N]: ").strip().lower()
-            if ans in ("y", "yes"):
+            ans = prompt_yes_no(f"Delete {candidate}?", default=False)
+            if ans:
                 try:
                     os.remove(candidate)
                     removed_files.append(candidate)

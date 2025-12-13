@@ -5,7 +5,7 @@ Print Cost Dashboard Installer
 
 Refactored to use modular installer package.
 """
-from installer.utils import println, load_state, save_state
+from installer.utils import println, load_state, save_state, prompt_choice, prompt_yes_no
 from installer.setup import master_setup, install_client_local, install_client_remote
 from installer.utils import (
     get_client_registry,
@@ -64,16 +64,14 @@ def master_install_menu():
     println("  1) Install MASTER only")
     println("  2) Install MASTER + CLIENT on this machine")
     println("  3) Back")
-    choice = input("Select option [1-3]: ").strip()
-    
-    if choice == "1":
+    choice = prompt_choice("Select option [1-3]: ", range(1, 4))
+
+    if choice == 1:
         master_setup(master_and_client=False)
-    elif choice == "2":
+    elif choice == 2:
         master_setup(master_and_client=True)
-    elif choice == "3":
+    elif choice == 3:
         return
-    else:
-        println("Invalid choice.")
 
 
 def client_install_menu():
@@ -83,18 +81,16 @@ def client_install_menu():
         println("  1) Install CLIENT on THIS machine (local)")
         println("  2) Install CLIENT on REMOTE machine via SSH")
         println("  3) Back")
-        choice = input("Select option [1-3]: ").strip()
-        
-        if choice == "1":
+        choice = prompt_choice("Select option [1-3]: ", range(1, 4), cancel_inputs=["b"])
+
+        if choice == 1:
             install_client_local()
             continue
-        elif choice == "2":
+        elif choice == 2:
             install_client_remote()
             continue
-        elif choice == "3" or choice.lower() == "b":
+        elif choice in (3, None):
             return
-        else:
-            println("Invalid choice.")
 
 
 def uninstall_main_menu():
@@ -109,12 +105,13 @@ def uninstall_main_menu():
             desc = c.get("printer_name", "Unknown")
             extra = c.get("cfg_dir") if client_type == "local" else c.get("host")
             println(f"  {i}) {desc} ({extra})")
-        choice = input(f"Select [1-{len(clients)}] (or Enter to cancel): ").strip()
-        if not choice or not choice.isdigit():
-            return None
-        idx = int(choice)
-        if 1 <= idx <= len(clients):
-            return clients[idx - 1].get("printer_name")
+        choice = prompt_choice(
+            f"Select [1-{len(clients)}] (or Enter to cancel): ",
+            range(1, len(clients) + 1),
+            allow_empty=True,
+        )
+        if choice:
+            return clients[choice - 1].get("printer_name")
         return None
 
     while True:
@@ -125,30 +122,28 @@ def uninstall_main_menu():
         println("  4) Update LOCAL client")
         println("  5) Update REMOTE client")
         println("  6) Back")
-        choice = input("Select option [1-6]: ").strip()
+        choice = prompt_choice("Select option [1-6]: ", range(1, 7), cancel_inputs=["b"])
 
-        if choice == "1":
+        if choice == 1:
             uninstall_master()
-        elif choice == "2":
+        elif choice == 2:
             pname = pick_client("local")
             if pname:
                 uninstall_client_local(pname)
-        elif choice == "3":
+        elif choice == 3:
             pname = pick_client("remote")
             if pname:
                 uninstall_client_remote(pname)
-        elif choice == "4":
+        elif choice == 4:
             pname = pick_client("local")
             if pname:
                 update_client_local(pname)
-        elif choice == "5":
+        elif choice == 5:
             pname = pick_client("remote")
             if pname:
                 update_client_remote(pname)
-        elif choice == "6" or choice.lower() == "b":
+        elif choice in (6, None):
             return
-        else:
-            println("Invalid choice.")
 
 
 def settings_menu():
@@ -159,18 +154,16 @@ def settings_menu():
         println("  2) List registered clients")
         println("  3) Reset installer state")
         println("  4) Back")
-        choice = input("Select option [1-4]: ").strip()
-        
-        if choice == "1":
+        choice = prompt_choice("Select option [1-4]: ", range(1, 5), cancel_inputs=["b"])
+
+        if choice == 1:
             show_current_settings()
-        elif choice == "2":
+        elif choice == 2:
             list_registered_clients()
-        elif choice == "3":
+        elif choice == 3:
             reset_install_state()
-        elif choice == "4" or choice.lower() == "b":
+        elif choice in (4, None):
             return
-        else:
-            println("Invalid choice.")
 
 
 def reset_install_state():
@@ -178,8 +171,8 @@ def reset_install_state():
     println("\n=== Reset Installer State ===")
     println("This will clear all remembered paths, URLs, and API keys.")
     println("It will NOT delete your data/print_costs.csv or data/settings.json.")
-    confirm = input("Are you sure? [y/N]: ").strip().lower()
-    if confirm in ("y", "yes"):
+    confirm = prompt_yes_no("Are you sure?", default=False)
+    if confirm:
         if os.path.exists(STATE_FILE):
             try:
                 os.remove(STATE_FILE)
@@ -204,21 +197,19 @@ def main():
         println("  3) Uninstall (master or client)")
         println("  4) Settings")
         println("  5) Exit")
-        choice = input("Select option [1-5]: ").strip()
-        
-        if choice == "1":
+        choice = prompt_choice("Select option [1-5]: ", range(1, 6), cancel_inputs=["b"])
+
+        if choice == 1:
             master_install_menu()
-        elif choice == "2":
+        elif choice == 2:
             client_install_menu()
-        elif choice == "3":
+        elif choice == 3:
             uninstall_main_menu()
-        elif choice == "4":
+        elif choice == 4:
             settings_menu()
-        elif choice == "5" or choice.lower() == "b":
+        elif choice in (5, None):
             println("Goodbye.")
             break
-        else:
-            println("Invalid choice. Try again.")
 
 
 if __name__ == "__main__":
