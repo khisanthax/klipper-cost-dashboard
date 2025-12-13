@@ -20,32 +20,18 @@
 
 <body>
     <!-- Navigation Header -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('index') }}">Klipper Cost Dashboard</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#kcdNav"
-                aria-controls="kcdNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="kcdNav">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/' %}active{% endif %}"
-                            href="{{ url_for('index') }}">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path.startswith('/reports') %}active{% endif %}"
-                            href="{{ url_for('reports_page') }}">Reports</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path.startswith('/projects') %}active{% endif %}"
-                            href="{{ url_for('projects_page') }}">Projects</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path.startswith('/settings') %}active{% endif %}"
-                            href="{{ url_for('settings_page') }}">Settings</a>
-                    </li>
-                </ul>
+            <div class="d-flex flex-wrap gap-2 ms-auto">
+                <a class="btn btn-sm btn-outline-light {% if request.path == '/' %}active{% endif %}"
+                    href="{{ url_for('index') }}">Dashboard</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/reports') %}active{% endif %}"
+                    href="{{ url_for('reports_page') }}">Reports</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/projects') %}active{% endif %}"
+                    href="{{ url_for('projects_page') }}">Projects</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
+                    href="{{ url_for('settings_page') }}">Settings</a>
             </div>
         </div>
     </nav>
