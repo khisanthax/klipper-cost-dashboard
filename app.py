@@ -25,6 +25,7 @@ from core import profiles
 from core import rates
 from core import pricing
 from core import live
+from core import projects
 
 app = Flask(__name__)
 
@@ -464,6 +465,113 @@ def reports_page():
         start_date=request.args.get("start_date", ""),
         end_date=request.args.get("end_date", ""),
         error=error,
+    )
+
+
+@app.route("/projects", methods=["GET", "POST"])
+def projects_page():
+    """
+    Projects page:
+    - Projects are stored in data/projects.json
+    - Job membership is stored in data/project_assignments.json (job_key -> project_id)
+    - Deleting a project unassigns jobs (no CSV rows are deleted)
+    """
+    error = None
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        try:
+            if action == "create_project":
+                name = request.form.get("name", "").strip()
+                notes = request.form.get("notes", "").strip()
+                projects.create_project(name=name, notes=notes)
+
+            elif action == "update_project":
+                project_id = request.form.get("project_id", "").strip()
+                name = request.form.get("name", "").strip()
+                notes = request.form.get("notes", "").strip()
+                projects.update_project(project_id=project_id, name=name, notes=notes)
+
+            elif action == "delete_project":
+                project_id = request.form.get("project_id", "").strip()
+                projects.delete_project(project_id)
+
+            elif action == "assign_jobs":
+                project_id = request.form.get("project_id", "").strip()
+                job_keys = request.form.getlist("job_key")
+                if project_id and job_keys:
+                    projects.assign_jobs(job_keys, project_id=project_id)
+
+            elif action == "unassign_job":
+                job_key = request.form.get("job_key", "").strip()
+                if job_key:
+                    projects.unassign_jobs([job_key])
+
+            elif action == "unassign_selected":
+                job_keys = request.form.getlist("job_key")
+                if job_keys:
+                    projects.unassign_jobs(job_keys)
+
+            # Always cleanup after any mutation
+            projects.recalculate()
+        except projects.ProjectsDataError as e:
+            error = str(e)
+        except ValueError as e:
+            error = str(e)
+        except Exception as e:
+            error = f"Unexpected error: {e}"
+
+        if error:
+            return redirect(url_for("projects_page", error=error))
+        return redirect(url_for("projects_page"))
+
+    # GET
+    rows, rows_error = load_rows_raw(CSV_FILE)
+    if rows_error:
+        error = rows_error
+
+    error = request.args.get("error") or error
+
+    try:
+        projects_map, assignments = projects.recalculate()
+        project_jobs, unassigned_jobs = projects.group_rows_by_project(rows)
+    except projects.ProjectsDataError as e:
+        return render_template(
+            "projects.html",
+            error=str(e),
+            projects=[],
+            unassigned_jobs=[],
+            projects_by_id={},
+        )
+
+    # Build view models (derived totals always computed from current membership)
+    project_rows = []
+    for pid, p in projects_map.items():
+        jobs = project_jobs.get(pid, [])
+        totals = projects.compute_project_totals(jobs)
+        project_rows.append(
+            {
+                "id": pid,
+                "name": p.name,
+                "notes": p.notes,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+                "totals": totals,
+                "jobs": sorted(jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True),
+            }
+        )
+
+    project_rows.sort(key=lambda x: (x.get("updated_at") or 0.0, x.get("name") or ""), reverse=True)
+
+    # Sort unassigned by timestamp, newest first
+    unassigned_jobs_sorted = sorted(unassigned_jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True)
+
+    return render_template(
+        "projects.html",
+        error=error,
+        projects=project_rows,
+        unassigned_jobs=unassigned_jobs_sorted,
+        projects_by_id={p["id"]: p for p in project_rows},
     )
 
 
