@@ -61,7 +61,6 @@
     </div>
     <div class="card-body">
         <form method="post">
-            <input type="hidden" name="action" value="save_printer_defaults">
             <input type="hidden" name="printer" value="{{ p }}">
 
             <h6 class="card-subtitle mb-2 text-muted">Default Pricing (Fallback)</h6>
@@ -93,15 +92,11 @@
                 </div>
             </div>
             <div class="d-flex justify-content-between align-items-center mt-3">
-                <button type="submit" class="btn btn-primary">Save to defaults</button>
-                <form method="post" class="m-0">
-                    <input type="hidden" name="action" value="delete_printer">
-                    <input type="hidden" name="printer" value="{{ p }}">
-                    <button type="submit" class="btn btn-outline-danger"
-                            onclick="return confirm('Delete printer {{ p }}?')">
-                        Delete printer
-                    </button>
-                </form>
+                <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
+                <button type="submit" class="btn btn-outline-danger" name="action" value="delete_printer"
+                        onclick="return confirm('Delete printer {{ p }}?')">
+                    Delete printer
+                </button>
             </div>
         </form>
     </div>
@@ -315,4 +310,3 @@
     </div>
 </div>
 {% endblock %}
-
