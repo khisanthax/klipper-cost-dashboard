@@ -288,7 +288,9 @@
                                         <div class="card-body">
                                             <div class="row g-3 align-items-end">
                                                 <div class="col-md-7">
-                                                    <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
+                                                    <form method="post" enctype="multipart/form-data"
+                                                        class="d-flex gap-2 align-items-end flex-wrap"
+                                                        onsubmit="return window.kcdProjectsUploadStart && window.kcdProjectsUploadStart(this);">
                                                         <input type="hidden" name="action" value="upload_plan_gcode">
                                                         <input type="hidden" name="project_id" value="{{ p.id }}">
                                                         <div class="flex-grow-1" style="min-width: 260px;">
@@ -296,9 +298,15 @@
                                                             <input type="file" class="form-control" name="gcode_file" accept=".gcode" required>
                                                         </div>
                                                         <div class="pb-0">
-                                                            <button type="submit" class="btn btn-outline-primary">Add Planned Item</button>
+                                                            <button type="submit" class="btn btn-outline-primary kcd-upload-btn">
+                                                                <span class="kcd-upload-text">Add Planned Item</span>
+                                                                <span class="spinner-border spinner-border-sm ms-2 d-none kcd-upload-spinner" role="status" aria-hidden="true"></span>
+                                                            </button>
                                                         </div>
                                                     </form>
+                                                    <div class="progress mt-2 d-none kcd-upload-progress" style="height: 6px;">
+                                                        <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                                                    </div>
                                                     <div class="text-muted small mt-2">
                                                         If slicer metadata is missing (estimated time), no item is created. Add a manual job instead.
                                                     </div>
@@ -494,6 +502,28 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+    window.kcdProjectsUploadStart = function (form) {
+        try {
+            const fileInput = form.querySelector('input[type="file"][name="gcode_file"]');
+            if (fileInput && fileInput.files && fileInput.files[0]) {
+                const maxBytes = 150 * 1024 * 1024;
+                if (fileInput.files[0].size > maxBytes) {
+                    alert("Upload too large. Please upload a smaller .gcode file (max 150MB).");
+                    return false;
+                }
+            }
+            const btn = form.querySelector(".kcd-upload-btn");
+            const spinner = form.querySelector(".kcd-upload-spinner");
+            const progress = form.parentElement?.querySelector(".kcd-upload-progress");
+            if (btn) btn.disabled = true;
+            if (spinner) spinner.classList.remove("d-none");
+            if (progress) progress.classList.remove("d-none");
+        } catch (e) { }
+        return true;
+    };
+</script>
 
 <script>
     document.addEventListener("DOMContentLoaded", function () {
