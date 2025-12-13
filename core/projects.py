@@ -31,6 +31,7 @@ from core.config import DEFAULT_PRICING
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
 ASSIGNMENTS_FILE = os.path.join(DATA_DIR, "project_assignments.json")
 MANUAL_JOBS_FILE = os.path.join(DATA_DIR, "project_manual_jobs.json")
+PLANS_FILE = os.path.join(DATA_DIR, "project_plans.json")
 
 
 class ProjectsDataError(RuntimeError):
@@ -55,6 +56,20 @@ class ManualJob:
     filament_g: float = 0.0
     cost_override: Optional[float] = None
     created_at: str = ""
+    notes: str = ""
+
+
+@dataclass(frozen=True)
+class PlannedItem:
+    plan_id: str
+    project_id: str
+    filename: str
+    created_at: str
+    est_time_s: int
+    est_filament_g: Optional[float] = None
+    est_cost: float = 0.0
+    status: str = "active"  # "active" | "fulfilled"
+    source: str = ""
     notes: str = ""
 
 
@@ -92,6 +107,8 @@ def ensure_projects_files() -> None:
         _write_json(ASSIGNMENTS_FILE, {})
     if not os.path.exists(MANUAL_JOBS_FILE):
         _write_json(MANUAL_JOBS_FILE, [])
+    if not os.path.exists(PLANS_FILE):
+        _write_json(PLANS_FILE, [])
 
 
 def load_projects() -> Dict[str, Project]:
@@ -226,6 +243,41 @@ def _save_manual_jobs(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _planned_cost_from_defaults(est_time_s: int, est_filament_g: Optional[float]) -> float:
+    """
+    Compute planned item cost using existing default pricing settings.
+
+    - Time cost: uses the same 1-hour minimum billing rule as job cost calculation.
+    - Material cost: computed only if filament grams are provided, using default
+      filament_mode/filament_rate/grams_per_meter.
+    """
+    rate_per_hour = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
+    duration_hours = max(float(est_time_s or 0) / 3600.0, 0.0)
+    billed_hours = 0.0
+    if duration_hours > 0:
+        billed_hours = max(duration_hours, 1.0)
+    time_cost = billed_hours * rate_per_hour
+
+    material_cost = 0.0
+    if est_filament_g is not None:
+        try:
+            g = float(est_filament_g)
+        except (TypeError, ValueError):
+            g = 0.0
+        mode = str(DEFAULT_PRICING.get("filament_mode") or "per_meter")
+        rate = float(DEFAULT_PRICING.get("filament_rate") or 0.0)
+        gpm = float(DEFAULT_PRICING.get("grams_per_meter") or 0.0)
+        if mode == "per_gram":
+            material_cost = rate * max(g, 0.0)
+        elif mode == "per_kg":
+            material_cost = rate * (max(g, 0.0) / 1000.0)
+        elif mode == "per_meter" and gpm > 0:
+            meters = max(g, 0.0) / gpm
+            material_cost = rate * meters
+
+    return float(time_cost + material_cost)
 
 
 def create_manual_job(
@@ -391,6 +443,191 @@ def compute_manual_job_cost(mj: ManualJob, hourly_rate: Optional[float] = None) 
     return _manual_job_cost(mj, hourly_rate=float(hourly_rate or 0.0))
 
 
+def load_plans() -> Dict[str, List[PlannedItem]]:
+    """Load planned items grouped by project_id."""
+    ensure_projects_files()
+    raw = _read_json(PLANS_FILE, [])
+    if not isinstance(raw, list):
+        raise ProjectsDataError(f"{PLANS_FILE} must contain a JSON list")
+
+    by_project: Dict[str, List[PlannedItem]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        plan_id = str(item.get("plan_id") or "").strip()
+        pid = str(item.get("project_id") or "").strip()
+        filename = str(item.get("filename") or "").strip()
+        created_at = str(item.get("created_at") or "").strip()
+        status = str(item.get("status") or "active").strip().lower()
+        source = str(item.get("source") or "").strip()
+        notes = str(item.get("notes") or "")
+        if status not in ("active", "fulfilled"):
+            status = "active"
+
+        try:
+            est_time_s = int(float(item.get("est_time_s") or 0))
+        except (TypeError, ValueError):
+            est_time_s = 0
+
+        est_filament_g_raw = item.get("est_filament_g", None)
+        est_filament_g: Optional[float]
+        if est_filament_g_raw is None or str(est_filament_g_raw).strip() == "":
+            est_filament_g = None
+        else:
+            try:
+                est_filament_g = float(est_filament_g_raw)
+            except (TypeError, ValueError):
+                est_filament_g = None
+
+        try:
+            est_cost = float(item.get("est_cost") or 0.0)
+        except (TypeError, ValueError):
+            est_cost = 0.0
+
+        if not plan_id or not pid or not filename or est_time_s <= 0:
+            continue
+
+        by_project.setdefault(pid, []).append(
+            PlannedItem(
+                plan_id=plan_id,
+                project_id=pid,
+                filename=filename,
+                created_at=created_at,
+                est_time_s=est_time_s,
+                est_filament_g=est_filament_g,
+                est_cost=est_cost,
+                status=status,
+                source=source,
+                notes=notes,
+            )
+        )
+
+    return by_project
+
+
+def _save_plans(by_project: Dict[str, List[PlannedItem]]) -> None:
+    payload: List[Dict[str, Any]] = []
+    for pid, items in by_project.items():
+        for p in items:
+            payload.append(
+                {
+                    "plan_id": p.plan_id,
+                    "project_id": p.project_id,
+                    "filename": p.filename,
+                    "created_at": p.created_at,
+                    "est_time_s": int(p.est_time_s),
+                    "est_filament_g": p.est_filament_g,
+                    "est_cost": float(p.est_cost or 0.0),
+                    "status": p.status,
+                    "source": p.source,
+                    "notes": p.notes,
+                }
+            )
+    _write_json(PLANS_FILE, payload)
+
+
+def create_plan_item(
+    project_id: str,
+    filename: str,
+    est_time_s: int,
+    est_filament_g: Optional[float] = None,
+    source: str = "",
+    notes: str = "",
+) -> PlannedItem:
+    pid = str(project_id or "").strip()
+    if not pid:
+        raise ValueError("project_id is required")
+    projects = load_projects()
+    if pid not in projects:
+        raise ValueError("Project not found")
+
+    filename = str(filename or "").strip()
+    if not filename:
+        raise ValueError("filename is required")
+
+    try:
+        time_s = int(float(est_time_s))
+    except (TypeError, ValueError):
+        time_s = 0
+    if time_s <= 0:
+        raise ValueError("Estimated time must be provided")
+
+    est_cost = _planned_cost_from_defaults(time_s, est_filament_g=est_filament_g)
+    item = PlannedItem(
+        plan_id=uuid.uuid4().hex,
+        project_id=pid,
+        filename=filename,
+        created_at=_iso_now(),
+        est_time_s=time_s,
+        est_filament_g=est_filament_g,
+        est_cost=est_cost,
+        status="active",
+        source=str(source or "").strip(),
+        notes=str(notes or ""),
+    )
+
+    plans = load_plans()
+    plans.setdefault(pid, []).append(item)
+    _save_plans(plans)
+    return item
+
+
+def set_plan_status(plan_id: str, status: str) -> None:
+    pid = str(plan_id or "").strip()
+    if not pid:
+        return
+    status = str(status or "").strip().lower()
+    if status not in ("active", "fulfilled"):
+        status = "active"
+    plans = load_plans()
+    changed = False
+    for proj_id, items in plans.items():
+        for idx, it in enumerate(items):
+            if it.plan_id == pid:
+                items[idx] = PlannedItem(
+                    plan_id=it.plan_id,
+                    project_id=it.project_id,
+                    filename=it.filename,
+                    created_at=it.created_at,
+                    est_time_s=it.est_time_s,
+                    est_filament_g=it.est_filament_g,
+                    est_cost=it.est_cost,
+                    status=status,
+                    source=it.source,
+                    notes=it.notes,
+                )
+                changed = True
+                break
+    if changed:
+        _save_plans(plans)
+
+
+def delete_plan_item(plan_id: str) -> None:
+    pid = str(plan_id or "").strip()
+    if not pid:
+        return
+    plans = load_plans()
+    changed = False
+    for proj_id, items in list(plans.items()):
+        new_items = [it for it in items if it.plan_id != pid]
+        if len(new_items) != len(items):
+            plans[proj_id] = new_items
+            changed = True
+    if changed:
+        _save_plans(plans)
+
+
+def compute_project_projection(plans: List[PlannedItem]) -> Dict[str, float]:
+    """Projected totals from ACTIVE planned items only."""
+    projected = {"count": 0.0, "hours": 0.0, "cost": 0.0}
+    for p in plans:
+        if p.status != "active":
+            continue
+        projected["count"] += 1.0
+        projected["hours"] += float(p.est_time_s or 0) / 3600.0
+        projected["cost"] += float(p.est_cost or 0.0)
+    return projected
+
 def create_project(name: str, notes: str = "") -> Project:
     name = str(name or "").strip()
     if not name:
@@ -451,6 +688,12 @@ def delete_project(project_id: str) -> None:
     if pid in jobs_by_project:
         jobs_by_project.pop(pid, None)
         _save_manual_jobs(jobs_by_project)
+
+    # Remove planned items in this project.
+    plans_by_project = load_plans()
+    if pid in plans_by_project:
+        plans_by_project.pop(pid, None)
+        _save_plans(plans_by_project)
 
 
 def assign_jobs(job_keys: Iterable[str], project_id: str) -> None:
@@ -514,12 +757,12 @@ def recalculate() -> Tuple[Dict[str, Project], Dict[str, str]]:
     return projects, assignments
 
 
-def recalculate_all() -> Tuple[Dict[str, Project], Dict[str, str], Dict[str, List[ManualJob]]]:
+def recalculate_all() -> Tuple[Dict[str, Project], Dict[str, str], Dict[str, List[ManualJob]], Dict[str, List[PlannedItem]]]:
     """
     Recalculate/cleanup all project-related stores:
     - Drop assignment entries referencing missing projects.
     - Drop manual jobs referencing missing projects.
-    Returns (projects, assignments, manual_jobs_by_project).
+    Returns (projects, assignments, manual_jobs_by_project, plans_by_project).
     """
     projects, assignments = recalculate()
     jobs_by_project = load_manual_jobs()
@@ -528,7 +771,13 @@ def recalculate_all() -> Tuple[Dict[str, Project], Dict[str, str], Dict[str, Lis
     if cleaned_jobs != jobs_by_project:
         _save_manual_jobs(cleaned_jobs)
         jobs_by_project = cleaned_jobs
-    return projects, assignments, jobs_by_project
+    plans_by_project = load_plans()
+    cleaned_plans = {pid: items for pid, items in plans_by_project.items() if pid in valid_ids}
+    if cleaned_plans != plans_by_project:
+        _save_plans(cleaned_plans)
+        plans_by_project = cleaned_plans
+
+    return projects, assignments, jobs_by_project, plans_by_project
 
 
 def group_rows_by_project(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:

@@ -3,7 +3,10 @@ Print Cost Dashboard - Flask Application
 
 Refactored to use modular core package.
 """
+import os
+import tempfile
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
+from werkzeug.utils import secure_filename
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
     DEFAULT_PRICING, SETTINGS_FILE, DISPLAY_FILE, DATA_DIR, TIMEZONE_OBJ
@@ -26,6 +29,7 @@ from core import rates
 from core import pricing
 from core import live
 from core import projects
+from core.gcode_metadata import extract_gcode_metadata
 
 app = Flask(__name__)
 
@@ -548,6 +552,66 @@ def projects_page():
                 manual_job_id = request.form.get("manual_job_id", "").strip()
                 projects.delete_manual_job(manual_job_id)
 
+            elif action == "upload_plan_gcode":
+                project_id = request.form.get("project_id", "").strip()
+                file = request.files.get("gcode_file")
+                if not project_id:
+                    raise ValueError("Project is required")
+                if not file or not file.filename:
+                    raise ValueError("Please choose a .gcode file to upload.")
+
+                original_name = os.path.basename(file.filename)
+                if not original_name.lower().endswith(".gcode"):
+                    raise ValueError("Only .gcode files are supported.")
+
+                # Basic guardrail (request size)
+                max_bytes = 150 * 1024 * 1024  # 150MB
+                if request.content_length and request.content_length > max_bytes:
+                    raise ValueError("Upload too large. Please upload a smaller .gcode file (max 150MB).")
+
+                tmp_path = None
+                try:
+                    safe_name = secure_filename(original_name) or "upload.gcode"
+                    with tempfile.NamedTemporaryFile(prefix="kcd_plan_", suffix="_" + safe_name, delete=False) as tf:
+                        tmp_path = tf.name
+                        total = 0
+                        while True:
+                            chunk = file.stream.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > max_bytes:
+                                raise ValueError("Upload too large. Please upload a smaller .gcode file (max 150MB).")
+                            tf.write(chunk)
+
+                    meta = extract_gcode_metadata(tmp_path)
+                    if not meta.found or not meta.time_s:
+                        raise ValueError(meta.error or "No slicer metadata found (missing estimated time).")
+
+                    projects.create_plan_item(
+                        project_id=project_id,
+                        filename=original_name,
+                        est_time_s=int(meta.time_s),
+                        est_filament_g=meta.filament_g,
+                        source=meta.slicer or "",
+                    )
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+
+            elif action == "fulfill_plan_item":
+                plan_id = request.form.get("plan_id", "").strip()
+                if plan_id:
+                    projects.set_plan_status(plan_id, "fulfilled")
+
+            elif action == "delete_plan_item":
+                plan_id = request.form.get("plan_id", "").strip()
+                if plan_id:
+                    projects.delete_plan_item(plan_id)
+
             # Always cleanup after any mutation
             projects.recalculate_all()
         except projects.ProjectsDataError as e:
@@ -569,7 +633,7 @@ def projects_page():
     error = request.args.get("error") or error
 
     try:
-        projects_map, assignments, manual_jobs_by_project = projects.recalculate_all()
+        projects_map, assignments, manual_jobs_by_project, plans_by_project = projects.recalculate_all()
         project_jobs, unassigned_jobs = projects.group_rows_by_project(rows)
     except projects.ProjectsDataError as e:
         return render_template(
@@ -586,6 +650,8 @@ def projects_page():
         jobs = project_jobs.get(pid, [])
         manual_jobs = manual_jobs_by_project.get(pid, [])
         totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs)
+        plans = plans_by_project.get(pid, [])
+        projection = projects.compute_project_projection(plans)
 
         manual_jobs_view = []
         for mj in manual_jobs:
@@ -603,6 +669,30 @@ def projects_page():
             )
         manual_jobs_view.sort(key=lambda x: x.get("created_at") or "", reverse=True)
 
+        # Tracked (CSV) actual cost only (manual jobs are shown separately in totals).
+        tracked_cost = 0.0
+        for r in jobs:
+            try:
+                tracked_cost += float(r.get("total_cost") or 0.0)
+            except (TypeError, ValueError):
+                pass
+        manual_cost = max(float(totals.get("cost") or 0.0) - tracked_cost, 0.0)
+
+        plans_view = []
+        for pl in sorted(plans, key=lambda x: x.created_at or "", reverse=True):
+            plans_view.append(
+                {
+                    "plan_id": pl.plan_id,
+                    "filename": pl.filename,
+                    "created_at": pl.created_at,
+                    "est_time_s": pl.est_time_s,
+                    "est_filament_g": pl.est_filament_g,
+                    "est_cost": pl.est_cost,
+                    "status": pl.status,
+                    "source": pl.source,
+                }
+            )
+
         project_rows.append(
             {
                 "id": pid,
@@ -613,6 +703,10 @@ def projects_page():
                 "totals": totals,
                 "jobs": sorted(jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True),
                 "manual_jobs": manual_jobs_view,
+                "planned_items": plans_view,
+                "projected": projection,
+                "actual_tracked_cost": tracked_cost,
+                "actual_manual_cost": manual_cost,
             }
         )
 

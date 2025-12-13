@@ -293,6 +293,125 @@
                                         </table>
                                     </div>
                                     {% endif %}
+
+                                    <hr class="my-4">
+
+                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                                        <h6 class="mb-0">Planned Items (Pre-Planner)</h6>
+                                        <span class="text-muted small">Upload a .gcode file to extract slicer estimates</span>
+                                    </div>
+
+                                    <div class="card mb-3">
+                                        <div class="card-body">
+                                            <div class="row g-3 align-items-end">
+                                                <div class="col-md-7">
+                                                    <form method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
+                                                        <input type="hidden" name="action" value="upload_plan_gcode">
+                                                        <input type="hidden" name="project_id" value="{{ p.id }}">
+                                                        <div class="flex-grow-1" style="min-width: 260px;">
+                                                            <label class="form-label">Upload .gcode (metadata-only)</label>
+                                                            <input type="file" class="form-control" name="gcode_file" accept=".gcode" required>
+                                                        </div>
+                                                        <div class="pb-0">
+                                                            <button type="submit" class="btn btn-outline-primary">Add Planned Item</button>
+                                                        </div>
+                                                    </form>
+                                                    <div class="text-muted small mt-2">
+                                                        If slicer metadata is missing (estimated time), no item is created. Add a manual job instead.
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-5">
+                                                    <div class="border rounded p-3 bg-light">
+                                                        <div class="d-flex justify-content-between">
+                                                            <div class="text-muted small">Projected total (active)</div>
+                                                            <div class="fw-semibold">${{ "%.2f"|format(p.projected.cost) }}</div>
+                                                        </div>
+                                                        <div class="d-flex justify-content-between">
+                                                            <div class="text-muted small">Actual total (history)</div>
+                                                            <div class="fw-semibold">${{ "%.2f"|format(p.actual_tracked_cost) }}</div>
+                                                        </div>
+                                                        <div class="d-flex justify-content-between">
+                                                            <div class="text-muted small">Variance (Actual − Projected)</div>
+                                                            <div class="fw-semibold">${{ "%.2f"|format(p.actual_tracked_cost - p.projected.cost) }}</div>
+                                                        </div>
+                                                        {% if p.actual_manual_cost and p.actual_manual_cost > 0 %}
+                                                        <div class="text-muted small mt-2">Manual jobs in project: ${{ "%.2f"|format(p.actual_manual_cost) }}</div>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {% if not p.planned_items %}
+                                    <div class="text-muted">No planned items for this project.</div>
+                                    {% else %}
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Filename</th>
+                                                    <th class="text-end">Est. Time</th>
+                                                    <th class="text-end">Filament (g)</th>
+                                                    <th class="text-end">Est. Cost</th>
+                                                    <th>Status</th>
+                                                    <th class="text-nowrap">Created</th>
+                                                    <th style="width: 1%;"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for pl in p.planned_items %}
+                                                <tr>
+                                                    <td class="text-break">
+                                                        {{ pl.filename }}
+                                                        {% if pl.source %}
+                                                        <div class="text-muted small">Source: {{ pl.source }}</div>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-end text-nowrap">
+                                                        {{ (pl.est_time_s // 3600)|int }}h {{ ((pl.est_time_s % 3600) // 60)|int }}m
+                                                    </td>
+                                                    <td class="text-end text-nowrap">
+                                                        {% if pl.est_filament_g is not none %}
+                                                        {{ "%.1f"|format(pl.est_filament_g) }}
+                                                        {% else %}
+                                                        —
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-end text-nowrap">${{ "%.2f"|format(pl.est_cost) }}</td>
+                                                    <td class="text-nowrap">
+                                                        {% if pl.status == 'active' %}
+                                                        <span class="badge bg-primary">Active</span>
+                                                        {% else %}
+                                                        <span class="badge bg-secondary">Fulfilled</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td class="text-nowrap">{{ pl.created_at }}</td>
+                                                    <td class="text-nowrap">
+                                                        <div class="d-flex gap-2">
+                                                            {% if pl.status == 'active' %}
+                                                            <form method="post" class="m-0">
+                                                                <input type="hidden" name="action" value="fulfill_plan_item">
+                                                                <input type="hidden" name="plan_id" value="{{ pl.plan_id }}">
+                                                                <button type="submit" class="btn btn-sm btn-outline-success">Fulfill</button>
+                                                            </form>
+                                                            {% endif %}
+                                                            <form method="post" class="m-0">
+                                                                <input type="hidden" name="action" value="delete_plan_item">
+                                                                <input type="hidden" name="plan_id" value="{{ pl.plan_id }}">
+                                                                <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                                    onclick="return confirm('Delete this planned item?')">
+                                                                    Delete
+                                                                </button>
+                                                            </form>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {% endif %}
                                 </div>
                             </div>
                         </td>
