@@ -366,7 +366,7 @@ def index():
     summary.setdefault("per_day", {})
     summary.setdefault("per_printer", {})
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-    visible_cols = display_settings.get("visible_columns", HEADERS)
+    selected_columns = display_settings.get("visible_columns") or HEADERS
 
     # Prepare chart data
     chart_cost_per_day = {"labels": [], "values": []}
@@ -933,7 +933,7 @@ def settings_page():
         active_rate_profiles[p] = settings.get(p, {}).get("active_rate_profile_id", "")
 
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-    visible_cols = display_settings.get("visible_columns", HEADERS)
+    selected_columns = display_settings.get("visible_columns") or HEADERS
 
     # Load profile data
     all_profiles = profiles.get_all_profiles()
@@ -947,7 +947,7 @@ def settings_page():
         configs=printer_configs,
         headers=HEADERS,
         friendly_headers=FRIENDLY_HEADERS,
-        visible_cols=visible_cols,
+        selected_columns=selected_columns,
         profiles=all_profiles,
         printer_mappings=printer_mappings,
         rate_profiles=rate_profiles,
