@@ -297,6 +297,20 @@
                                                             <label class="form-label">Upload .gcode (metadata-only)</label>
                                                             <input type="file" class="form-control" name="gcode_file" accept=".gcode" required>
                                                         </div>
+                                                        <div class="d-flex flex-wrap gap-2">
+                                                            <div style="min-width: 160px;">
+                                                                <label class="form-label text-muted small mb-0">Hours (if missing)</label>
+                                                                <input type="text" class="form-control form-control-sm" name="manual_time_hours" placeholder="e.g. 1.5">
+                                                            </div>
+                                                            <div style="min-width: 160px;">
+                                                                <label class="form-label text-muted small mb-0">Filament g (if missing)</label>
+                                                                <input type="text" class="form-control form-control-sm" name="manual_filament_g" placeholder="optional">
+                                                            </div>
+                                                            <div style="min-width: 170px;">
+                                                                <label class="form-label text-muted small mb-0">Cost $ (optional)</label>
+                                                                <input type="text" class="form-control form-control-sm" name="manual_cost" placeholder="optional">
+                                                            </div>
+                                                        </div>
                                                         <div class="pb-0">
                                                             <button type="submit" class="btn btn-outline-primary kcd-upload-btn">
                                                                 <span class="kcd-upload-text">Add Planned Item</span>
@@ -308,7 +322,7 @@
                                                         <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
                                                     </div>
                                                     <div class="text-muted small mt-2">
-                                                        If slicer metadata is missing (estimated time), no item is created. Add a manual job instead.
+                                                        If slicer metadata is missing, you can provide hours/filament above or use Edit after upload.
                                                     </div>
                                                 </div>
                                                 <div class="col-md-5">

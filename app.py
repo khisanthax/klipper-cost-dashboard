@@ -639,6 +639,9 @@ def projects_page():
 
             elif action == "upload_plan_gcode":
                 project_id = request.form.get("project_id", "").strip()
+                manual_time_hours = request.form.get("manual_time_hours", "").strip()
+                manual_filament_g = request.form.get("manual_filament_g", "").strip()
+                manual_cost = request.form.get("manual_cost", "").strip()
                 file = request.files.get("gcode_file")
                 if not project_id:
                     raise ValueError("Project is required")
@@ -670,17 +673,48 @@ def projects_page():
                             tf.write(chunk)
 
                     meta = extract_gcode_metadata(tmp_path)
-                    if not meta.found or not meta.time_s:
-                        raise ValueError(meta.error or "No slicer metadata found (missing estimated time).")
+                    est_time_s = int(meta.time_s or 0)
+                    est_filament_g = meta.filament_g
+                    source = meta.slicer or ""
+
+                    # If slicer metadata is missing/incomplete, allow manual overrides.
+                    if not meta.found or not est_time_s:
+                        if manual_time_hours:
+                            try:
+                                est_time_s = int(float(manual_time_hours) * 3600.0)
+                            except (TypeError, ValueError):
+                                est_time_s = 0
+                            source = "Manual"
+                        if not est_time_s:
+                            raise ValueError(meta.error or "No slicer metadata found (missing estimated time).")
+
+                    if est_filament_g is None and manual_filament_g:
+                        try:
+                            est_filament_g = float(manual_filament_g)
+                        except (TypeError, ValueError):
+                            est_filament_g = None
+
+                    est_cost_override = None
+                    if manual_cost:
+                        try:
+                            est_cost_override = float(manual_cost)
+                        except (TypeError, ValueError):
+                            est_cost_override = None
 
                     projects.create_plan_item(
                         project_id=project_id,
                         filename=original_name,
-                        est_time_s=int(meta.time_s),
-                        est_filament_g=meta.filament_g,
-                        source=meta.slicer or "",
+                        est_time_s=est_time_s,
+                        est_filament_g=est_filament_g,
+                        source=source,
+                        est_cost_override=est_cost_override,
                     )
-                    redirect_args = {"msg": "Planned item added.", "edit_project": project_id}
+                    msg = "Planned item added."
+                    if meta.found and meta.filament_g is None and not manual_filament_g:
+                        msg = "Planned item added. Filament grams not found; use Edit to fill it in."
+                    if not meta.found:
+                        msg = "Planned item added using manual estimates."
+                    redirect_args = {"msg": msg, "edit_project": project_id}
                 finally:
                     if tmp_path and os.path.exists(tmp_path):
                         try:
