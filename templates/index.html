@@ -58,10 +58,17 @@
         checkboxes.forEach(cb => cb.checked = source.checked);
     }
 
-    function confirmDelete() {
+    function ensureSelection() {
         const checked = document.querySelectorAll('input[name="delete_rows"]:checked');
         if (checked.length === 0) {
-            alert("No rows selected for deletion.");
+            alert("No rows selected.");
+            return false;
+        }
+        return true;
+    }
+
+    function confirmDelete() {
+        if (!ensureSelection()) {
             return false;
         }
         return confirm("Delete selected rows? This cannot be undone.");
@@ -443,11 +450,10 @@
         <h5 class="mb-0">Print History</h5>
     </div>
     <div class="card-body p-0">
-        <form method="post" onsubmit="return confirmDelete()">
-            <input type="hidden" name="action" value="delete_rows">
-
-            <div class="p-2 bg-light border-bottom">
-                <button type="submit" class="btn btn-danger btn-sm">Delete Selected</button>
+        <form method="post">
+            <div class="p-2 bg-light border-bottom d-flex gap-2">
+                <button type="submit" name="action" value="complete_rows" class="btn btn-success btn-sm" onclick="return ensureSelection()">Complete Selected</button>
+                <button type="submit" name="action" value="delete_rows" class="btn btn-danger btn-sm" onclick="return confirmDelete()">Delete Selected</button>
             </div>
 
             <div class="table-responsive">
