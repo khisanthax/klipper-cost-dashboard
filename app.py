@@ -477,6 +477,8 @@ def settings_page():
             printer = request.form.get("printer", "").strip()
             if printer:
                 pricing.delete_printer(printer, delete_csv=False)
+                # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
+                pricing.hide_printer(printer)
             return redirect(url_for("settings_page"))
 
         if action == "save_printer_defaults":
@@ -648,7 +650,8 @@ def settings_page():
         return redirect(url_for("settings_page"))
 
     # GET request
-    printers = get_known_printers()
+    printers = pricing.get_configured_printers()
+    discovered_printers = pricing.get_discovered_printers()
     settings = load_settings(SETTINGS_FILE)
     
     printer_configs = {}
@@ -670,6 +673,7 @@ def settings_page():
     return render_template(
         "settings.html",
         printers=printers,
+        discovered_printers=discovered_printers,
         configs=printer_configs,
         headers=HEADERS,
         friendly_headers=FRIENDLY_HEADERS,

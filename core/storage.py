@@ -46,7 +46,7 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
-        data = {"visible_columns": headers}
+        data = {"visible_columns": headers, "hidden_printers": []}
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -58,14 +58,18 @@ def load_display_settings(display_file, headers):
         with open(display_file) as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"visible_columns": headers}
+                return {"visible_columns": headers, "hidden_printers": []}
             cols = data.get("visible_columns", headers)
             cols = [c for c in cols if c in headers]
             if not cols:
                 cols = headers
-            return {"visible_columns": cols}
+            hidden = data.get("hidden_printers", [])
+            if not isinstance(hidden, list):
+                hidden = []
+            hidden = [str(p) for p in hidden if str(p).strip()]
+            return {"visible_columns": cols, "hidden_printers": hidden}
     except Exception:
-        return {"visible_columns": headers}
+        return {"visible_columns": headers, "hidden_printers": []}
 
 
 def save_display_settings(display_file, headers, visible_columns):
@@ -73,8 +77,28 @@ def save_display_settings(display_file, headers, visible_columns):
     visible = [c for c in visible_columns if c in headers]
     if not visible:
         visible = headers
+    # Preserve any additional display settings (e.g. hidden_printers).
+    hidden = []
+    try:
+        with open(display_file) as f:
+            existing = json.load(f)
+            if isinstance(existing, dict) and isinstance(existing.get("hidden_printers"), list):
+                hidden = [str(p) for p in existing.get("hidden_printers", []) if str(p).strip()]
+    except Exception:
+        pass
+
     with open(display_file, "w") as f:
-        json.dump({"visible_columns": visible}, f, indent=2)
+        json.dump({"visible_columns": visible, "hidden_printers": hidden}, f, indent=2)
+
+
+def save_hidden_printers(display_file, headers, hidden_printers):
+    """Persist hidden printer list while preserving visible column settings."""
+    settings = load_display_settings(display_file, headers)
+    visible_cols = settings.get("visible_columns", headers)
+    hidden = hidden_printers if isinstance(hidden_printers, list) else []
+    hidden = [str(p) for p in hidden if str(p).strip()]
+    with open(display_file, "w") as f:
+        json.dump({"visible_columns": visible_cols, "hidden_printers": hidden}, f, indent=2)
 
 
 def ensure_api_key(secret_file=None, data_dir=None):

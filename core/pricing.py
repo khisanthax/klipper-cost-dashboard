@@ -3,8 +3,16 @@ Cost calculations and printer management for Print Cost Dashboard.
 """
 import os
 import csv
-from core.config import DEFAULT_PRICING, CSV_FILE, SETTINGS_FILE, HEADERS
-from core.storage import load_settings, save_settings, load_rows_raw, load_state, save_state
+from core.config import DEFAULT_PRICING, CSV_FILE, SETTINGS_FILE, HEADERS, DISPLAY_FILE
+from core.storage import (
+    load_settings,
+    save_settings,
+    load_rows_raw,
+    load_state,
+    save_state,
+    load_display_settings,
+    save_hidden_printers,
+)
 from core import profiles
 from core import rates
 
@@ -220,21 +228,82 @@ def compute_estimated_final_cost(printer_name, estimated_duration, estimated_fil
 
 
 def get_known_printers():
-    """Get list of all known printers from settings and CSV."""
+    """
+    Get list of all known printers from settings and CSV, excluding hidden printers.
+
+    Hidden printers are a soft-delete mechanism used to keep configuration UIs clean
+    without deleting historical CSV rows.
+    """
+    def _norm(name) -> str:
+        return str(name or "").strip()
+
     printers = set()
+    hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
     settings = load_settings(SETTINGS_FILE)
-    printers.update(settings.keys())
+    printers.update({_norm(p) for p in settings.keys() if _norm(p)})
     if os.path.exists(CSV_FILE):
         try:
             with open(CSV_FILE, newline="") as f:
                 reader = csv.DictReader(f)
                 for r in reader:
-                    p = r.get("printer")
+                    p = _norm(r.get("printer"))
                     if p:
                         printers.add(p)
         except Exception:
             pass
-    return sorted(printers)
+    return sorted([p for p in printers if p not in hidden])
+
+
+def get_configured_printers():
+    """Printers explicitly configured in settings.json (excluding hidden)."""
+    def _norm(name) -> str:
+        return str(name or "").strip()
+
+    settings = load_settings(SETTINGS_FILE)
+    hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
+    return sorted([p for p in settings.keys() if _norm(p) and _norm(p) not in hidden])
+
+
+def get_discovered_printers():
+    """
+    Printers found only via CSV history (not present in settings.json), excluding hidden.
+    Used for optional display in Settings.
+    """
+    def _norm(name) -> str:
+        return str(name or "").strip()
+
+    settings = load_settings(SETTINGS_FILE)
+    configured = {_norm(p) for p in settings.keys() if _norm(p)}
+    hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
+    discovered = set()
+    if os.path.exists(CSV_FILE):
+        try:
+            with open(CSV_FILE, newline="") as f:
+                reader = csv.DictReader(f)
+                for r in reader:
+                    p = _norm(r.get("printer"))
+                    if p:
+                        discovered.add(p)
+        except Exception:
+            pass
+    discovered = discovered - configured - hidden
+    return sorted(discovered)
+
+
+def hide_printer(printer_name: str) -> None:
+    """
+    Soft-delete: hide a printer from configuration views without deleting CSV rows.
+    """
+    printer_name = str(printer_name or "").strip()
+    if not printer_name:
+        return
+    display = load_display_settings(DISPLAY_FILE, HEADERS)
+    hidden = display.get("hidden_printers", [])
+    if not isinstance(hidden, list):
+        hidden = []
+    hidden_set = {str(p).strip() for p in hidden if str(p).strip()}
+    hidden_set.add(printer_name)
+    save_hidden_printers(DISPLAY_FILE, HEADERS, sorted(hidden_set))
 
 
 def rename_printer(old_name, new_name, update_csv=True):
@@ -319,23 +388,31 @@ def delete_printer(printer_name, delete_csv=False):
     """
     from core.config import DATA_DIR
 
-    # Remove from settings.json
+    target = str(printer_name or "").strip()
+    if not target:
+        return
+
+    # Remove from settings.json (match by normalized name).
     settings = load_settings(SETTINGS_FILE)
-    if printer_name in settings:
-        settings.pop(printer_name, None)
+    removed_any = False
+    for key in list(settings.keys()):
+        if str(key).strip() == target:
+            settings.pop(key, None)
+            removed_any = True
+    if removed_any:
         save_settings(SETTINGS_FILE, DATA_DIR, settings)
 
     # Remove from client registry in install_state.json
     state_file = os.path.join(DATA_DIR, "install_state.json")
     registry = load_state(state_file, "clients", [])
-    new_registry = [entry for entry in registry if entry.get("printer_name") != printer_name]
+    new_registry = [entry for entry in registry if str(entry.get("printer_name") or "").strip() != target]
     if len(new_registry) != len(registry):
         save_state(state_file, DATA_DIR, "clients", new_registry)
 
     # Optionally remove rows from CSV
     if delete_csv and os.path.exists(CSV_FILE):
         rows, _ = load_rows_raw(CSV_FILE)
-        rows = [row for row in rows if row.get("printer") != printer_name]
+        rows = [row for row in rows if str(row.get("printer") or "").strip() != target]
         with open(CSV_FILE, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=HEADERS)
             writer.writeheader()
