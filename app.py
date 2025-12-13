@@ -10,7 +10,7 @@ from core.config import (
 )
 from core.storage import (
     load_settings, save_settings, load_display_settings, save_display_settings,
-    append_row, load_rows_raw, rewrite_csv_without_indices, ts_to_local_dt
+    append_row, load_rows_raw, rewrite_csv_without_indices, rewrite_csv_mark_completed, ts_to_local_dt
 )
 from core.pricing import (
     compute_costs, get_known_printers, rename_printer, merge_printers,
@@ -313,6 +313,13 @@ def index():
             printer_name = request.form.get("printer_name", "").strip()
             if printer_name:
                 live.end_job(printer_name)
+            return redirect(url_for("index"))
+
+        if action == "complete_rows":
+            indices_raw = request.form.getlist("delete_rows")
+            if indices_raw:
+                indices = [int(i) for i in indices_raw if str(i).strip().isdigit()]
+                rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
             return redirect(url_for("index"))
 
         # Handle row deletion

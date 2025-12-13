@@ -202,6 +202,32 @@ def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
             writer.writerow(out)
 
 
+def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
+    """Mark specified rows as completed if they are currently printing."""
+    if not os.path.exists(csv_file):
+        return
+
+    rows, _ = load_rows_raw(csv_file)
+    indices_set = set(indices_to_complete)
+
+    for row in rows:
+        if row.get("row_index") not in indices_set:
+            continue
+
+        status = str(row.get("status", "")).lower()
+        if status == "printing":
+            row["status"] = "completed"
+            if "failure_reason" in row:
+                row["failure_reason"] = ""
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            out = {h: row.get(h, "") for h in headers}
+            writer.writerow(out)
+
+
 # State management for installer (used by both app and installer)
 def load_state(state_file, key, default=""):
     """Load a value from install state."""
