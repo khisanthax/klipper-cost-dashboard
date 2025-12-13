@@ -248,6 +248,10 @@ def insert_run_shell_command(macro_name, path, printer_name):
 
     macro_block = lines[start_index:end_index]
 
+    # If a KCD END_PRINT block is already present, skip repatching.
+    if any(KCD_START_END_MARKER in ln for ln in macro_block) and any(KCD_END_END_MARKER in ln for ln in macro_block):
+        return True, "Command already present"
+
     # CLEAN mode: remove any previous KCD END_PRINT block marked with our markers
     macro_block = _clean_marked_block(macro_block, KCD_START_END_MARKER, KCD_END_END_MARKER)
     lines[start_index:end_index] = macro_block
@@ -488,6 +492,10 @@ def insert_macro_call(macro_name, path, macro_to_call):
         return False, f"Macro '{macro_name}' not found"
 
     macro_block = lines[start_index:end_index]
+
+    # If a KCD START_PRINT block is already present, skip repatching.
+    if any(KCD_START_START_MARKER in ln for ln in macro_block) and any(KCD_END_START_MARKER in ln for ln in macro_block):
+        return True, "Call already present"
 
     # CLEAN: remove any previous KCD START_PRINT block
     macro_block = _clean_marked_block(macro_block, KCD_START_START_MARKER, KCD_END_START_MARKER)

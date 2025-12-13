@@ -13,7 +13,7 @@ import re
 import secrets
 import tempfile
 import shutil
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
 import installer_macro
 
@@ -90,6 +90,55 @@ def _find_registry_entry(printer_name: str, client_type: str) -> Dict[str, Any]:
         if entry.get("type") == client_type and entry.get("printer_name") == printer_name:
             return entry
     return {}
+
+def _find_remote_registry_entry_by_host_dir(host: str, config_dir: str) -> Tuple[int, Dict[str, Any]]:
+    """
+    Find a remote client registry entry by host + config_dir.
+    Returns (index, entry) or (-1, {}).
+    """
+    registry = get_client_registry()
+    for i, entry in enumerate(registry):
+        if entry.get("type") != "remote":
+            continue
+        if entry.get("host") == host and entry.get("config_dir") == config_dir:
+            return i, entry
+    return -1, {}
+
+
+def _get_remote_macro_prefs(host: str, config_dir: str) -> Dict[str, Any]:
+    _, entry = _find_remote_registry_entry_by_host_dir(host, config_dir)
+    prefs = entry.get("macro_prefs", {})
+    return prefs if isinstance(prefs, dict) else {}
+
+
+def _save_remote_macro_prefs(
+    host: str,
+    config_dir: str,
+    start: Optional[Dict[str, str]] = None,
+    end: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Persist macro integration selections per remote printer in install_state.json.
+    Matches a client by host + config_dir and stores:
+      macro_prefs: { "start": {"file": ..., "macro": ...}, "end": {...} }
+    """
+    registry = get_client_registry()
+    idx, entry = _find_remote_registry_entry_by_host_dir(host, config_dir)
+    if idx < 0:
+        return
+
+    prefs = entry.get("macro_prefs", {})
+    if not isinstance(prefs, dict):
+        prefs = {}
+
+    if isinstance(start, dict) and start.get("file") and start.get("macro"):
+        prefs["start"] = {"file": start["file"], "macro": start["macro"]}
+    if isinstance(end, dict) and end.get("file") and end.get("macro"):
+        prefs["end"] = {"file": end["file"], "macro": end["macro"]}
+
+    entry["macro_prefs"] = prefs
+    registry[idx] = entry
+    _set_client_registry(registry)
 
 
 # ----------------------------------------------------------------------
@@ -727,6 +776,7 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
     """
     Download .cfg files from remote printer_dir, run local macro integration, upload back.
     """
+    prefs = _get_remote_macro_prefs(remote, printer_dir)
     tmp_dir = tempfile.mkdtemp(prefix="kcd_remote_cfg_")
     try:
         cfg_files = r.remote_list_cfg_files(remote, printer_dir)
@@ -749,12 +799,49 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
             println("Failed to download any remote .cfg files; skipping macro integration.")
             return
 
-        installer_macro.run_macro_integration(printer_name, tmp_dir)
+        # Prefer stored defaults if they still exist in the scan results.
+        default_end_macro = None
+        default_end_file = None
+        default_start_macro = None
+        default_start_file = None
+
+        end_pref = prefs.get("end") if isinstance(prefs, dict) else None
+        if isinstance(end_pref, dict):
+            pref_file = end_pref.get("file")
+            pref_macro = end_pref.get("macro")
+            if pref_file and pref_macro:
+                end_candidates, _ = installer_macro.find_macros_in_dir(tmp_dir)
+                if any(f == pref_file and m == pref_macro for (f, m, _ln) in end_candidates):
+                    default_end_file = pref_file
+                    default_end_macro = pref_macro
+
+        start_pref = prefs.get("start") if isinstance(prefs, dict) else None
+        if isinstance(start_pref, dict):
+            pref_file = start_pref.get("file")
+            pref_macro = start_pref.get("macro")
+            if pref_file and pref_macro:
+                start_candidates = installer_macro.find_start_macros_in_dir(tmp_dir)
+                if any(f == pref_file and m == pref_macro for (f, m, _ln) in start_candidates):
+                    default_start_file = pref_file
+                    default_start_macro = pref_macro
+
+        end_macro, end_file = installer_macro.prompt_macro_insertion(
+            printer_name, tmp_dir, default_macro=default_end_macro, default_file=default_end_file
+        )
+        start_macro, start_file = installer_macro.prompt_start_macro_insertion(
+            printer_name, tmp_dir, default_macro=default_start_macro, default_file=default_start_file
+        )
 
         for remote_path, local_path in local_paths:
             with open(local_path, "r", encoding="utf-8") as f:
                 updated = f.read()
             r.remote_write_file(remote, remote_path, updated, mode=0o644)
+
+        # Persist selections (match remote client by host + config_dir).
+        if end_macro and end_file:
+            _save_remote_macro_prefs(remote, printer_dir, end={"file": end_file, "macro": end_macro})
+        if start_macro and start_file:
+            _save_remote_macro_prefs(remote, printer_dir, start={"file": start_file, "macro": start_macro})
 
         println("Remote macro integration completed successfully.")
     finally:
@@ -974,4 +1061,3 @@ def update_client_remote(printer_name: str) -> None:
     })
 
     println(f"Remote client update complete for '{printer_name}'.")
-
