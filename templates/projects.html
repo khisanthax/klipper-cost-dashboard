@@ -361,7 +361,7 @@
                                             </thead>
                                             <tbody>
                                                 {% for pl in p.planned_items %}
-                                                <tr>
+                                                <tr class="{% if pl.status != 'active' %}table-secondary{% endif %}">
                                                     <td class="text-break">
                                                         {{ pl.filename }}
                                                         {% if pl.source %}
