@@ -366,7 +366,7 @@
                                                         {% if pl.est_filament_g is not none %}
                                                         {{ "%.1f"|format(pl.est_filament_g) }}
                                                         {% else %}
-                                                        —
+                                                        -
                                                         {% endif %}
                                                     </td>
                                                     <td class="text-end text-nowrap">${{ "%.2f"|format(pl.est_cost) }}</td>
@@ -383,6 +383,18 @@
                                                     <td class="text-nowrap">{{ pl.created_at }}</td>
                                                     <td class="text-nowrap">
                                                         <div class="d-flex gap-2">
+                                                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                data-kcd-plan-open="edit"
+                                                                data-project-id="{{ p.id }}"
+                                                                data-plan-id="{{ pl.plan_id }}"
+                                                                data-filename="{{ pl.filename|e }}"
+                                                                data-time-hours="{{ (pl.est_time_s / 3600.0) }}"
+                                                                data-filament-g="{{ pl.est_filament_g if pl.est_filament_g is not none else '' }}"
+                                                                data-est-cost="{{ pl.est_cost }}"
+                                                                data-source="{{ pl.source|e }}"
+                                                                data-notes="{{ pl.notes|e }}">
+                                                                Edit
+                                                            </button>
                                                             {% if pl.status == 'active' %}
                                                             <form method="post" class="m-0">
                                                                 <input type="hidden" name="action" value="fulfill_plan_item">
@@ -659,6 +671,101 @@
                 notes: btn.getAttribute("data-notes") || "",
             };
             openManualModal(mode, data);
+        });
+    })();
+</script>
+
+<!-- Planned Item Modal -->
+<div class="modal fade" id="kcdPlanModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form method="post" id="kcdPlanForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="kcdPlanTitle">Edit Planned Item</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="update_plan_item">
+                    <input type="hidden" name="project_id" id="kcdPlanProjectId" value="">
+                    <input type="hidden" name="plan_id" id="kcdPlanId" value="">
+
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Filename</label>
+                            <input type="text" class="form-control" name="filename" id="kcdPlanFilename" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Estimated time (hours)</label>
+                            <input type="text" class="form-control" name="time_hours" id="kcdPlanTimeHours" required>
+                            <div class="text-muted small">Must be &gt; 0</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Filament (g)</label>
+                            <input type="text" class="form-control" name="filament_g" id="kcdPlanFilamentG" placeholder="optional">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Estimated cost ($)</label>
+                            <input type="text" class="form-control" name="est_cost" id="kcdPlanCost" placeholder="optional">
+                            <div class="text-muted small">Leave blank to recalculate from defaults</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Source</label>
+                            <input type="text" class="form-control" name="source" id="kcdPlanSource" placeholder="optional">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notes</label>
+                            <textarea class="form-control" name="notes" id="kcdPlanNotes" rows="2" placeholder="optional"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        function getPlanModal() {
+            const el = document.getElementById("kcdPlanModal");
+            if (!el || !window.bootstrap || !bootstrap.Modal) return null;
+            return bootstrap.Modal.getOrCreateInstance(el, { focus: true });
+        }
+
+        function openPlanModal(data) {
+            const modal = getPlanModal();
+            if (!modal) return;
+
+            document.getElementById("kcdPlanProjectId").value = data.projectId || "";
+            document.getElementById("kcdPlanId").value = data.planId || "";
+            document.getElementById("kcdPlanFilename").value = data.filename || "";
+            document.getElementById("kcdPlanTimeHours").value = (data.timeHours ?? "").toString();
+            document.getElementById("kcdPlanFilamentG").value = (data.filamentG ?? "").toString();
+            document.getElementById("kcdPlanCost").value = (data.estCost ?? "").toString();
+            document.getElementById("kcdPlanSource").value = data.source || "";
+            document.getElementById("kcdPlanNotes").value = data.notes || "";
+
+            modal.show();
+            setTimeout(() => document.getElementById("kcdPlanFilename").focus(), 50);
+        }
+
+        document.addEventListener("click", function (e) {
+            const btn = e.target.closest("[data-kcd-plan-open]");
+            if (!btn) return;
+            const data = {
+                projectId: btn.getAttribute("data-project-id") || "",
+                planId: btn.getAttribute("data-plan-id") || "",
+                filename: btn.getAttribute("data-filename") || "",
+                timeHours: btn.getAttribute("data-time-hours") || "",
+                filamentG: btn.getAttribute("data-filament-g") || "",
+                estCost: btn.getAttribute("data-est-cost") || "",
+                source: btn.getAttribute("data-source") || "",
+                notes: btn.getAttribute("data-notes") || "",
+            };
+            openPlanModal(data);
         });
     })();
 </script>

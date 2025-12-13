@@ -552,6 +552,7 @@ def create_plan_item(
     est_filament_g: Optional[float] = None,
     source: str = "",
     notes: str = "",
+    est_cost_override: Optional[float] = None,
 ) -> PlannedItem:
     pid = str(project_id or "").strip()
     if not pid:
@@ -571,7 +572,14 @@ def create_plan_item(
     if time_s <= 0:
         raise ValueError("Estimated time must be provided")
 
-    est_cost = _planned_cost_from_defaults(time_s, est_filament_g=est_filament_g)
+    est_cost: float
+    if est_cost_override is not None and str(est_cost_override).strip() != "":
+        try:
+            est_cost = float(est_cost_override)
+        except (TypeError, ValueError):
+            est_cost = _planned_cost_from_defaults(time_s, est_filament_g=est_filament_g)
+    else:
+        est_cost = _planned_cost_from_defaults(time_s, est_filament_g=est_filament_g)
     item = PlannedItem(
         plan_id=uuid.uuid4().hex,
         project_id=pid,
@@ -590,6 +598,79 @@ def create_plan_item(
     plans.setdefault(pid, []).append(item)
     _save_plans(plans)
     return item
+
+
+def update_plan_item(
+    plan_id: str,
+    *,
+    filename: Optional[str] = None,
+    est_time_s: Optional[int] = None,
+    est_filament_g: Optional[float] = None,
+    est_cost: Optional[float] = None,
+    source: Optional[str] = None,
+    notes: Optional[str] = None,
+) -> PlannedItem:
+    """
+    Update an existing planned item (estimates-only overlay).
+
+    - Does not touch CSV history.
+    - If est_cost is None, cost is recomputed from defaults using time + filament.
+    """
+    pid = str(plan_id or "").strip()
+    if not pid:
+        raise ValueError("plan_id is required")
+
+    plans = load_plans()
+    for proj_id, items in plans.items():
+        for idx, it in enumerate(items):
+            if it.plan_id != pid:
+                continue
+
+            new_filename = it.filename if filename is None else str(filename or "").strip() or it.filename
+
+            time_s = it.est_time_s
+            if est_time_s is not None and str(est_time_s).strip() != "":
+                try:
+                    time_s = int(float(est_time_s))
+                except (TypeError, ValueError):
+                    time_s = 0
+            if time_s <= 0:
+                raise ValueError("Estimated time must be greater than 0")
+
+            filament_g = est_filament_g
+            if filament_g is None:
+                filament_g = it.est_filament_g
+
+            cost: float
+            if est_cost is None or str(est_cost).strip() == "":
+                cost = _planned_cost_from_defaults(time_s, est_filament_g=filament_g)
+            else:
+                try:
+                    cost = float(est_cost)
+                except (TypeError, ValueError):
+                    cost = _planned_cost_from_defaults(time_s, est_filament_g=filament_g)
+
+            new_source = it.source if source is None else str(source or "").strip()
+            new_notes = it.notes if notes is None else str(notes or "")
+
+            updated = PlannedItem(
+                plan_id=it.plan_id,
+                project_id=it.project_id,
+                filename=new_filename,
+                created_at=it.created_at,
+                est_time_s=time_s,
+                est_filament_g=filament_g,
+                est_cost=cost,
+                status=it.status,
+                source=new_source,
+                notes=new_notes,
+                converted_to_manual_job_id=it.converted_to_manual_job_id,
+            )
+            items[idx] = updated
+            _save_plans(plans)
+            return updated
+
+    raise ValueError("Planned item not found")
 
 
 def set_plan_status(plan_id: str, status: str) -> None:

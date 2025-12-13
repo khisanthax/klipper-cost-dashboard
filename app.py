@@ -680,12 +680,53 @@ def projects_page():
                         est_filament_g=meta.filament_g,
                         source=meta.slicer or "",
                     )
+                    redirect_args = {"msg": "Planned item added.", "edit_project": project_id}
                 finally:
                     if tmp_path and os.path.exists(tmp_path):
                         try:
                             os.remove(tmp_path)
                         except Exception:
                             pass
+
+            elif action == "update_plan_item":
+                plan_id = request.form.get("plan_id", "").strip()
+                project_id = request.form.get("project_id", "").strip()
+                filename = request.form.get("filename", "").strip()
+                time_hours = request.form.get("time_hours", "").strip()
+                filament_g = request.form.get("filament_g", "").strip()
+                est_cost = request.form.get("est_cost", "").strip()
+                source = request.form.get("source", "").strip()
+                notes = request.form.get("notes", "").strip()
+
+                try:
+                    est_time_s = int(float(time_hours) * 3600.0)
+                except (TypeError, ValueError):
+                    est_time_s = 0
+
+                filament_val = None
+                if filament_g != "":
+                    try:
+                        filament_val = float(filament_g)
+                    except (TypeError, ValueError):
+                        filament_val = None
+
+                cost_val = None
+                if est_cost != "":
+                    try:
+                        cost_val = float(est_cost)
+                    except (TypeError, ValueError):
+                        cost_val = None
+
+                projects.update_plan_item(
+                    plan_id,
+                    filename=filename,
+                    est_time_s=est_time_s,
+                    est_filament_g=filament_val,
+                    est_cost=cost_val,
+                    source=source,
+                    notes=notes,
+                )
+                redirect_args = {"msg": "Planned item updated.", "edit_project": project_id}
 
             elif action == "fulfill_plan_item":
                 plan_id = request.form.get("plan_id", "").strip()
