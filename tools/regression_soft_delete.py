@@ -58,30 +58,39 @@ def main() -> int:
         _write_csv(
             data_dir / "print_costs.csv",
             [
-                 {"printer": "P1", "filename": "a.gcode"},
-                 {"printer": "P2  ", "filename": "b.gcode"},
-             ],
-         )
+                {"printer": "P1", "filename": "a.gcode"},
+                {"printer": "P2  ", "filename": "b.gcode"},
+            ],
+        )
 
         from core import pricing
+        from core.reports import compute_printer_summaries
 
         assert "P1" in pricing.get_known_printers()
-         assert "P2" in pricing.get_known_printers()
+        assert "P2" in pricing.get_known_printers()
 
         # Soft delete for printer in settings + csv.
-         pricing.delete_printer("P1", delete_csv=False)
-         pricing.hide_printer("P1")
-         assert "P1" not in pricing.get_configured_printers()
-         assert "P1" not in pricing.get_known_printers()
+        pricing.delete_printer("P1", delete_csv=False)
+        pricing.hide_printer("P1")
+        assert "P1" not in pricing.get_configured_printers()
+        assert "P1" not in pricing.get_known_printers()
+        assert "P1" not in compute_printer_summaries(
+            rows=[{"printer": "P1", "duration_hours": "1", "total_cost": "1", "timestamp_raw": "0"}],
+            live_jobs_list=[],
+        )
 
         # CSV row remains.
         csv_text = (data_dir / "print_costs.csv").read_text(encoding="utf-8")
         assert "P1" in csv_text
 
         # Soft delete for printer only in csv.
-         pricing.hide_printer("P2")
-         assert "P2" not in pricing.get_discovered_printers()
-         assert "P2" not in pricing.get_known_printers()
+        pricing.hide_printer("P2")
+        assert "P2" not in pricing.get_discovered_printers()
+        assert "P2" not in pricing.get_known_printers()
+        assert "P2" not in compute_printer_summaries(
+            rows=[{"printer": "P2", "duration_hours": "1", "total_cost": "1", "timestamp_raw": "0"}],
+            live_jobs_list=[],
+        )
 
         # CSV row remains.
         csv_text = (data_dir / "print_costs.csv").read_text(encoding="utf-8")

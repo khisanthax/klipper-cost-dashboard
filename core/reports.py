@@ -4,8 +4,8 @@ Reporting utilities for Print Cost Dashboard.
 Merged from report_utils.py + additional reporting functions from app.py.
 """
 from datetime import datetime, timedelta
-from core.config import DEFAULT_TIMEZONE, SETTINGS_FILE
-from core.storage import ts_to_local_dt, load_settings
+from core.config import DEFAULT_TIMEZONE, SETTINGS_FILE, DISPLAY_FILE, HEADERS
+from core.storage import ts_to_local_dt, load_settings, load_display_settings
 
 
 def _parse_date(s):
@@ -251,30 +251,40 @@ def compute_printer_summaries(rows, live_jobs_list):
     """
     from datetime import datetime
     
+    def _norm(name) -> str:
+        return str(name or "").strip()
+
     summaries = {}
-    
-    # Get all known printers:
+
+    # Get all known printers for status cards:
     # 1) Persistent printers from settings.json
     # 2) Printers from historical CSV rows
     # 3) Printers from current live jobs
+    #
+    # Respect soft-delete ("hidden_printers") so deleted/hid printers don't keep
+    # reappearing in the dashboard cards due to CSV history.
+    hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
+
     settings = load_settings(SETTINGS_FILE)
-    printers = set(settings.keys())
+    printers = {_norm(p) for p in settings.keys() if _norm(p)}
 
     for r in rows:
-        pname = r.get("printer") or "Unknown"
-        printers.add(pname)
+        pname = _norm(r.get("printer"))
+        if pname:
+            printers.add(pname)
 
     for job in live_jobs_list:
-        pname = job.get("printer_name") or "Unknown"
-        printers.add(pname)
+        pname = _norm(job.get("printer_name"))
+        if pname:
+            printers.add(pname)
+
+    printers = {p for p in printers if p not in hidden and p != "Unknown"}
     
     # Compute for each printer
     today_start = ts_to_local_dt(datetime.now().timestamp()).replace(hour=0, minute=0, second=0, microsecond=0)
     today_ts = today_start.timestamp()
     
     for printer in printers:
-        if printer == "Unknown":
-            continue
             
         summary = {
             "status": "idle",
@@ -287,14 +297,14 @@ def compute_printer_summaries(rows, live_jobs_list):
         
         # Check for active job
         for job in live_jobs_list:
-            if job.get("printer_name") == printer:
+            if _norm(job.get("printer_name")) == printer:
                 summary["status"] = job.get("status", "printing")
                 summary["last_job_name"] = job.get("filename", "Unknown")
                 summary["profile_name"] = job.get("profile_id")
                 break
         
         # Find most recent completed job
-        printer_rows = [r for r in rows if r.get("printer") == printer]
+        printer_rows = [r for r in rows if _norm(r.get("printer")) == printer]
         if printer_rows:
             # Sort by timestamp descending
             sorted_rows = sorted(
