@@ -367,6 +367,7 @@ def index():
     summary.setdefault("per_printer", {})
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     selected_columns = display_settings.get("visible_columns") or HEADERS
+    visible_cols = selected_columns
 
     # Prepare chart data
     chart_cost_per_day = {"labels": [], "values": []}
