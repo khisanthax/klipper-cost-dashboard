@@ -157,6 +157,7 @@
                                                     <th>Filename</th>
                                                     <th>Status</th>
                                                     <th class="text-end">Hours</th>
+                                                    <th class="text-end">Filament</th>
                                                     <th class="text-end">Cost</th>
                                                     <th style="width: 1%;"></th>
                                                 </tr>
@@ -169,6 +170,13 @@
                                                     <td class="text-break">{{ j.filename }}</td>
                                                     <td class="text-nowrap">{{ j.status }}</td>
                                                     <td class="text-end">{{ "%.2f"|format(j.duration_hours|float) }}</td>
+                                                    <td class="text-end text-nowrap">
+                                                        {% if j.filament_meters %}
+                                                        {{ "%.2f"|format(j.filament_meters|float) }} m
+                                                        {% else %}
+                                                        —
+                                                        {% endif %}
+                                                    </td>
                                                     <td class="text-end">${{ "%.2f"|format(j.total_cost|float) }}</td>
                                                     <td class="text-nowrap">
                                                         <form method="post" class="m-0">
@@ -454,6 +462,7 @@
                             <th>Filename</th>
                             <th>Status</th>
                             <th class="text-end">Hours</th>
+                            <th class="text-end">Filament</th>
                             <th class="text-end">Cost</th>
                         </tr>
                     </thead>
@@ -468,6 +477,13 @@
                             <td class="text-break">{{ j.filename }}</td>
                             <td class="text-nowrap">{{ j.status }}</td>
                             <td class="text-end">{{ "%.2f"|format(j.duration_hours|float) }}</td>
+                            <td class="text-end text-nowrap">
+                                {% if j.filament_meters %}
+                                {{ "%.2f"|format(j.filament_meters|float) }} m
+                                {% else %}
+                                —
+                                {% endif %}
+                            </td>
                             <td class="text-end">${{ "%.2f"|format(j.total_cost|float) }}</td>
                         </tr>
                         {% endfor %}
