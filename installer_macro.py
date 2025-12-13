@@ -228,8 +228,8 @@ def insert_run_shell_command(macro_name, path, printer_name):
       shutdown command (TURN_OFF_HEATERS, M104 S0, M140 S0, _ALL_FAN_OFF, M84, etc.).
       If none found, append near the end of the macro.
 
-    Note: `printer_name` is kept for compatibility but the inserted Jinja uses `printer.name`
-    so it always reflects the actual Klipper printer object.
+    Note: `printer_name` is kept for compatibility but the inserted Jinja uses the
+    baked value from `printer["gcode_macro _KCD_VARS"].printer_name` (set by the installer).
     """
 
     if not os.path.exists(path):
@@ -267,11 +267,11 @@ def insert_run_shell_command(macro_name, path, printer_name):
         f"{indent}{KCD_START_END_MARKER} - DO NOT MODIFY OR DELETE THIS BLOCK ###\n",
         f"{indent}G4 P500\n",
         f"{indent}# KCD: send cost data to dashboard\n",
-        f"{indent}{{% set printer_name = printer.name %}}\n",
-        f"{indent}{{% set fname = printer.print_stats.filename|default('unknown.gcode') %}}\n",
+        f'{indent}{{% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}}\n',
+        f'{indent}{{% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}}\n',
         f"{indent}{{% set dur = printer.print_stats.print_duration|int %}}\n",
         f"{indent}{{% set filament = printer.print_stats.filament_used|default(0)|int %}}\n",
-        f"{indent}{{% set params = printer_name ~ ' ' ~ fname ~ ' ' ~ dur ~ ' ' ~ filament %}}\n",
+        f"{indent}{{% set params = printer_name ~ '|' ~ fname ~ '|' ~ dur ~ '|' ~ filament %}}\n",
         f'{indent}RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{{params}}"\n',
         f"{indent}{KCD_END_END_MARKER} ###\n",
         "\n",
@@ -309,11 +309,11 @@ gcode:
     G4 P500
 
     # KCD: send cost data to dashboard
-    {{% set printer_name = printer.name %}}
-    {{% set fname = printer.print_stats.filename|default('unknown.gcode') %}}
+    {{% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}}
+    {{% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}}
     {{% set dur = printer.print_stats.print_duration|int %}}
     {{% set filament = printer.print_stats.filament_used|default(0)|int %}}
-    {{% set params = printer_name ~ ' ' ~ fname ~ ' ' ~ dur ~ ' ' ~ filament %}}
+    {{% set params = printer_name ~ '|' ~ fname ~ '|' ~ dur ~ '|' ~ filament %}}
     RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{{params}}"
     {KCD_END_END_MARKER} ###
 
@@ -419,11 +419,11 @@ def prompt_macro_insertion(printer_name, config_dir, default_macro=None, default
         print("  - Please add a universal KCD block manually just before heaters/steppers shut off:")
         print('    G4 P500')
         print('    # KCD: send cost data to dashboard')
-        print('    {% set printer_name = printer.name %}')
-        print('    {% set fname = printer.print_stats.filename|default(\'unknown.gcode\') %}')
+        print('    {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}')
+        print('    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}')
         print('    {% set dur = printer.print_stats.print_duration|int %}')
         print('    {% set filament = printer.print_stats.filament_used|default(0)|int %}')
-        print('    {% set params = printer_name ~ \' \' ~ fname ~ \' \' ~ dur ~ \' \' ~ filament %}')
+        print('    {% set params = printer_name ~ \'|\' ~ fname ~ \'|\' ~ dur ~ \'|\' ~ filament %}')
         print('    RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{{params}}"')
         return None, None
 
