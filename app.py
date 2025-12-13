@@ -512,8 +512,44 @@ def projects_page():
                 if job_keys:
                     projects.unassign_jobs(job_keys)
 
+            elif action == "create_manual_job":
+                project_id = request.form.get("project_id", "").strip()
+                title = request.form.get("title", "").strip()
+                hours = request.form.get("hours", "").strip()
+                filament_g = request.form.get("filament_g", "").strip()
+                cost_override = request.form.get("cost_override", "").strip()
+                notes = request.form.get("notes", "").strip()
+                projects.create_manual_job(
+                    project_id=project_id,
+                    title=title,
+                    hours=hours,
+                    filament_g=filament_g,
+                    cost_override=cost_override,
+                    notes=notes,
+                )
+
+            elif action == "update_manual_job":
+                manual_job_id = request.form.get("manual_job_id", "").strip()
+                title = request.form.get("title", "").strip()
+                hours = request.form.get("hours", "").strip()
+                filament_g = request.form.get("filament_g", "").strip()
+                cost_override = request.form.get("cost_override", "").strip()
+                notes = request.form.get("notes", "").strip()
+                projects.update_manual_job(
+                    manual_job_id=manual_job_id,
+                    title=title,
+                    hours=hours,
+                    filament_g=filament_g,
+                    cost_override=cost_override,
+                    notes=notes,
+                )
+
+            elif action == "delete_manual_job":
+                manual_job_id = request.form.get("manual_job_id", "").strip()
+                projects.delete_manual_job(manual_job_id)
+
             # Always cleanup after any mutation
-            projects.recalculate()
+            projects.recalculate_all()
         except projects.ProjectsDataError as e:
             error = str(e)
         except ValueError as e:
@@ -533,7 +569,7 @@ def projects_page():
     error = request.args.get("error") or error
 
     try:
-        projects_map, assignments = projects.recalculate()
+        projects_map, assignments, manual_jobs_by_project = projects.recalculate_all()
         project_jobs, unassigned_jobs = projects.group_rows_by_project(rows)
     except projects.ProjectsDataError as e:
         return render_template(
@@ -548,7 +584,25 @@ def projects_page():
     project_rows = []
     for pid, p in projects_map.items():
         jobs = project_jobs.get(pid, [])
-        totals = projects.compute_project_totals(jobs)
+        manual_jobs = manual_jobs_by_project.get(pid, [])
+        totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs)
+
+        manual_jobs_view = []
+        for mj in manual_jobs:
+            manual_jobs_view.append(
+                {
+                    "manual_job_id": mj.manual_job_id,
+                    "title": mj.title,
+                    "hours": mj.hours,
+                    "filament_g": mj.filament_g,
+                    "cost_override": mj.cost_override,
+                    "computed_cost": projects.compute_manual_job_cost(mj),
+                    "created_at": mj.created_at,
+                    "notes": mj.notes,
+                }
+            )
+        manual_jobs_view.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
         project_rows.append(
             {
                 "id": pid,
@@ -558,6 +612,7 @@ def projects_page():
                 "updated_at": p.updated_at,
                 "totals": totals,
                 "jobs": sorted(jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True),
+                "manual_jobs": manual_jobs_view,
             }
         )
 

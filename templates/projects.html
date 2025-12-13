@@ -76,7 +76,7 @@
                         <th>Project</th>
                         <th class="text-end">Prints</th>
                         <th class="text-end">Hours</th>
-                        <th class="text-end">Filament (m)</th>
+                        <th class="text-end">Filament</th>
                         <th class="text-end">Cost</th>
                         <th>Notes</th>
                     </tr>
@@ -98,7 +98,12 @@
                         <td class="fw-semibold">{{ p.name }}</td>
                         <td class="text-end">{{ p.totals.prints|int }}</td>
                         <td class="text-end">{{ "%.2f"|format(p.totals.hours) }}</td>
-                        <td class="text-end">{{ "%.2f"|format(p.totals.meters) }}</td>
+                        <td class="text-end">
+                            <div>{{ "%.2f"|format(p.totals.meters) }} m</div>
+                            {% if p.totals.filament_g and p.totals.filament_g > 0 %}
+                            <div class="text-muted small">{{ "%.1f"|format(p.totals.filament_g) }} g</div>
+                            {% endif %}
+                        </td>
                         <td class="text-end">${{ "%.2f"|format(p.totals.cost) }}</td>
                         <td class="text-muted">{{ p.notes }}</td>
                     </tr>
@@ -168,6 +173,119 @@
                                                                 Unassign
                                                             </button>
                                                         </form>
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {% endif %}
+
+                                    <hr class="my-4">
+
+                                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                                        <h6 class="mb-0">Manual Jobs</h6>
+                                        <span class="text-muted small">Cost is time-only unless an override is set.</span>
+                                    </div>
+
+                                    <div class="card mb-3">
+                                        <div class="card-body">
+                                            <form method="post" class="row g-2 align-items-end">
+                                                <input type="hidden" name="action" value="create_manual_job">
+                                                <input type="hidden" name="project_id" value="{{ p.id }}">
+                                                <div class="col-md-4">
+                                                    <label class="form-label">Description</label>
+                                                    <input type="text" class="form-control" name="title" required>
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label">Hours</label>
+                                                    <input type="text" class="form-control" name="hours" placeholder="1.5" required>
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label">Filament (g)</label>
+                                                    <input type="text" class="form-control" name="filament_g" placeholder="optional">
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label">Cost override ($)</label>
+                                                    <input type="text" class="form-control" name="cost_override" placeholder="optional">
+                                                </div>
+                                                <div class="col-md-2 d-flex">
+                                                    <button type="submit" class="btn btn-outline-primary w-100">Add Manual Job</button>
+                                                </div>
+                                                <div class="col-12">
+                                                    <label class="form-label">Notes (optional)</label>
+                                                    <input type="text" class="form-control" name="notes">
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+
+                                    {% if not p.manual_jobs %}
+                                    <div class="text-muted">No manual jobs for this project.</div>
+                                    {% else %}
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Description</th>
+                                                    <th class="text-end">Hours</th>
+                                                    <th class="text-end">Filament (g)</th>
+                                                    <th class="text-end">Cost</th>
+                                                    <th class="text-nowrap">Created</th>
+                                                    <th style="width: 1%;"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for mj in p.manual_jobs %}
+                                                <form id="mj_update_{{ mj.manual_job_id }}" method="post" class="d-none">
+                                                    <input type="hidden" name="action" value="update_manual_job">
+                                                    <input type="hidden" name="manual_job_id" value="{{ mj.manual_job_id }}">
+                                                </form>
+                                                <form id="mj_delete_{{ mj.manual_job_id }}" method="post" class="d-none">
+                                                    <input type="hidden" name="action" value="delete_manual_job">
+                                                    <input type="hidden" name="manual_job_id" value="{{ mj.manual_job_id }}">
+                                                </form>
+                                                <tr>
+                                                    <td>
+                                                        <div class="mb-1">
+                                                            <input form="mj_update_{{ mj.manual_job_id }}" type="text"
+                                                                class="form-control form-control-sm" name="title"
+                                                                value="{{ mj.title }}" required>
+                                                        </div>
+                                                        <div>
+                                                            <input form="mj_update_{{ mj.manual_job_id }}" type="text"
+                                                                class="form-control form-control-sm" name="notes"
+                                                                value="{{ mj.notes }}" placeholder="notes (optional)">
+                                                        </div>
+                                                    </td>
+                                                    <td class="text-end" style="min-width: 90px;">
+                                                        <input form="mj_update_{{ mj.manual_job_id }}" type="text"
+                                                            class="form-control form-control-sm text-end" name="hours"
+                                                            value="{{ mj.hours }}">
+                                                    </td>
+                                                    <td class="text-end" style="min-width: 110px;">
+                                                        <input form="mj_update_{{ mj.manual_job_id }}" type="text"
+                                                            class="form-control form-control-sm text-end" name="filament_g"
+                                                            value="{{ mj.filament_g }}">
+                                                    </td>
+                                                    <td class="text-end" style="min-width: 130px;">
+                                                        <div class="mb-1">
+                                                            <input form="mj_update_{{ mj.manual_job_id }}" type="text"
+                                                                class="form-control form-control-sm text-end" name="cost_override"
+                                                                value="{{ mj.cost_override if mj.cost_override is not none else '' }}"
+                                                                placeholder="override (optional)">
+                                                        </div>
+                                                        <div class="text-muted small">Used: ${{ "%.2f"|format(mj.computed_cost) }}</div>
+                                                    </td>
+                                                    <td class="text-nowrap" style="min-width: 180px;">{{ mj.created_at }}</td>
+                                                    <td class="text-nowrap">
+                                                        <div class="d-flex gap-2">
+                                                            <button form="mj_update_{{ mj.manual_job_id }}" type="submit"
+                                                                class="btn btn-sm btn-outline-primary">Save</button>
+                                                            <button form="mj_delete_{{ mj.manual_job_id }}" type="submit"
+                                                                class="btn btn-sm btn-outline-danger"
+                                                                onclick="return confirm('Delete this manual job?')">Delete</button>
+                                                        </div>
                                                     </td>
                                                 </tr>
                                                 {% endfor %}
@@ -250,4 +368,3 @@
     </div>
 </div>
 {% endblock %}
-

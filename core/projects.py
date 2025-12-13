@@ -20,14 +20,17 @@ import json
 import os
 import time
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.config import DATA_DIR
+from core.config import DEFAULT_PRICING
 
 
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
 ASSIGNMENTS_FILE = os.path.join(DATA_DIR, "project_assignments.json")
+MANUAL_JOBS_FILE = os.path.join(DATA_DIR, "project_manual_jobs.json")
 
 
 class ProjectsDataError(RuntimeError):
@@ -41,6 +44,18 @@ class Project:
     notes: str = ""
     created_at: float = 0.0
     updated_at: float = 0.0
+
+
+@dataclass(frozen=True)
+class ManualJob:
+    manual_job_id: str
+    project_id: str
+    title: str
+    hours: float
+    filament_g: float = 0.0
+    cost_override: Optional[float] = None
+    created_at: str = ""
+    notes: str = ""
 
 
 def _ensure_data_dir() -> None:
@@ -75,6 +90,8 @@ def ensure_projects_files() -> None:
         _write_json(PROJECTS_FILE, [])
     if not os.path.exists(ASSIGNMENTS_FILE):
         _write_json(ASSIGNMENTS_FILE, {})
+    if not os.path.exists(MANUAL_JOBS_FILE):
+        _write_json(MANUAL_JOBS_FILE, [])
 
 
 def load_projects() -> Dict[str, Project]:
@@ -131,6 +148,249 @@ def save_assignments(assignments: Dict[str, str]) -> None:
     _write_json(ASSIGNMENTS_FILE, dict(assignments))
 
 
+def load_manual_jobs() -> Dict[str, List[ManualJob]]:
+    """
+    Return manual jobs grouped by project_id.
+
+    Storage is a list of dicts in `data/project_manual_jobs.json`.
+    """
+    ensure_projects_files()
+    raw = _read_json(MANUAL_JOBS_FILE, [])
+    if not isinstance(raw, list):
+        raise ProjectsDataError(f"{MANUAL_JOBS_FILE} must contain a JSON list")
+
+    jobs_by_project: Dict[str, List[ManualJob]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        mid = str(item.get("manual_job_id") or "").strip()
+        pid = str(item.get("project_id") or "").strip()
+        title = str(item.get("title") or item.get("description") or "").strip()
+        if not mid or not pid or not title:
+            continue
+        try:
+            hours = float(item.get("hours") or 0.0)
+        except (TypeError, ValueError):
+            hours = 0.0
+        try:
+            filament_g = float(item.get("filament_g") or 0.0)
+        except (TypeError, ValueError):
+            filament_g = 0.0
+
+        cost_override_raw = item.get("cost_override", None)
+        cost_override: Optional[float]
+        if cost_override_raw is None or str(cost_override_raw).strip() == "":
+            cost_override = None
+        else:
+            try:
+                cost_override = float(cost_override_raw)
+            except (TypeError, ValueError):
+                cost_override = None
+
+        created_at = str(item.get("created_at") or "").strip()
+        notes = str(item.get("notes") or "")
+
+        mj = ManualJob(
+            manual_job_id=mid,
+            project_id=pid,
+            title=title,
+            hours=hours,
+            filament_g=filament_g,
+            cost_override=cost_override,
+            created_at=created_at,
+            notes=notes,
+        )
+        jobs_by_project.setdefault(pid, []).append(mj)
+
+    return jobs_by_project
+
+
+def _save_manual_jobs(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
+    payload: List[Dict[str, Any]] = []
+    for pid, jobs in jobs_by_project.items():
+        for j in jobs:
+            payload.append(
+                {
+                    "manual_job_id": j.manual_job_id,
+                    "project_id": j.project_id,
+                    "title": j.title,
+                    "hours": float(j.hours or 0.0),
+                    "filament_g": float(j.filament_g or 0.0),
+                    "cost_override": j.cost_override,
+                    "created_at": j.created_at,
+                    "notes": j.notes,
+                }
+            )
+    _write_json(MANUAL_JOBS_FILE, payload)
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def create_manual_job(
+    project_id: str,
+    title: str,
+    hours: float,
+    filament_g: Optional[float] = None,
+    cost_override: Optional[float] = None,
+    notes: str = "",
+) -> ManualJob:
+    pid = str(project_id or "").strip()
+    if not pid:
+        raise ValueError("project_id is required")
+
+    projects = load_projects()
+    if pid not in projects:
+        raise ValueError("Project not found")
+
+    title = str(title or "").strip()
+    if not title:
+        raise ValueError("Description is required")
+
+    try:
+        hours_f = float(hours)
+    except (TypeError, ValueError):
+        raise ValueError("Hours must be a number")
+    if hours_f <= 0:
+        raise ValueError("Hours must be greater than 0")
+
+    filament_f = 0.0
+    if filament_g is not None and str(filament_g).strip() != "":
+        try:
+            filament_f = float(filament_g)
+        except (TypeError, ValueError):
+            filament_f = 0.0
+
+    override_f: Optional[float]
+    if cost_override is None or str(cost_override).strip() == "":
+        override_f = None
+    else:
+        try:
+            override_f = float(cost_override)
+        except (TypeError, ValueError):
+            override_f = None
+
+    mj = ManualJob(
+        manual_job_id=uuid.uuid4().hex,
+        project_id=pid,
+        title=title,
+        hours=hours_f,
+        filament_g=filament_f,
+        cost_override=override_f,
+        created_at=_iso_now(),
+        notes=str(notes or ""),
+    )
+
+    jobs_by_project = load_manual_jobs()
+    jobs_by_project.setdefault(pid, []).append(mj)
+    _save_manual_jobs(jobs_by_project)
+    return mj
+
+
+def update_manual_job(
+    manual_job_id: str,
+    title: str,
+    hours: float,
+    filament_g: Optional[float] = None,
+    cost_override: Optional[float] = None,
+    notes: str = "",
+) -> ManualJob:
+    mid = str(manual_job_id or "").strip()
+    if not mid:
+        raise ValueError("manual_job_id is required")
+
+    title = str(title or "").strip()
+    if not title:
+        raise ValueError("Description is required")
+
+    try:
+        hours_f = float(hours)
+    except (TypeError, ValueError):
+        raise ValueError("Hours must be a number")
+    if hours_f <= 0:
+        raise ValueError("Hours must be greater than 0")
+
+    filament_f = 0.0
+    if filament_g is not None and str(filament_g).strip() != "":
+        try:
+            filament_f = float(filament_g)
+        except (TypeError, ValueError):
+            filament_f = 0.0
+
+    override_f: Optional[float]
+    if cost_override is None or str(cost_override).strip() == "":
+        override_f = None
+    else:
+        try:
+            override_f = float(cost_override)
+        except (TypeError, ValueError):
+            override_f = None
+
+    jobs_by_project = load_manual_jobs()
+    for pid, jobs in jobs_by_project.items():
+        for idx, j in enumerate(jobs):
+            if j.manual_job_id == mid:
+                updated = ManualJob(
+                    manual_job_id=j.manual_job_id,
+                    project_id=j.project_id,
+                    title=title,
+                    hours=hours_f,
+                    filament_g=filament_f,
+                    cost_override=override_f,
+                    created_at=j.created_at,
+                    notes=str(notes or ""),
+                )
+                jobs[idx] = updated
+                _save_manual_jobs(jobs_by_project)
+                return updated
+
+    raise ValueError("Manual job not found")
+
+
+def delete_manual_job(manual_job_id: str) -> None:
+    mid = str(manual_job_id or "").strip()
+    if not mid:
+        return
+    jobs_by_project = load_manual_jobs()
+    changed = False
+    for pid, jobs in list(jobs_by_project.items()):
+        new_jobs = [j for j in jobs if j.manual_job_id != mid]
+        if len(new_jobs) != len(jobs):
+            jobs_by_project[pid] = new_jobs
+            changed = True
+    if changed:
+        _save_manual_jobs(jobs_by_project)
+
+
+def _manual_job_cost(mj: ManualJob, hourly_rate: float) -> float:
+    if mj.cost_override is not None:
+        try:
+            return float(mj.cost_override)
+        except (TypeError, ValueError):
+            return 0.0
+    # v1: time-only cost, filament optional is tracked but not monetized here.
+    try:
+        return float(mj.hours or 0.0) * float(hourly_rate or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def compute_manual_job_cost(mj: ManualJob, hourly_rate: Optional[float] = None) -> float:
+    """
+    Compute the cost contribution of a manual job.
+
+    v1 behavior:
+    - If cost_override is present, it is used as the exact job cost.
+    - Otherwise, cost is time-only: hours * hourly_rate.
+    - Filament grams are tracked but not monetized here (until a clear pricing
+      rule exists for manual entries).
+    """
+    if hourly_rate is None:
+        hourly_rate = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
+    return _manual_job_cost(mj, hourly_rate=float(hourly_rate or 0.0))
+
+
 def create_project(name: str, notes: str = "") -> Project:
     name = str(name or "").strip()
     if not name:
@@ -185,6 +445,12 @@ def delete_project(project_id: str) -> None:
     new_assignments = {k: v for k, v in assignments.items() if v != pid}
     if new_assignments != assignments:
         save_assignments(new_assignments)
+
+    # Remove manual jobs in this project.
+    jobs_by_project = load_manual_jobs()
+    if pid in jobs_by_project:
+        jobs_by_project.pop(pid, None)
+        _save_manual_jobs(jobs_by_project)
 
 
 def assign_jobs(job_keys: Iterable[str], project_id: str) -> None:
@@ -248,6 +514,23 @@ def recalculate() -> Tuple[Dict[str, Project], Dict[str, str]]:
     return projects, assignments
 
 
+def recalculate_all() -> Tuple[Dict[str, Project], Dict[str, str], Dict[str, List[ManualJob]]]:
+    """
+    Recalculate/cleanup all project-related stores:
+    - Drop assignment entries referencing missing projects.
+    - Drop manual jobs referencing missing projects.
+    Returns (projects, assignments, manual_jobs_by_project).
+    """
+    projects, assignments = recalculate()
+    jobs_by_project = load_manual_jobs()
+    valid_ids = set(projects.keys())
+    cleaned_jobs = {pid: jobs for pid, jobs in jobs_by_project.items() if pid in valid_ids}
+    if cleaned_jobs != jobs_by_project:
+        _save_manual_jobs(cleaned_jobs)
+        jobs_by_project = cleaned_jobs
+    return projects, assignments, jobs_by_project
+
+
 def group_rows_by_project(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
     """
     Return (project_jobs, unassigned_jobs) where project_jobs maps project_id to row list.
@@ -270,15 +553,36 @@ def group_rows_by_project(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, List[Di
     return project_jobs, unassigned
 
 
-def compute_project_totals(rows: List[Dict[str, Any]]) -> Dict[str, float]:
-    totals = {"prints": 0.0, "hours": 0.0, "meters": 0.0, "cost": 0.0}
-    totals["prints"] = float(len(rows))
-    for r in rows:
+def compute_project_totals(
+    tracked_rows: List[Dict[str, Any]],
+    manual_jobs: Optional[List[ManualJob]] = None,
+) -> Dict[str, float]:
+    """
+    Compute derived totals for a project (tracked jobs + manual jobs).
+
+    - Filament totals are tracked separately:
+        tracked -> meters
+        manual -> grams (optional)
+    - Manual job cost is time-only unless cost_override is provided.
+    """
+    manual_jobs = manual_jobs or []
+    totals = {"prints": 0.0, "hours": 0.0, "meters": 0.0, "filament_g": 0.0, "cost": 0.0}
+    totals["prints"] = float(len(tracked_rows) + len(manual_jobs))
+
+    for r in tracked_rows:
         try:
             totals["hours"] += float(r.get("duration_hours") or 0.0)
             totals["meters"] += float(r.get("filament_meters") or 0.0)
             totals["cost"] += float(r.get("total_cost") or 0.0)
         except (TypeError, ValueError):
             continue
-    return totals
 
+    hourly_rate = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
+    for mj in manual_jobs:
+        try:
+            totals["hours"] += float(mj.hours or 0.0)
+            totals["filament_g"] += float(mj.filament_g or 0.0)
+            totals["cost"] += _manual_job_cost(mj, hourly_rate=hourly_rate)
+        except (TypeError, ValueError):
+            continue
+    return totals
