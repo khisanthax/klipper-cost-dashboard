@@ -30,6 +30,11 @@ from core import pricing
 from core import live
 from core import projects
 from core.gcode_metadata import extract_gcode_metadata
+from core.printers import (
+    get_canonical_printer_names,
+    normalize_incoming_printer_and_filename,
+    looks_like_gcode_filename,
+)
 
 app = Flask(__name__)
 
@@ -61,14 +66,18 @@ def log_print():
     except ValueError:
         return jsonify({"status": "error", "error": "Numeric fields must be numbers"}), 400
 
-    printer_name = str(payload["printer"])
-    filename = str(payload["filename"])
+    printer_name_raw = str(payload["printer"])
+    filename_raw = str(payload["filename"])
 
-    # Make sure printer exists in settings
-    settings = load_settings(SETTINGS_FILE)
-    if printer_name not in settings:
-        settings[printer_name] = dict(DEFAULT_PRICING)
-        save_settings(SETTINGS_FILE, DATA_DIR, settings)
+    canonical = get_canonical_printer_names()
+    norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
+    if not norm.valid_printer:
+        app.logger.warning(norm.reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"status": "error", "error": norm.reason}), 400
+
+    printer_name = norm.printer_name
+    filename = norm.filename
 
     # Check for live job metadata
     from core import live
@@ -149,16 +158,19 @@ def job_start():
     from core import live
     
     data = request.get_json() or request.form.to_dict()
-    printer_name = data.get("printer_name")
-    filename = data.get("filename")
+    printer_name_raw = data.get("printer_name")
+    filename_raw = data.get("filename")
 
-    # Guard against swapped arguments (some clients may send filename as printer_name)
-    if printer_name and isinstance(printer_name, str):
-        lower = printer_name.lower()
-        if lower.endswith((".gcode", ".gco", ".g")):
-            # Likely swapped: printer_name looks like a file, so swap with filename
-            printer_name, filename = filename, printer_name
-    
+    canonical = get_canonical_printer_names()
+    norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
+    if not norm.valid_printer:
+        app.logger.warning(norm.reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": norm.reason}), 400
+
+    printer_name = norm.printer_name
+    filename = norm.filename
+
     if not printer_name or not filename:
         return jsonify({"success": False, "error": "Missing required fields: printer_name, filename"}), 400
     
@@ -202,6 +214,18 @@ def job_update():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     # Extract update fields (exclude printer_name from updates)
     updates = {k: v for k, v in data.items() if k != "printer_name"}
@@ -233,6 +257,18 @@ def job_pause():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     result = live.pause_job(printer_name)
     
@@ -253,6 +289,18 @@ def job_resume():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     result = live.resume_job(printer_name)
     
@@ -274,6 +322,18 @@ def job_cancel():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        error = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(error)
+        return jsonify({"success": False, "error": error}), 400
+
+    if printer_name not in canonical:
+        error = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(error)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": error}), 400
     
     result = live.cancel_job(printer_name, reason)
     
@@ -294,6 +354,18 @@ def job_end():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     result = live.end_job(printer_name)
     
