@@ -4,7 +4,7 @@ Projects feature for Klipper Cost Dashboard.
 Data storage:
 - Projects are stored in `data/projects.json` as a list of project objects.
 - Job membership is stored in `data/project_assignments.json` as a mapping:
-    job_key -> project_id
+    job_uid -> project_id
 
 Delete behavior:
 - Deleting a project unassigns its jobs (membership mapping entries are removed)
@@ -26,6 +26,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.config import DATA_DIR
 from core.config import DEFAULT_PRICING
+from core.storage import compute_job_uid
 
 
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
@@ -927,6 +928,69 @@ def job_key(row: Dict[str, Any]) -> str:
     return "|".join([ts, printer, filename, duration, filament])
 
 
+def job_uid(row: Dict[str, Any]) -> str:
+    """
+    Return a stable UID for a history row.
+
+    Prefer the precomputed `job_uid` field (added by core.storage.load_rows_raw),
+    otherwise compute it from row fields deterministically.
+    """
+    existing = row.get("job_uid")
+    if isinstance(existing, str) and existing.strip():
+        return existing.strip()
+    return compute_job_uid(row)
+
+
+def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Migrate legacy assignment keys (job_key) to the stable job_uid.
+
+    This is safe and idempotent:
+      - If assignments already use job_uid keys, it does nothing.
+      - If a legacy key cannot be mapped to a current row, it is dropped.
+
+    Returns the (possibly migrated) assignments mapping.
+    """
+    assignments = load_assignments()
+    if not assignments:
+        return assignments
+
+    def _looks_like_uid(k: str) -> bool:
+        return k.startswith("job_") and len(k) >= 8
+
+    # Build mapping from legacy job_key -> job_uid for current rows.
+    legacy_to_uid: Dict[str, str] = {}
+    for r in rows:
+        try:
+            legacy_to_uid[job_key(r)] = job_uid(r)
+        except Exception:
+            continue
+
+    migrated: Dict[str, str] = {}
+    changed = False
+    for k, pid in assignments.items():
+        key = str(k or "").strip()
+        if not key:
+            changed = True
+            continue
+        if _looks_like_uid(key):
+            migrated[key] = pid
+            continue
+        mapped = legacy_to_uid.get(key)
+        if mapped:
+            migrated[mapped] = pid
+            changed = True
+        else:
+            # Orphaned assignment (row not found); treat as unassigned.
+            changed = True
+
+    if changed and migrated != assignments:
+        save_assignments(migrated)
+        return migrated
+
+    return assignments
+
+
 def recalculate() -> Tuple[Dict[str, Project], Dict[str, str]]:
     """
     Clean up references after mutations:
@@ -969,17 +1033,19 @@ def recalculate_all() -> Tuple[Dict[str, Project], Dict[str, str], Dict[str, Lis
 def group_rows_by_project(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
     """
     Return (project_jobs, unassigned_jobs) where project_jobs maps project_id to row list.
-    Each row will have an added `job_key` field.
+    Each row will have added `job_uid` (stable) and `job_key` (legacy) fields.
     """
     projects, assignments = recalculate()
     project_jobs: Dict[str, List[Dict[str, Any]]] = {pid: [] for pid in projects.keys()}
     unassigned: List[Dict[str, Any]] = []
 
     for r in rows:
+        uid = job_uid(r)
         jk = job_key(r)
         rr = dict(r)
-        rr["job_key"] = jk
-        pid = assignments.get(jk)
+        rr["job_uid"] = uid
+        rr["job_key"] = jk  # legacy, for backward compatibility
+        pid = assignments.get(uid) or assignments.get(jk)
         if pid and pid in project_jobs:
             project_jobs[pid].append(rr)
         else:

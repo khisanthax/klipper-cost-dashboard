@@ -557,7 +557,7 @@ def projects_page():
     """
     Projects page:
     - Projects are stored in data/projects.json
-    - Job membership is stored in data/project_assignments.json (job_key -> project_id)
+    - Job membership is stored in data/project_assignments.json (job_uid -> project_id)
     - Deleting a project unassigns jobs (no CSV rows are deleted)
     """
     error = None
@@ -806,6 +806,9 @@ def projects_page():
     edit_manual_job_id = request.args.get("edit_manual_job_id", "").strip() or request.args.get("edit_manual", "").strip()
 
     try:
+        # Ensure legacy assignment keys are migrated to stable job_uids.
+        projects.migrate_assignments_to_job_uid(rows)
+
         projects_map, assignments, manual_jobs_by_project, plans_by_project = projects.recalculate_all()
         project_jobs, unassigned_jobs = projects.group_rows_by_project(rows)
     except projects.ProjectsDataError as e:
