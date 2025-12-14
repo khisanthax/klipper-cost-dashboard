@@ -52,9 +52,25 @@
                 <label class="form-label">Project name</label>
                 <input type="text" class="form-control" name="name" required>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <label class="form-label">Notes (optional)</label>
                 <input type="text" class="form-control" name="notes">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Hourly rate (override)</label>
+                <input type="text" class="form-control" name="hourly_rate_override" placeholder="optional">
+                <div class="text-muted small">$/hr</div>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Filament (override)</label>
+                <input type="text" class="form-control" name="filament_cost_per_kg_override" placeholder="optional">
+                <div class="text-muted small">$/kg</div>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="labor_only" id="create_labor_only">
+                    <label class="form-check-label" for="create_labor_only">Labor-only</label>
+                </div>
             </div>
             <div class="col-md-2 d-flex align-items-end">
                 <button type="submit" class="btn btn-primary w-100">Create</button>
@@ -126,9 +142,30 @@
                                                 <label class="form-label">Name</label>
                                                 <input type="text" class="form-control" name="name" value="{{ p.name }}" required>
                                             </div>
-                                            <div class="col-md-6">
+                                            <div class="col-md-4">
                                                 <label class="form-label">Notes</label>
                                                 <input type="text" class="form-control" name="notes" value="{{ p.notes }}">
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Hourly rate (override)</label>
+                                                <input type="text" class="form-control" name="hourly_rate_override"
+                                                       value="{{ p.hourly_rate_override if p.hourly_rate_override is not none else '' }}"
+                                                       placeholder="optional">
+                                                <div class="text-muted small">$/hr</div>
+                                            </div>
+                                            <div class="col-md-2">
+                                                <label class="form-label">Filament (override)</label>
+                                                <input type="text" class="form-control" name="filament_cost_per_kg_override"
+                                                       value="{{ p.filament_cost_per_kg_override if p.filament_cost_per_kg_override is not none else '' }}"
+                                                       placeholder="optional">
+                                                <div class="text-muted small">$/kg</div>
+                                            </div>
+                                            <div class="col-md-2 d-flex align-items-end">
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="checkbox" name="labor_only" id="labor_only_{{ p.id }}"
+                                                           {% if p.labor_only %}checked{% endif %}>
+                                                    <label class="form-check-label" for="labor_only_{{ p.id }}">Labor-only</label>
+                                                </div>
                                             </div>
                                             <div class="col-md-2 d-flex">
                                                 <button type="submit" class="btn btn-outline-primary w-100">Save</button>
@@ -202,7 +239,7 @@
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
                                         <h6 class="mb-0">Manual Jobs</h6>
                                         <div class="d-flex align-items-center gap-2">
-                                            <span class="text-muted small">Cost is time-only unless an override is set.</span>
+                                            <span class="text-muted small">Cost uses project defaults unless an override is set.</span>
                                             <button type="button" class="btn btn-sm btn-outline-primary"
                                                 data-kcd-manual-open="create" data-project-id="{{ p.id }}">
                                                 Add Manual Job
@@ -401,18 +438,19 @@
                                                     <td class="text-nowrap">{{ pl.created_at }}</td>
                                                     <td class="text-nowrap">
                                                         <div class="d-flex gap-2">
-                                                            <button type="button" class="btn btn-sm btn-outline-secondary"
-                                                                data-kcd-plan-open="edit"
-                                                                data-project-id="{{ p.id }}"
-                                                                data-plan-id="{{ pl.plan_id }}"
-                                                                data-filename="{{ pl.filename|e }}"
-                                                                data-time-hours="{{ (pl.est_time_s / 3600.0) }}"
-                                                                data-filament-g="{{ pl.est_filament_g if pl.est_filament_g is not none else '' }}"
-                                                                data-est-cost="{{ pl.est_cost }}"
-                                                                data-source="{{ pl.source|e }}"
-                                                                data-notes="{{ pl.notes|e }}">
-                                                                Edit
-                                                            </button>
+                                                             <button type="button" class="btn btn-sm btn-outline-secondary"
+                                                                 data-kcd-plan-open="edit"
+                                                                 data-project-id="{{ p.id }}"
+                                                                 data-plan-id="{{ pl.plan_id }}"
+                                                                 data-filename="{{ pl.filename|e }}"
+                                                                 data-time-hours="{{ (pl.est_time_s / 3600.0) }}"
+                                                                 data-filament-g="{{ pl.est_filament_g if pl.est_filament_g is not none else '' }}"
+                                                                 data-est-cost="{{ pl.est_cost }}"
+                                                                 data-est-cost-is-override="{{ 1 if pl.est_cost_is_override else 0 }}"
+                                                                 data-source="{{ pl.source|e }}"
+                                                                 data-notes="{{ pl.notes|e }}">
+                                                                 Edit
+                                                             </button>
                                                             {% if pl.status == 'active' %}
                                                             <form method="post" class="m-0">
                                                                 <input type="hidden" name="action" value="fulfill_plan_item">
@@ -759,7 +797,7 @@
             return bootstrap.Modal.getOrCreateInstance(el, { focus: true });
         }
 
-        function openPlanModal(data) {
+         function openPlanModal(data) {
             const modal = getPlanModal();
             if (!modal) return;
 
@@ -768,7 +806,11 @@
             document.getElementById("kcdPlanFilename").value = data.filename || "";
             document.getElementById("kcdPlanTimeHours").value = (data.timeHours ?? "").toString();
             document.getElementById("kcdPlanFilamentG").value = (data.filamentG ?? "").toString();
-            document.getElementById("kcdPlanCost").value = (data.estCost ?? "").toString();
+            const costEl = document.getElementById("kcdPlanCost");
+            if (costEl) {
+                const isOverride = (data.estCostIsOverride ?? "") === "1";
+                costEl.value = isOverride ? (data.estCost ?? "").toString() : "";
+            }
             document.getElementById("kcdPlanSource").value = data.source || "";
             document.getElementById("kcdPlanNotes").value = data.notes || "";
 
@@ -784,13 +826,14 @@
                 planId: btn.getAttribute("data-plan-id") || "",
                 filename: btn.getAttribute("data-filename") || "",
                 timeHours: btn.getAttribute("data-time-hours") || "",
-                filamentG: btn.getAttribute("data-filament-g") || "",
-                estCost: btn.getAttribute("data-est-cost") || "",
-                source: btn.getAttribute("data-source") || "",
-                notes: btn.getAttribute("data-notes") || "",
-            };
-            openPlanModal(data);
-        });
+                 filamentG: btn.getAttribute("data-filament-g") || "",
+                 estCost: btn.getAttribute("data-est-cost") || "",
+                 estCostIsOverride: btn.getAttribute("data-est-cost-is-override") || "",
+                 source: btn.getAttribute("data-source") || "",
+                 notes: btn.getAttribute("data-notes") || "",
+             };
+             openPlanModal(data);
+         });
     })();
 </script>
 
