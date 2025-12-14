@@ -564,11 +564,11 @@
                         </tr>
                     </thead>
                     <tbody>
-                         {% for j in unassigned_jobs %}
+                         {% for j in unassigned_jobs_page %}
                          <tr data-printer="{{ j.printer|e }}">
-                             <td>
-                                <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}">
-                             </td>
+                              <td>
+                                 <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}">
+                              </td>
                              <td class="text-nowrap">{{ j.timestamp }}</td>
                              <td class="text-nowrap">{{ j.printer }}</td>
                              <td class="text-break">{{ j.filename }}</td>
@@ -582,12 +582,48 @@
                                 {% endif %}
                             </td>
                             <td class="text-end">${{ "%.2f"|format(j.total_cost|float) }}</td>
-                        </tr>
-                        {% endfor %}
+                         </tr>
+                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </form>
+
+        <div class="mt-3 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <form method="get" class="d-flex align-items-center gap-2 mb-0">
+                {% for k, v in unassigned_pager.base_query.items() %}
+                <input type="hidden" name="{{ k }}" value="{{ v }}">
+                {% endfor %}
+                <input type="hidden" name="unassigned_page" value="1">
+                <label class="text-muted small mb-0" for="unassignedPerPage">Rows per page</label>
+                <select id="unassignedPerPage" name="unassigned_per_page" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+                    {% for opt in [10, 25, 50, 100] %}
+                    <option value="{{ opt }}" {% if unassigned_pager.per_page == opt %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                <span class="text-muted small">({{ unassigned_pager.total }} total)</span>
+            </form>
+
+            <nav aria-label="Unassigned jobs pagination">
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item {% if not unassigned_pager.has_prev %}disabled{% endif %}">
+                        <a class="page-link" href="{{ unassigned_pager.prev_url or '#' }}">Prev</a>
+                    </li>
+                    {% for link in unassigned_pager.links %}
+                        {% if link.page %}
+                        <li class="page-item {% if link.current %}active{% endif %}">
+                            <a class="page-link" href="{{ link.url }}">{{ link.page }}</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                        {% endif %}
+                    {% endfor %}
+                    <li class="page-item {% if not unassigned_pager.has_next %}disabled{% endif %}">
+                        <a class="page-link" href="{{ unassigned_pager.next_url or '#' }}">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
         {% endif %}
     </div>
 </div>

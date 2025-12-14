@@ -6,6 +6,7 @@ Refactored to use modular core package.
 import os
 import tempfile
 import uuid
+import math
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -43,6 +44,68 @@ from core.printers import (
 from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
 
 app = Flask(__name__)
+
+_ALLOWED_PER_PAGE = (10, 25, 50, 100)
+
+
+def _parse_per_page(raw, default=25):
+    try:
+        v = int(raw)
+    except Exception:
+        v = default
+    return v if v in _ALLOWED_PER_PAGE else default
+
+
+def _paginate(items, page, per_page):
+    total = len(items)
+    pages = max(1, int(math.ceil(total / float(per_page))) if per_page else 1)
+    try:
+        page = int(page)
+    except Exception:
+        page = 1
+    page = max(1, min(pages, page))
+    start = (page - 1) * per_page
+    end = start + per_page
+    return items[start:end], {
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": pages,
+        "has_prev": page > 1,
+        "has_next": page < pages,
+    }
+
+
+def _pager_links(endpoint, args_dict, page_key, per_page_key, pager_meta):
+    def _url_for_page(p):
+        params = dict(args_dict)
+        params[page_key] = str(p)
+        params[per_page_key] = str(pager_meta["per_page"])
+        return url_for(endpoint, **params)
+
+    pages = pager_meta["pages"]
+    page = pager_meta["page"]
+
+    if pages <= 7:
+        page_numbers = list(range(1, pages + 1))
+    else:
+        page_numbers = sorted(set([1, pages, page - 2, page - 1, page, page + 1, page + 2]))
+        page_numbers = [p for p in page_numbers if 1 <= p <= pages]
+
+    links = []
+    last = None
+    for p in page_numbers:
+        if last is not None and p - last > 1:
+            links.append({"page": None, "url": None, "current": False})
+        links.append({"page": p, "url": _url_for_page(p), "current": p == page})
+        last = p
+
+    pager_meta = dict(pager_meta)
+    pager_meta["links"] = links
+    pager_meta["prev_url"] = _url_for_page(page - 1) if pager_meta["has_prev"] else None
+    pager_meta["next_url"] = _url_for_page(page + 1) if pager_meta["has_next"] else None
+    pager_meta["base_query"] = {k: v for k, v in args_dict.items() if k not in (page_key, per_page_key)}
+    return pager_meta
 
 
 @app.before_request
@@ -488,6 +551,16 @@ def index():
                 continue
         rows = filtered
 
+    history_per_page = _parse_per_page(request.args.get("history_per_page"), default=25)
+    history_rows_page, history_pager = _paginate(rows, request.args.get("history_page", 1), history_per_page)
+    history_pager = _pager_links(
+        endpoint="index",
+        args_dict=request.args.to_dict(flat=True),
+        page_key="history_page",
+        per_page_key="history_per_page",
+        pager_meta=history_pager,
+    )
+
     summary = compute_summary(rows) or {}
     # Ensure expected keys exist to avoid template errors
     summary.setdefault("total_prints", 0)
@@ -534,6 +607,8 @@ def index():
     return render_template(
         "index.html",
         rows=rows,
+        history_rows_page=history_rows_page,
+        history_pager=history_pager,
         error=error,
         message=message,
         headers=HEADERS,
@@ -991,6 +1066,20 @@ def projects_page():
     # Sort unassigned by timestamp, newest first
     unassigned_jobs_sorted = sorted(unassigned_jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True)
 
+    unassigned_per_page = _parse_per_page(request.args.get("unassigned_per_page"), default=25)
+    unassigned_jobs_page, unassigned_pager = _paginate(
+        unassigned_jobs_sorted,
+        request.args.get("unassigned_page", 1),
+        unassigned_per_page,
+    )
+    unassigned_pager = _pager_links(
+        endpoint="projects_page",
+        args_dict=request.args.to_dict(flat=True),
+        page_key="unassigned_page",
+        per_page_key="unassigned_per_page",
+        pager_meta=unassigned_pager,
+    )
+
     return render_template(
         "projects.html",
         error=error,
@@ -999,6 +1088,8 @@ def projects_page():
         edit_manual_job_id=edit_manual_job_id,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
+        unassigned_jobs_page=unassigned_jobs_page,
+        unassigned_pager=unassigned_pager,
         projects_by_id={p["id"]: p for p in project_rows},
     )
 

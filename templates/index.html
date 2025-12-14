@@ -536,7 +536,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for row in rows %}
+                        {% for row in history_rows_page %}
                         <tr>
                             <td><input type="checkbox" name="delete_rows" value="{{ row.job_uid }}"></td>
                             {% for h in headers %}
@@ -568,6 +568,42 @@
                 </table>
             </div>
         </form>
+
+        <div class="p-2 border-top d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <form method="get" class="d-flex align-items-center gap-2 mb-0">
+                {% for k, v in history_pager.base_query.items() %}
+                <input type="hidden" name="{{ k }}" value="{{ v }}">
+                {% endfor %}
+                <input type="hidden" name="history_page" value="1">
+                <label class="text-muted small mb-0" for="historyPerPage">Rows per page</label>
+                <select id="historyPerPage" name="history_per_page" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+                    {% for opt in [10, 25, 50, 100] %}
+                    <option value="{{ opt }}" {% if history_pager.per_page == opt %}selected{% endif %}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                <span class="text-muted small">({{ history_pager.total }} total)</span>
+            </form>
+
+            <nav aria-label="Print history pagination">
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item {% if not history_pager.has_prev %}disabled{% endif %}">
+                        <a class="page-link" href="{{ history_pager.prev_url or '#' }}">Prev</a>
+                    </li>
+                    {% for link in history_pager.links %}
+                        {% if link.page %}
+                        <li class="page-item {% if link.current %}active{% endif %}">
+                            <a class="page-link" href="{{ link.url }}">{{ link.page }}</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                        {% endif %}
+                    {% endfor %}
+                    <li class="page-item {% if not history_pager.has_next %}disabled{% endif %}">
+                        <a class="page-link" href="{{ history_pager.next_url or '#' }}">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
     </div>
 </div>
 
