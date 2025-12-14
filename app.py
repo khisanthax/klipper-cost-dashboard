@@ -599,13 +599,32 @@ def projects_page():
             if action == "create_project":
                 name = request.form.get("name", "").strip()
                 notes = request.form.get("notes", "").strip()
-                projects.create_project(name=name, notes=notes)
+                hourly_rate_override = request.form.get("hourly_rate_override", "").strip()
+                filament_cost_per_kg_override = request.form.get("filament_cost_per_kg_override", "").strip()
+                labor_only = bool(request.form.get("labor_only"))
+                projects.create_project(
+                    name=name,
+                    notes=notes,
+                    hourly_rate_override=hourly_rate_override,
+                    filament_cost_per_kg_override=filament_cost_per_kg_override,
+                    labor_only=labor_only,
+                )
 
             elif action == "update_project":
                 project_id = request.form.get("project_id", "").strip()
                 name = request.form.get("name", "").strip()
                 notes = request.form.get("notes", "").strip()
-                projects.update_project(project_id=project_id, name=name, notes=notes)
+                hourly_rate_override = request.form.get("hourly_rate_override", "").strip()
+                filament_cost_per_kg_override = request.form.get("filament_cost_per_kg_override", "").strip()
+                labor_only = bool(request.form.get("labor_only"))
+                projects.update_project(
+                    project_id=project_id,
+                    name=name,
+                    notes=notes,
+                    hourly_rate_override=hourly_rate_override,
+                    filament_cost_per_kg_override=filament_cost_per_kg_override,
+                    labor_only=labor_only,
+                )
 
             elif action == "delete_project":
                 project_id = request.form.get("project_id", "").strip()
@@ -860,9 +879,9 @@ def projects_page():
     for pid, p in projects_map.items():
         jobs = project_jobs.get(pid, [])
         manual_jobs = manual_jobs_by_project.get(pid, [])
-        totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs)
+        totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs, project=p)
         plans = plans_by_project.get(pid, [])
-        projection = projects.compute_project_projection(plans)
+        projection = projects.compute_project_projection(plans, project=p)
 
         manual_jobs_view = []
         for mj in manual_jobs:
@@ -873,7 +892,7 @@ def projects_page():
                     "hours": mj.hours,
                     "filament_g": mj.filament_g,
                     "cost_override": mj.cost_override,
-                    "computed_cost": projects.compute_manual_job_cost(mj),
+                    "computed_cost": projects.compute_manual_job_cost(mj, project=p),
                     "created_at": mj.created_at,
                     "updated_at": mj.updated_at,
                     "notes": mj.notes,
@@ -892,6 +911,7 @@ def projects_page():
 
         plans_view = []
         for pl in sorted(plans, key=lambda x: x.created_at or "", reverse=True):
+            effective_cost = projects.compute_planned_item_cost(pl, p)
             plans_view.append(
                 {
                     "plan_id": pl.plan_id,
@@ -899,10 +919,12 @@ def projects_page():
                     "created_at": pl.created_at,
                     "est_time_s": pl.est_time_s,
                     "est_filament_g": pl.est_filament_g,
-                    "est_cost": pl.est_cost,
+                    "est_cost": effective_cost,
                     "status": pl.status,
                     "source": pl.source,
                     "converted_to_manual_job_id": pl.converted_to_manual_job_id,
+                    "est_cost_is_override": pl.est_cost_is_override,
+                    "notes": pl.notes,
                 }
             )
 
@@ -911,6 +933,9 @@ def projects_page():
                 "id": pid,
                 "name": p.name,
                 "notes": p.notes,
+                "hourly_rate_override": p.hourly_rate_override,
+                "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
+                "labor_only": bool(p.labor_only),
                 "created_at": p.created_at,
                 "updated_at": p.updated_at,
                 "totals": totals,
