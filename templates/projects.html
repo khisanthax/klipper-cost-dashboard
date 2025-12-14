@@ -181,14 +181,14 @@
                                                     </td>
                                                     <td class="text-end">${{ "%.2f"|format(j.total_cost|float) }}</td>
                                                     <td class="text-nowrap">
-                                                        <form method="post" class="m-0">
-                                                            <input type="hidden" name="action" value="unassign_job">
-                                                            <input type="hidden" name="job_key" value="{{ j.job_key }}">
-                                                            <button type="submit" class="btn btn-sm btn-outline-danger"
-                                                                    title="Unassign job from this project">
-                                                                Unassign
-                                                            </button>
-                                                        </form>
+                                                         <form method="post" class="m-0">
+                                                             <input type="hidden" name="action" value="unassign_job">
+                                                            <input type="hidden" name="job_uid" value="{{ j.job_uid }}">
+                                                             <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                                     title="Unassign job from this project">
+                                                                 Unassign
+                                                             </button>
+                                                         </form>
                                                     </td>
                                                 </tr>
                                                 {% endfor %}
@@ -506,14 +506,14 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {% for j in unassigned_jobs %}
-                        <tr>
-                            <td>
-                                <input class="form-check-input" type="checkbox" name="job_key" value="{{ j.job_key }}">
-                            </td>
-                            <td class="text-nowrap">{{ j.timestamp }}</td>
-                            <td class="text-nowrap">{{ j.printer }}</td>
-                            <td class="text-break">{{ j.filename }}</td>
+                         {% for j in unassigned_jobs %}
+                         <tr>
+                             <td>
+                                <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}">
+                             </td>
+                             <td class="text-nowrap">{{ j.timestamp }}</td>
+                             <td class="text-nowrap">{{ j.printer }}</td>
+                             <td class="text-break">{{ j.filename }}</td>
                             <td class="text-nowrap">{{ j.status }}</td>
                             <td class="text-end">{{ "%.2f"|format(j.duration_hours|float) }}</td>
                             <td class="text-end text-nowrap">

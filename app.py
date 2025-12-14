@@ -13,7 +13,10 @@ from core.config import (
 )
 from core.storage import (
     load_settings, save_settings, load_display_settings, save_display_settings,
-    append_row, load_rows_raw, rewrite_csv_without_indices, rewrite_csv_mark_completed, ts_to_local_dt
+    append_row, load_rows_raw,
+    rewrite_csv_without_indices, rewrite_csv_mark_completed,
+    rewrite_csv_without_job_uids, rewrite_csv_mark_completed_job_uids,
+    ts_to_local_dt
 )
 from core.pricing import (
     compute_costs, get_known_printers, rename_printer, merge_printers,
@@ -393,18 +396,26 @@ def index():
             return redirect(url_for("index"))
 
         if action == "complete_rows":
-            indices_raw = request.form.getlist("delete_rows")
-            if indices_raw:
-                indices = [int(i) for i in indices_raw if str(i).strip().isdigit()]
-                rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+            selected = request.form.getlist("delete_rows")
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                    rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
 
         # Handle row deletion
         if action in ("delete_rows", "delete"):
-            indices_raw = request.form.getlist("delete_rows")
-            if indices_raw:
-                indices = [int(i) for i in indices_raw if str(i).strip().isdigit()]
-                rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+            selected = request.form.getlist("delete_rows")
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                    rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
 
     rows, error = load_rows_raw(CSV_FILE)
@@ -583,19 +594,19 @@ def projects_page():
 
             elif action == "assign_jobs":
                 project_id = request.form.get("project_id", "").strip()
-                job_keys = request.form.getlist("job_key")
-                if project_id and job_keys:
-                    projects.assign_jobs(job_keys, project_id=project_id)
+                job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
+                if project_id and job_ids:
+                    projects.assign_jobs(job_ids, project_id=project_id)
 
             elif action == "unassign_job":
-                job_key = request.form.get("job_key", "").strip()
-                if job_key:
-                    projects.unassign_jobs([job_key])
+                job_id = (request.form.get("job_uid") or request.form.get("job_key") or "").strip()
+                if job_id:
+                    projects.unassign_jobs([job_id])
 
             elif action == "unassign_selected":
-                job_keys = request.form.getlist("job_key")
-                if job_keys:
-                    projects.unassign_jobs(job_keys)
+                job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
+                if job_ids:
+                    projects.unassign_jobs(job_ids)
 
             elif action == "create_manual_job":
                 project_id = request.form.get("project_id", "").strip()

@@ -290,6 +290,45 @@ def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
             writer.writerow(_row_to_csv_dict(row, headers))
 
 
+def rewrite_csv_without_job_uids(csv_file, headers, job_uids_to_remove):
+    """Rewrite CSV file without rows whose computed job_uid is in job_uids_to_remove."""
+    if not os.path.exists(csv_file):
+        return
+    rows, _ = load_rows_raw(csv_file)
+    uid_set = {str(u or "").strip() for u in (job_uids_to_remove or []) if str(u or "").strip()}
+    keep = [r for r in rows if str(r.get("job_uid") or "").strip() not in uid_set]
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for r in keep:
+            writer.writerow(_row_to_csv_dict(r, headers))
+
+
+def rewrite_csv_mark_completed_job_uids(csv_file, headers, job_uids_to_complete):
+    """Mark specified rows as completed if they are currently printing, by job_uid."""
+    if not os.path.exists(csv_file):
+        return
+
+    rows, _ = load_rows_raw(csv_file)
+    uid_set = {str(u or "").strip() for u in (job_uids_to_complete or []) if str(u or "").strip()}
+
+    for row in rows:
+        if str(row.get("job_uid") or "").strip() not in uid_set:
+            continue
+
+        status = str(row.get("status", "")).lower()
+        if status == "printing":
+            row["status"] = "completed"
+            if "failure_reason" in row:
+                row["failure_reason"] = ""
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_row_to_csv_dict(row, headers))
+
+
 # State management for installer (used by both app and installer)
 def load_state(state_file, key, default=""):
     """Load a value from install state."""

@@ -533,7 +533,7 @@
                     <tbody>
                         {% for row in rows %}
                         <tr>
-                            <td><input type="checkbox" name="delete_rows" value="{{ row.row_index }}"></td>
+                            <td><input type="checkbox" name="delete_rows" value="{{ row.job_uid }}"></td>
                             {% for h in headers %}
                             {% if h in visible %}
                             <td class="col-{{ h|replace(' ', '-')|lower }}">
