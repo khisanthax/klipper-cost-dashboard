@@ -75,16 +75,17 @@
         <div class="text-muted">No projects yet.</div>
         {% else %}
         <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle">
+            <table class="table table-striped table-hover align-middle"
+                data-kcd-resizable="true" data-kcd-table-id="projects_table">
                 <thead class="table-light">
                     <tr>
-                        <th style="width: 1%;"></th>
-                        <th>Project</th>
-                        <th class="text-end">Prints</th>
-                        <th class="text-end">Hours</th>
-                        <th class="text-end">Filament</th>
-                        <th class="text-end">Cost</th>
-                        <th>Notes</th>
+                        <th style="width: 1%;" data-col="expand"></th>
+                        <th data-col="project">Project</th>
+                        <th class="text-end" data-col="prints">Prints</th>
+                        <th class="text-end" data-col="hours">Hours</th>
+                        <th class="text-end" data-col="filament">Filament</th>
+                        <th class="text-end" data-col="cost">Cost</th>
+                        <th data-col="notes">Notes</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -149,17 +150,18 @@
                                     <div class="text-muted">No jobs assigned yet.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0">
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0"
+                                            data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th>Date</th>
-                                                    <th>Printer</th>
-                                                    <th>Filename</th>
-                                                    <th>Status</th>
-                                                    <th class="text-end">Hours</th>
-                                                    <th class="text-end">Filament</th>
-                                                    <th class="text-end">Cost</th>
-                                                    <th style="width: 1%;"></th>
+                                                    <th data-col="date">Date</th>
+                                                    <th data-col="printer">Printer</th>
+                                                    <th data-col="filename">Filename</th>
+                                                    <th data-col="status">Status</th>
+                                                    <th class="text-end" data-col="hours">Hours</th>
+                                                    <th class="text-end" data-col="filament">Filament</th>
+                                                    <th class="text-end" data-col="cost">Cost</th>
+                                                    <th style="width: 1%;" data-col="actions"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -212,15 +214,16 @@
                                     <div class="text-muted">No manual jobs for this project.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0">
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0"
+                                            data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_manual_jobs_table">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th>Description</th>
-                                                    <th class="text-end">Hours</th>
-                                                    <th class="text-end">Filament (g)</th>
-                                                    <th class="text-end">Cost</th>
-                                                    <th class="text-nowrap">Created</th>
-                                                    <th style="width: 1%;"></th>
+                                                    <th data-col="description">Description</th>
+                                                    <th class="text-end" data-col="hours">Hours</th>
+                                                    <th class="text-end" data-col="filament_g">Filament (g)</th>
+                                                    <th class="text-end" data-col="cost">Cost</th>
+                                                    <th class="text-nowrap" data-col="created">Created</th>
+                                                    <th style="width: 1%;" data-col="actions"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -352,16 +355,17 @@
                                     <div class="text-muted">No planned items for this project.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0">
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0"
+                                            data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_planned_items_table">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th>Filename</th>
-                                                    <th class="text-end">Est. Time</th>
-                                                    <th class="text-end">Filament (g)</th>
-                                                    <th class="text-end">Est. Cost</th>
-                                                    <th>Status</th>
-                                                    <th class="text-nowrap">Created</th>
-                                                    <th style="width: 1%;"></th>
+                                                    <th data-col="filename">Filename</th>
+                                                    <th class="text-end" data-col="est_time">Est. Time</th>
+                                                    <th class="text-end" data-col="filament_g">Filament (g)</th>
+                                                    <th class="text-end" data-col="est_cost">Est. Cost</th>
+                                                    <th data-col="status">Status</th>
+                                                    <th class="text-nowrap" data-col="created">Created</th>
+                                                    <th style="width: 1%;" data-col="actions"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -487,17 +491,18 @@
             </div>
 
             <div class="table-responsive">
-                <table class="table table-striped table-hover align-middle">
+                <table class="table table-striped table-hover align-middle"
+                    data-kcd-resizable="true" data-kcd-table-id="projects_unassigned_jobs_table">
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 1%;"></th>
-                            <th>Date</th>
-                            <th>Printer</th>
-                            <th>Filename</th>
-                            <th>Status</th>
-                            <th class="text-end">Hours</th>
-                            <th class="text-end">Filament</th>
-                            <th class="text-end">Cost</th>
+                            <th style="width: 1%;" data-col="__select__"></th>
+                            <th data-col="date">Date</th>
+                            <th data-col="printer">Printer</th>
+                            <th data-col="filename">Filename</th>
+                            <th data-col="status">Status</th>
+                            <th class="text-end" data-col="hours">Hours</th>
+                            <th class="text-end" data-col="filament">Filament</th>
+                            <th class="text-end" data-col="cost">Cost</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -784,4 +789,5 @@
     })();
 </script>
 
+{% include "_col_resize.html" %}
 {% endblock %}

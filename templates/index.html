@@ -457,15 +457,17 @@
             </div>
 
             <div class="table-responsive">
-                <table id="history-table" class="table table-striped table-hover table-sm mb-0">
+                <table id="history-table" class="table table-striped table-hover table-sm mb-0"
+                       data-kcd-resizable="true" data-kcd-table-id="history_table">
                     {% set visible = visible_cols if visible_cols and (visible_cols|length > 0) else headers %}
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 40px;"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
+                            <th style="width: 40px;" data-col="__select__"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
                             {% set col_index = 1 %}
                             {% for h in headers %}
                             {% if h in visible %}
                             <th class="col-{{ h|replace(' ', '-')|lower }}" style="cursor: pointer;"
+                                data-col="{{ h }}"
                                 onclick="sortTable({{ col_index }}, {{ 'true' if h in ['duration_seconds','duration_hours','filament_mm','filament_meters','total_cost','time_cost','material_cost'] else 'false' }})">
                                 {{ friendly_headers.get(h, h) }}
                             </th>
@@ -510,4 +512,5 @@
     </div>
 </div>
 
+{% include "_col_resize.html" %}
 {% endblock %}
