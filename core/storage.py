@@ -5,6 +5,7 @@ import os
 import csv
 import json
 import secrets
+import hashlib
 from datetime import datetime, timezone
 try:
     from zoneinfo import ZoneInfo
@@ -169,9 +170,11 @@ def load_rows_raw(csv_file):
                     r["status"] = "completed"
                 if "failure_reason" not in r:
                     r["failure_reason"] = ""
-                
+
                 r["row_index"] = idx
                 ts = r.get("timestamp", "")
+                # Preserve the raw timestamp as stored in CSV, even if we render a display timestamp.
+                r["timestamp_epoch"] = ts
                 if ts:
                     try:
                         ts_float = float(ts)
@@ -182,10 +185,71 @@ def load_rows_raw(csv_file):
                         r["timestamp_raw"] = None
                 else:
                     r["timestamp_raw"] = None
+
+                # Stable ID for selection and project assignment
+                r["job_uid"] = compute_job_uid(r)
                 rows.append(r)
         return rows, None
     except Exception as e:
         return [], f"Error reading CSV: {e}"
+
+
+def _canon_float(value, *, decimals: int = 6) -> str:
+    try:
+        return format(float(value), f".{decimals}f")
+    except Exception:
+        return str(value or "").strip()
+
+
+def compute_job_uid(row: dict) -> str:
+    """
+    Compute a stable identifier for a history row without modifying CSV schema.
+
+    The UID is deterministic and independent of table ordering, based on:
+      - timestamp (epoch if available, else raw string)
+      - printer
+      - filename
+      - duration_seconds
+      - filament_mm
+
+    This is used for safe selection/actions (delete/complete/recalculate) and
+    for project assignment mapping.
+    """
+    ts = row.get("timestamp_epoch")
+    if not ts:
+        ts = row.get("timestamp_raw")
+    if ts is None or ts == "":
+        ts = row.get("timestamp")
+
+    payload = [
+        _canon_float(ts),
+        str(row.get("printer") or "").strip(),
+        str(row.get("filename") or "").strip(),
+        _canon_float(row.get("duration_seconds")),
+        _canon_float(row.get("filament_mm")),
+    ]
+
+    digest = hashlib.sha1(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return f"job_{digest[:16]}"
+
+
+def _row_to_csv_dict(row: dict, headers: list) -> dict:
+    """
+    Convert an in-memory row (which may include display-only fields like
+    timestamp_raw / timestamp_display) into a dict suitable for writing to CSV.
+    """
+    out = {h: row.get(h, "") for h in headers}
+
+    if "timestamp" in out:
+        ts_epoch = row.get("timestamp_epoch")
+        if ts_epoch != "" and ts_epoch is not None:
+            out["timestamp"] = ts_epoch
+        else:
+            ts_raw = row.get("timestamp_raw")
+            if ts_raw is not None and ts_raw != "":
+                out["timestamp"] = ts_raw
+
+    return out
 
 
 def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
@@ -198,8 +262,7 @@ def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         for r in keep:
-            out = {h: r.get(h, "") for h in headers}
-            writer.writerow(out)
+            writer.writerow(_row_to_csv_dict(r, headers))
 
 
 def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
@@ -224,8 +287,7 @@ def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         for row in rows:
-            out = {h: row.get(h, "") for h in headers}
-            writer.writerow(out)
+            writer.writerow(_row_to_csv_dict(row, headers))
 
 
 # State management for installer (used by both app and installer)
