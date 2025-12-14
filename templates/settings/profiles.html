@@ -1,6 +1,15 @@
-{% extends "settings/layout.html" %}
+{% extends "base.html" %}
 
-{% block settings_body %}
+{% block content %}
+{% if error %}
+<div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+
+{% if message %}
+<div class="alert alert-success" role="alert">{{ message }}</div>
+{% endif %}
+
+<div class="text-muted small mb-3">{{ settings_subtitle }}</div>
+
 {% include "settings/partials/profiles.html" %}
 {% endblock %}
-

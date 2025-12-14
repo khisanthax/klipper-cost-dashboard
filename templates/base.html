@@ -22,16 +22,26 @@
     <!-- Navigation Header -->
     <nav class="navbar navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('index') }}">Klipper Cost Dashboard</a>
+            <div class="d-flex align-items-center gap-3">
+                <a class="navbar-brand mb-0" href="{{ url_for('index') }}">Klipper Cost Dashboard</a>
+                {% if page_title %}
+                <span class="navbar-text text-white-50 small d-none d-sm-inline">{{ page_title }}</span>
+                {% endif %}
+            </div>
+
             <div class="d-flex flex-wrap gap-2 ms-auto">
-                <a class="btn btn-sm btn-outline-light {% if request.path == '/' %}active{% endif %}"
-                    href="{{ url_for('index') }}">Dashboard</a>
-                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/reports') %}active{% endif %}"
-                    href="{{ url_for('reports_page') }}">Reports</a>
-                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/projects') %}active{% endif %}"
-                    href="{{ url_for('projects_page') }}">Projects</a>
-                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
-                    href="{{ url_for('settings_printers') }}">Settings</a>
+                {% if request.path.startswith('/settings') %}
+                    {% include "settings/submenu.html" %}
+                {% else %}
+                    <a class="btn btn-sm btn-outline-light {% if request.path == '/' %}active{% endif %}"
+                        href="{{ url_for('index') }}">Dashboard</a>
+                    <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/reports') %}active{% endif %}"
+                        href="{{ url_for('reports_page') }}">Reports</a>
+                    <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/projects') %}active{% endif %}"
+                        href="{{ url_for('projects_page') }}">Projects</a>
+                    <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
+                        href="{{ url_for('settings_printers_page') }}">Settings</a>
+                {% endif %}
             </div>
         </div>
     </nav>

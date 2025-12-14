@@ -7,6 +7,7 @@ import os
 import tempfile
 import uuid
 import math
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -531,9 +532,33 @@ def index():
     rows, error = load_rows_raw(CSV_FILE)
     message = request.args.get("msg", "").strip()
     
-    # Apply date filtering
+    # Apply date filtering (printer + range + legacy date range inputs)
+    selected_printer = (request.args.get("printer") or "All").strip()
+    selected_range = (request.args.get("range") or "all").strip().lower()
+
     start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
+    if selected_range in {"today", "yesterday", "week", "month"}:
+        now = datetime.now(TIMEZONE_OBJ)
+        start_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if selected_range == "today":
+            start_dt = start_today
+            end_dt = now
+            range_label = "Today"
+        elif selected_range == "yesterday":
+            start_dt = start_today - timedelta(days=1)
+            end_dt = start_today
+            range_label = "Yesterday"
+        elif selected_range == "week":
+            start_dt = (start_today - timedelta(days=start_today.weekday()))
+            end_dt = now
+            range_label = "This week"
+        elif selected_range == "month":
+            start_dt = start_today.replace(day=1)
+            end_dt = now
+            range_label = "This month"
+        quick_range = ""
     
+    end_exclusive = selected_range == "yesterday"
     if start_dt or end_dt:
         filtered = []
         for r in rows:
@@ -544,12 +569,22 @@ def index():
                 row_dt = ts_to_local_dt(float(ts_raw))
                 if start_dt and row_dt < start_dt:
                     continue
-                if end_dt and row_dt > end_dt:
-                    continue
+                if end_dt:
+                    if end_exclusive and row_dt >= end_dt:
+                        continue
+                    if (not end_exclusive) and row_dt > end_dt:
+                        continue
                 filtered.append(r)
             except Exception:
                 continue
         rows = filtered
+
+    canonical_printers = get_canonical_printer_names()
+    if selected_printer and selected_printer != "All":
+        if selected_printer in canonical_printers:
+            rows = [r for r in rows if (r.get("printer") or "") == selected_printer]
+        else:
+            selected_printer = "All"
 
     history_per_page = _parse_per_page(request.args.get("history_per_page"), default=25)
     history_rows_page, history_pager = _paginate(rows, request.args.get("history_page", 1), history_per_page)
@@ -620,8 +655,9 @@ def index():
         quick_range=quick_range,
         chart_cost_per_day=chart_cost_per_day,
         chart_hours_per_printer=chart_hours_per_printer,
-        printers=get_known_printers(),
-        selected_printer=request.args.get("printer", "All"),
+        printers=canonical_printers,
+        selected_printer=selected_printer,
+        selected_range=selected_range,
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
         csv_file=CSV_FILE,
@@ -1098,7 +1134,7 @@ def projects_page():
 def settings_page():
     """Back-compat settings entrypoint (redirects to /settings/printers)."""
     if request.method == "GET":
-        return redirect(url_for("settings_printers"))
+        return redirect(url_for("settings_printers_page"))
     # For legacy POSTs, process the action but redirect to the appropriate sub-page.
     return _settings_view(tab="printers")
 
@@ -1114,10 +1150,10 @@ def _settings_endpoint_for_action(action: str) -> str:
         "delete_rate_profile",
     }
     if action in other_actions:
-        return "settings_other"
+        return "settings_other_page"
     if action in profiles_actions:
-        return "settings_profiles"
-    return "settings_printers"
+        return "settings_profiles_page"
+    return "settings_printers_page"
 
 
 def _settings_view(tab: str):
@@ -1367,6 +1403,7 @@ def _settings_view(tab: str):
 
     return render_template(
         template_by_tab[tab],
+        page_title="Print Cost Settings",
         settings_tab=tab,
         settings_subtitle=subtitle_by_tab[tab],
         message=message,
@@ -1384,19 +1421,18 @@ def _settings_view(tab: str):
         backup_settings=backup_settings,
     )
 
-
-@app.route("/settings/printers", methods=["GET", "POST"])
-def settings_printers():
+@app.route("/settings/printers", methods=["GET", "POST"], endpoint="settings_printers_page")
+def settings_printers_page():
     return _settings_view(tab="printers")
 
 
-@app.route("/settings/profiles", methods=["GET", "POST"])
-def settings_profiles():
+@app.route("/settings/profiles", methods=["GET", "POST"], endpoint="settings_profiles_page")
+def settings_profiles_page():
     return _settings_view(tab="profiles")
 
 
-@app.route("/settings/other", methods=["GET", "POST"])
-def settings_other():
+@app.route("/settings/other", methods=["GET", "POST"], endpoint="settings_other_page")
+def settings_other_page():
     return _settings_view(tab="other")
 
 
