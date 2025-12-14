@@ -44,6 +44,9 @@ class Project:
     id: str
     name: str
     notes: str = ""
+    hourly_rate_override: Optional[float] = None
+    filament_cost_per_kg_override: Optional[float] = None
+    labor_only: bool = False
     created_at: float = 0.0
     updated_at: float = 0.0
 
@@ -70,6 +73,7 @@ class PlannedItem:
     est_time_s: int
     est_filament_g: Optional[float] = None
     est_cost: float = 0.0
+    est_cost_is_override: bool = False
     status: str = "active"  # "active" | "fulfilled"
     source: str = ""
     notes: str = ""
@@ -131,7 +135,30 @@ def load_projects() -> Dict[str, Project]:
         notes = str(item.get("notes") or "")
         created_at = float(item.get("created_at") or 0.0)
         updated_at = float(item.get("updated_at") or 0.0)
-        projects[pid] = Project(id=pid, name=name, notes=notes, created_at=created_at, updated_at=updated_at)
+
+        def _opt_nonneg_float(value) -> Optional[float]:
+            if value is None or str(value).strip() == "":
+                return None
+            try:
+                f = float(value)
+            except (TypeError, ValueError):
+                return None
+            return f if f >= 0 else None
+
+        hourly_rate_override = _opt_nonneg_float(item.get("hourly_rate_override"))
+        filament_cost_per_kg_override = _opt_nonneg_float(item.get("filament_cost_per_kg_override"))
+        labor_only = bool(item.get("labor_only") or False)
+
+        projects[pid] = Project(
+            id=pid,
+            name=name,
+            notes=notes,
+            hourly_rate_override=hourly_rate_override,
+            filament_cost_per_kg_override=filament_cost_per_kg_override,
+            labor_only=labor_only,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
     return projects
 
 
@@ -143,6 +170,9 @@ def save_projects(projects: Iterable[Project]) -> None:
                 "id": p.id,
                 "name": p.name,
                 "notes": p.notes,
+                "hourly_rate_override": p.hourly_rate_override,
+                "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
+                "labor_only": bool(p.labor_only),
                 "created_at": float(p.created_at or 0.0),
                 "updated_at": float(p.updated_at or 0.0),
             }
@@ -251,6 +281,80 @@ def _iso_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _default_filament_cost_per_kg() -> float:
+    """
+    Convert global DEFAULT_PRICING filament settings to an approximate $/kg.
+
+    This is used for planned/manual entries that only provide filament grams.
+    """
+    mode = str(DEFAULT_PRICING.get("filament_mode") or "per_meter")
+    rate = float(DEFAULT_PRICING.get("filament_rate") or 0.0)
+    grams_per_meter = float(DEFAULT_PRICING.get("grams_per_meter") or 0.0)
+
+    if mode == "per_kg":
+        return max(rate, 0.0)
+    if mode == "per_gram":
+        return max(rate * 1000.0, 0.0)
+    if mode == "per_meter":
+        if grams_per_meter <= 0:
+            return 0.0
+        return max(rate * 1000.0 / grams_per_meter, 0.0)
+    return 0.0
+
+
+def _project_pricing(project: Optional[Project]) -> Tuple[float, float, bool]:
+    """
+    Resolve effective pricing defaults for a project.
+
+    Priority:
+      - project overrides (if set)
+      - global DEFAULT_PRICING-derived values
+    """
+    hourly_rate = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
+    filament_per_kg = _default_filament_cost_per_kg()
+    labor_only = False
+
+    if project is not None:
+        if project.hourly_rate_override is not None:
+            try:
+                hourly_rate = float(project.hourly_rate_override)
+            except (TypeError, ValueError):
+                pass
+        if project.filament_cost_per_kg_override is not None:
+            try:
+                filament_per_kg = float(project.filament_cost_per_kg_override)
+            except (TypeError, ValueError):
+                pass
+        labor_only = bool(project.labor_only)
+
+    return max(hourly_rate, 0.0), max(filament_per_kg, 0.0), labor_only
+
+
+def compute_planned_item_cost_from_pricing(
+    *,
+    est_time_s: int,
+    est_filament_g: Optional[float],
+    hourly_rate: float,
+    filament_cost_per_kg: float,
+    labor_only: bool,
+) -> float:
+    # Match compute_costs billing rule: minimum 1h for any non-zero job.
+    duration_hours = max(float(est_time_s or 0) / 3600.0, 0.0)
+    billed_hours = max(duration_hours, 1.0) if duration_hours > 0 else 0.0
+    time_cost = billed_hours * float(hourly_rate or 0.0)
+
+    material_cost = 0.0
+    if not labor_only and est_filament_g is not None:
+        try:
+            g = float(est_filament_g)
+        except (TypeError, ValueError):
+            g = 0.0
+        if g > 0:
+            material_cost = (g / 1000.0) * float(filament_cost_per_kg or 0.0)
+
+    return float(time_cost + material_cost)
+
+
 def _planned_cost_from_defaults(est_time_s: int, est_filament_g: Optional[float]) -> float:
     """
     Compute planned item cost using existing default pricing settings.
@@ -259,31 +363,15 @@ def _planned_cost_from_defaults(est_time_s: int, est_filament_g: Optional[float]
     - Material cost: computed only if filament grams are provided, using default
       filament_mode/filament_rate/grams_per_meter.
     """
-    rate_per_hour = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
-    duration_hours = max(float(est_time_s or 0) / 3600.0, 0.0)
-    billed_hours = 0.0
-    if duration_hours > 0:
-        billed_hours = max(duration_hours, 1.0)
-    time_cost = billed_hours * rate_per_hour
-
-    material_cost = 0.0
-    if est_filament_g is not None:
-        try:
-            g = float(est_filament_g)
-        except (TypeError, ValueError):
-            g = 0.0
-        mode = str(DEFAULT_PRICING.get("filament_mode") or "per_meter")
-        rate = float(DEFAULT_PRICING.get("filament_rate") or 0.0)
-        gpm = float(DEFAULT_PRICING.get("grams_per_meter") or 0.0)
-        if mode == "per_gram":
-            material_cost = rate * max(g, 0.0)
-        elif mode == "per_kg":
-            material_cost = rate * (max(g, 0.0) / 1000.0)
-        elif mode == "per_meter" and gpm > 0:
-            meters = max(g, 0.0) / gpm
-            material_cost = rate * meters
-
-    return float(time_cost + material_cost)
+    hourly_rate = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
+    filament_per_kg = _default_filament_cost_per_kg()
+    return compute_planned_item_cost_from_pricing(
+        est_time_s=est_time_s,
+        est_filament_g=est_filament_g,
+        hourly_rate=hourly_rate,
+        filament_cost_per_kg=filament_per_kg,
+        labor_only=False,
+    )
 
 
 def create_manual_job(
@@ -431,32 +519,69 @@ def delete_manual_job(manual_job_id: str) -> None:
         _save_manual_jobs(jobs_by_project)
 
 
-def _manual_job_cost(mj: ManualJob, hourly_rate: float) -> float:
+def _manual_job_cost(
+    mj: ManualJob,
+    *,
+    hourly_rate: float,
+    filament_cost_per_kg: float,
+    labor_only: bool,
+) -> float:
     if mj.cost_override is not None:
         try:
             return float(mj.cost_override)
         except (TypeError, ValueError):
             return 0.0
-    # v1: time-only cost, filament optional is tracked but not monetized here.
+
     try:
-        return float(mj.hours or 0.0) * float(hourly_rate or 0.0)
+        hours = float(mj.hours or 0.0)
     except (TypeError, ValueError):
-        return 0.0
+        hours = 0.0
+
+    time_cost = hours * float(hourly_rate or 0.0)
+
+    material_cost = 0.0
+    if not labor_only:
+        try:
+            g = float(mj.filament_g or 0.0)
+        except (TypeError, ValueError):
+            g = 0.0
+        if g > 0:
+            material_cost = (g / 1000.0) * float(filament_cost_per_kg or 0.0)
+
+    return float(time_cost + material_cost)
 
 
-def compute_manual_job_cost(mj: ManualJob, hourly_rate: Optional[float] = None) -> float:
+def compute_manual_job_cost(
+    mj: ManualJob,
+    *,
+    project: Optional[Project] = None,
+    hourly_rate: Optional[float] = None,
+    filament_cost_per_kg: Optional[float] = None,
+    labor_only: Optional[bool] = None,
+) -> float:
     """
     Compute the cost contribution of a manual job.
 
-    v1 behavior:
+    Rules:
     - If cost_override is present, it is used as the exact job cost.
-    - Otherwise, cost is time-only: hours * hourly_rate.
-    - Filament grams are tracked but not monetized here (until a clear pricing
-      rule exists for manual entries).
+    - Otherwise:
+        time_cost = hours * hourly_rate
+        material_cost = (filament_g/1000) * filament_cost_per_kg (unless labor_only)
     """
+    pr_hourly, pr_fil_per_kg, pr_labor_only = _project_pricing(project)
     if hourly_rate is None:
-        hourly_rate = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
-    return _manual_job_cost(mj, hourly_rate=float(hourly_rate or 0.0))
+        hourly_rate = pr_hourly
+    if filament_cost_per_kg is None:
+        filament_cost_per_kg = pr_fil_per_kg
+    if labor_only is None:
+        labor_only = pr_labor_only
+
+    return _manual_job_cost(
+        mj,
+        hourly_rate=float(hourly_rate or 0.0),
+        filament_cost_per_kg=float(filament_cost_per_kg or 0.0),
+        labor_only=bool(labor_only),
+    )
 
 
 def load_plans() -> Dict[str, List[PlannedItem]]:
@@ -502,6 +627,8 @@ def load_plans() -> Dict[str, List[PlannedItem]]:
         except (TypeError, ValueError):
             est_cost = 0.0
 
+        est_cost_is_override = bool(item.get("est_cost_is_override") or False)
+
         if not plan_id or not pid or not filename or est_time_s <= 0:
             continue
 
@@ -514,6 +641,7 @@ def load_plans() -> Dict[str, List[PlannedItem]]:
                 est_time_s=est_time_s,
                 est_filament_g=est_filament_g,
                 est_cost=est_cost,
+                est_cost_is_override=est_cost_is_override,
                 status=status,
                 source=source,
                 notes=notes,
@@ -537,6 +665,7 @@ def _save_plans(by_project: Dict[str, List[PlannedItem]]) -> None:
                     "est_time_s": int(p.est_time_s),
                     "est_filament_g": p.est_filament_g,
                     "est_cost": float(p.est_cost or 0.0),
+                    "est_cost_is_override": bool(p.est_cost_is_override),
                     "status": p.status,
                     "source": p.source,
                     "notes": p.notes,
@@ -573,14 +702,32 @@ def create_plan_item(
     if time_s <= 0:
         raise ValueError("Estimated time must be provided")
 
-    est_cost: float
+    project = projects.get(pid)
+    hourly_rate, filament_cost_per_kg, labor_only = _project_pricing(project)
+
+    est_cost_is_override = False
     if est_cost_override is not None and str(est_cost_override).strip() != "":
         try:
             est_cost = float(est_cost_override)
+            est_cost_is_override = True
         except (TypeError, ValueError):
-            est_cost = _planned_cost_from_defaults(time_s, est_filament_g=est_filament_g)
+            est_cost = compute_planned_item_cost_from_pricing(
+                est_time_s=time_s,
+                est_filament_g=est_filament_g,
+                hourly_rate=hourly_rate,
+                filament_cost_per_kg=filament_cost_per_kg,
+                labor_only=labor_only,
+            )
+            est_cost_is_override = False
     else:
-        est_cost = _planned_cost_from_defaults(time_s, est_filament_g=est_filament_g)
+        est_cost = compute_planned_item_cost_from_pricing(
+            est_time_s=time_s,
+            est_filament_g=est_filament_g,
+            hourly_rate=hourly_rate,
+            filament_cost_per_kg=filament_cost_per_kg,
+            labor_only=labor_only,
+        )
+        est_cost_is_override = False
     item = PlannedItem(
         plan_id=uuid.uuid4().hex,
         project_id=pid,
@@ -589,6 +736,7 @@ def create_plan_item(
         est_time_s=time_s,
         est_filament_g=est_filament_g,
         est_cost=est_cost,
+        est_cost_is_override=est_cost_is_override,
         status="active",
         source=str(source or "").strip(),
         notes=str(notes or ""),
@@ -642,14 +790,33 @@ def update_plan_item(
             if filament_g is None:
                 filament_g = it.est_filament_g
 
-            cost: float
+            projects_map = load_projects()
+            project = projects_map.get(it.project_id)
+            hourly_rate, filament_cost_per_kg, labor_only = _project_pricing(project)
+
+            cost_is_override = False
             if est_cost is None or str(est_cost).strip() == "":
-                cost = _planned_cost_from_defaults(time_s, est_filament_g=filament_g)
+                cost = compute_planned_item_cost_from_pricing(
+                    est_time_s=time_s,
+                    est_filament_g=filament_g,
+                    hourly_rate=hourly_rate,
+                    filament_cost_per_kg=filament_cost_per_kg,
+                    labor_only=labor_only,
+                )
+                cost_is_override = False
             else:
                 try:
                     cost = float(est_cost)
+                    cost_is_override = True
                 except (TypeError, ValueError):
-                    cost = _planned_cost_from_defaults(time_s, est_filament_g=filament_g)
+                    cost = compute_planned_item_cost_from_pricing(
+                        est_time_s=time_s,
+                        est_filament_g=filament_g,
+                        hourly_rate=hourly_rate,
+                        filament_cost_per_kg=filament_cost_per_kg,
+                        labor_only=labor_only,
+                    )
+                    cost_is_override = False
 
             new_source = it.source if source is None else str(source or "").strip()
             new_notes = it.notes if notes is None else str(notes or "")
@@ -662,6 +829,7 @@ def update_plan_item(
                 est_time_s=time_s,
                 est_filament_g=filament_g,
                 est_cost=cost,
+                est_cost_is_override=cost_is_override,
                 status=it.status,
                 source=new_source,
                 notes=new_notes,
@@ -694,6 +862,7 @@ def set_plan_status(plan_id: str, status: str) -> None:
                     est_time_s=it.est_time_s,
                     est_filament_g=it.est_filament_g,
                     est_cost=it.est_cost,
+                    est_cost_is_override=it.est_cost_is_override,
                     status=status,
                     source=it.source,
                     notes=it.notes,
@@ -726,6 +895,7 @@ def _set_plan_converted(plan_id: str, manual_job_id: str) -> None:
                     est_time_s=it.est_time_s,
                     est_filament_g=it.est_filament_g,
                     est_cost=it.est_cost,
+                    est_cost_is_override=it.est_cost_is_override,
                     status="fulfilled",
                     source=it.source,
                     notes=it.notes,
@@ -804,7 +974,30 @@ def delete_plan_item(plan_id: str) -> None:
         _save_plans(plans)
 
 
-def compute_project_projection(plans: List[PlannedItem]) -> Dict[str, float]:
+def compute_planned_item_cost(item: PlannedItem, project: Optional[Project]) -> float:
+    """
+    Compute the effective cost for a planned item.
+
+    - If the item has an explicit cost override, use it.
+    - Otherwise compute from current project defaults (or global defaults).
+    """
+    if item.est_cost_is_override:
+        try:
+            return float(item.est_cost or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    hourly_rate, filament_cost_per_kg, labor_only = _project_pricing(project)
+    return compute_planned_item_cost_from_pricing(
+        est_time_s=int(item.est_time_s or 0),
+        est_filament_g=item.est_filament_g,
+        hourly_rate=hourly_rate,
+        filament_cost_per_kg=filament_cost_per_kg,
+        labor_only=labor_only,
+    )
+
+
+def compute_project_projection(plans: List[PlannedItem], project: Optional[Project] = None) -> Dict[str, float]:
     """Projected totals from ACTIVE planned items only."""
     projected = {"count": 0.0, "hours": 0.0, "cost": 0.0}
     for p in plans:
@@ -812,23 +1005,57 @@ def compute_project_projection(plans: List[PlannedItem]) -> Dict[str, float]:
             continue
         projected["count"] += 1.0
         projected["hours"] += float(p.est_time_s or 0) / 3600.0
-        projected["cost"] += float(p.est_cost or 0.0)
+        projected["cost"] += float(compute_planned_item_cost(p, project))
     return projected
 
-def create_project(name: str, notes: str = "") -> Project:
+def _opt_nonneg_float(value) -> Optional[float]:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f >= 0 else None
+
+
+def create_project(
+    name: str,
+    notes: str = "",
+    *,
+    hourly_rate_override: Optional[float] = None,
+    filament_cost_per_kg_override: Optional[float] = None,
+    labor_only: bool = False,
+) -> Project:
     name = str(name or "").strip()
     if not name:
         raise ValueError("Project name is required")
     now = time.time()
     pid = uuid.uuid4().hex
-    project = Project(id=pid, name=name, notes=str(notes or ""), created_at=now, updated_at=now)
+    project = Project(
+        id=pid,
+        name=name,
+        notes=str(notes or ""),
+        hourly_rate_override=_opt_nonneg_float(hourly_rate_override),
+        filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override),
+        labor_only=bool(labor_only),
+        created_at=now,
+        updated_at=now,
+    )
     projects = load_projects()
     projects[pid] = project
     save_projects(projects.values())
     return project
 
 
-def update_project(project_id: str, name: str, notes: str = "") -> Project:
+def update_project(
+    project_id: str,
+    name: str,
+    notes: str = "",
+    *,
+    hourly_rate_override: Optional[float] = None,
+    filament_cost_per_kg_override: Optional[float] = None,
+    labor_only: Optional[bool] = None,
+) -> Project:
     pid = str(project_id or "").strip()
     if not pid:
         raise ValueError("project_id is required")
@@ -846,6 +1073,9 @@ def update_project(project_id: str, name: str, notes: str = "") -> Project:
         id=pid,
         name=name,
         notes=str(notes or ""),
+        hourly_rate_override=_opt_nonneg_float(hourly_rate_override) if hourly_rate_override is not None else existing.hourly_rate_override,
+        filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override) if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+        labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
         created_at=existing.created_at,
         updated_at=now,
     )
@@ -1081,6 +1311,7 @@ def group_rows_by_project(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, List[Di
 def compute_project_totals(
     tracked_rows: List[Dict[str, Any]],
     manual_jobs: Optional[List[ManualJob]] = None,
+    project: Optional[Project] = None,
 ) -> Dict[str, float]:
     """
     Compute derived totals for a project (tracked jobs + manual jobs).
@@ -1102,12 +1333,17 @@ def compute_project_totals(
         except (TypeError, ValueError):
             continue
 
-    hourly_rate = float(DEFAULT_PRICING.get("rate_per_hour") or 0.0)
+    hourly_rate, filament_cost_per_kg, labor_only = _project_pricing(project)
     for mj in manual_jobs:
         try:
             totals["hours"] += float(mj.hours or 0.0)
             totals["filament_g"] += float(mj.filament_g or 0.0)
-            totals["cost"] += _manual_job_cost(mj, hourly_rate=hourly_rate)
+            totals["cost"] += _manual_job_cost(
+                mj,
+                hourly_rate=float(hourly_rate or 0.0),
+                filament_cost_per_kg=float(filament_cost_per_kg or 0.0),
+                labor_only=bool(labor_only),
+            )
         except (TypeError, ValueError):
             continue
     return totals
