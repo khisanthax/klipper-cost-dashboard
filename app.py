@@ -40,8 +40,22 @@ from core.printers import (
     normalize_incoming_printer_and_filename,
     looks_like_gcode_filename,
 )
+from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
 
 app = Flask(__name__)
+
+
+@app.before_request
+def _kcd_auto_backup_hook():
+    # Best-effort auto backup. This is intentionally lightweight: it only runs when due.
+    if request.method != "GET":
+        return
+    if request.path.startswith("/static"):
+        return
+    try:
+        maybe_run_auto_backup()
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -995,6 +1009,35 @@ def settings_page():
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
 
+        if action == "backup_now":
+            try:
+                bs = load_backup_settings()
+                path = create_backup_archive(keep=bs.auto_backup_keep)
+                return redirect(
+                    url_for(
+                        "settings_page",
+                        msg=f"Backup created: data/backups/{os.path.basename(path)}",
+                    )
+                )
+            except Exception as e:
+                return redirect(url_for("settings_page", error=f"Backup failed: {e}"))
+
+        if action == "update_backup_settings":
+            enabled = bool(request.form.get("auto_backup_enabled"))
+            freq = (request.form.get("auto_backup_frequency") or "daily").strip().lower()
+            keep_raw = (request.form.get("auto_backup_keep") or "7").strip()
+            try:
+                keep = int(keep_raw)
+            except Exception:
+                keep = 7
+            keep = max(1, min(100, keep))
+            save_backup_settings(
+                auto_backup_enabled=enabled,
+                auto_backup_frequency=freq,
+                auto_backup_keep=keep,
+            )
+            return redirect(url_for("settings_page", msg="Backup settings saved."))
+
         if action == "delete_printer":
             printer = request.form.get("printer", "").strip()
             if printer:
@@ -1172,6 +1215,9 @@ def settings_page():
         return redirect(url_for("settings_page"))
 
     # GET request
+    message = request.args.get("msg", "").strip()
+    error = request.args.get("error", "").strip()
+
     printers = pricing.get_configured_printers()
     discovered_printers = pricing.get_discovered_printers()
     settings = load_settings(SETTINGS_FILE)
@@ -1191,9 +1237,12 @@ def settings_page():
     all_profiles = profiles.get_all_profiles()
     printer_mappings = profiles.get_all_printer_mappings()
     rate_profiles = rates.list_rate_profiles()
+    backup_settings = load_backup_settings()
 
     return render_template(
         "settings.html",
+        message=message,
+        error=error,
         printers=printers,
         discovered_printers=discovered_printers,
         configs=printer_configs,
@@ -1204,6 +1253,7 @@ def settings_page():
         printer_mappings=printer_mappings,
         rate_profiles=rate_profiles,
         active_rate_profiles=active_rate_profiles,
+        backup_settings=backup_settings,
     )
 
 
