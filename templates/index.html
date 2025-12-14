@@ -207,19 +207,49 @@
         const DEFAULT = "M";
         const map = { S: 280, M: 340, L: 460 };
 
-        const raw = (localStorage.getItem(KEY) || DEFAULT).toUpperCase();
-        const size = map[raw] ? raw : DEFAULT;
-        document.documentElement.style.setProperty("--kcd-card-min", map[size] + "px");
-        document.body.classList.remove("kcd-card-s", "kcd-card-m", "kcd-card-l");
-        document.body.classList.add("kcd-card-" + size.toLowerCase());
+        function getSize() {
+            const raw = (localStorage.getItem(KEY) || DEFAULT).toUpperCase();
+            return map[raw] ? raw : DEFAULT;
+        }
+
+        function applySize(size) {
+            const s = (size || DEFAULT).toUpperCase();
+            if (!map[s]) return;
+            localStorage.setItem(KEY, s);
+            document.documentElement.style.setProperty("--kcd-card-min", map[s] + "px");
+            document.body.classList.remove("kcd-card-s", "kcd-card-m", "kcd-card-l");
+            document.body.classList.add("kcd-card-" + s.toLowerCase());
+
+            document.querySelectorAll("[data-kcd-card-size]").forEach((btn) => {
+                const isActive = (btn.getAttribute("data-kcd-card-size") || "").toUpperCase() === s;
+                btn.classList.toggle("btn-primary", isActive);
+                btn.classList.toggle("text-white", isActive);
+                btn.classList.toggle("btn-outline-primary", !isActive);
+            });
+        }
+
+        // Apply immediately (no flash)
+        applySize(getSize());
+
+        document.addEventListener("click", function (e) {
+            const btn = e.target.closest("[data-kcd-card-size]");
+            if (!btn) return;
+            e.preventDefault();
+            applySize(btn.getAttribute("data-kcd-card-size"));
+        });
     })();
 </script>
 
 <!-- Printer Overview Section -->
 {% if printer_summaries %}
 <div class="card mb-4">
-    <div class="card-header">
+    <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Printer Overview</h5>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Printer card size">
+            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="S">S</button>
+            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="M">M</button>
+            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="L">L</button>
+        </div>
     </div>
     <div class="card-body">
         <div class="kcd-printer-grid">
