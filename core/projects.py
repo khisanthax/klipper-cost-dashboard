@@ -933,17 +933,17 @@ def job_uid(row: Dict[str, Any]) -> str:
     Return a stable UID for a history row.
 
     Prefer the precomputed `job_uid` field (added by core.storage.load_rows_raw),
-    otherwise compute it from row fields deterministically.
+    otherwise return an empty string (job_uid is expected to be persisted).
     """
     existing = row.get("job_uid")
     if isinstance(existing, str) and existing.strip():
         return existing.strip()
-    return compute_job_uid(row)
+    return ""
 
 
 def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]:
     """
-    Migrate legacy assignment keys (job_key) to the stable job_uid.
+    Migrate legacy assignment keys (job_key / legacy computed uid) to the persisted job_uid.
 
     This is safe and idempotent:
       - If assignments already use job_uid keys, it does nothing.
@@ -956,22 +956,35 @@ def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]
         return assignments
 
     def _looks_like_uid(k: str) -> bool:
-        return k.startswith("job_") and len(k) >= 8
+        # Persisted UIDs are UUID4 strings; legacy computed IDs were "job_<hash>".
+        try:
+            import uuid as _uuid
+            _uuid.UUID(k)
+            return True
+        except Exception:
+            return False
 
-    # Build mapping from legacy job_key -> job_uid for current rows.
+    # Build mapping from legacy keys -> persisted job_uid for current rows.
     legacy_to_uid: Dict[str, str] = {}
     for r in rows:
         try:
-            legacy_to_uid[job_key(r)] = job_uid(r)
+            persisted = job_uid(r)
+            if not persisted:
+                continue
+            legacy_to_uid[job_key(r)] = persisted
+            legacy_to_uid[str(r.get("legacy_job_uid") or compute_job_uid(r) or "").strip()] = persisted
         except Exception:
             continue
 
     migrated: Dict[str, str] = {}
     changed = False
+    dropped = 0
+    migrated_count = 0
     for k, pid in assignments.items():
         key = str(k or "").strip()
         if not key:
             changed = True
+            dropped += 1
             continue
         if _looks_like_uid(key):
             migrated[key] = pid
@@ -980,12 +993,23 @@ def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]
         if mapped:
             migrated[mapped] = pid
             changed = True
+            migrated_count += 1
         else:
             # Orphaned assignment (row not found); treat as unassigned.
             changed = True
+            dropped += 1
 
     if changed and migrated != assignments:
         save_assignments(migrated)
+        try:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Migrated project assignments to persisted job_uid: migrated=%s dropped=%s",
+                migrated_count,
+                dropped,
+            )
+        except Exception:
+            pass
         return migrated
 
     return assignments
