@@ -1,0 +1,15 @@
+<div class="btn-group">
+    <a href="{{ url_for('settings_printers') }}"
+       class="btn btn-outline-primary {% if settings_tab == 'printers' %}active{% endif %}">
+        Printers
+    </a>
+    <a href="{{ url_for('settings_profiles') }}"
+       class="btn btn-outline-primary {% if settings_tab == 'profiles' %}active{% endif %}">
+        Profiles
+    </a>
+    <a href="{{ url_for('settings_other') }}"
+       class="btn btn-outline-primary {% if settings_tab == 'other' %}active{% endif %}">
+        Other
+    </a>
+</div>
+

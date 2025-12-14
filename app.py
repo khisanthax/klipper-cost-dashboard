@@ -1096,7 +1096,35 @@ def projects_page():
 
 @app.route("/settings", methods=["GET", "POST"])
 def settings_page():
-    """Settings page for printer pricing configuration."""
+    """Back-compat settings entrypoint (redirects to /settings/printers)."""
+    if request.method == "GET":
+        return redirect(url_for("settings_printers"))
+    # For legacy POSTs, process the action but redirect to the appropriate sub-page.
+    return _settings_view(tab="printers")
+
+
+def _settings_endpoint_for_action(action: str) -> str:
+    other_actions = {"update_columns", "backup_now", "update_backup_settings"}
+    profiles_actions = {
+        "add_filament_profile",
+        "update_filament_profile",
+        "delete_filament_profile",
+        "add_rate_profile",
+        "update_rate_profile",
+        "delete_rate_profile",
+    }
+    if action in other_actions:
+        return "settings_other"
+    if action in profiles_actions:
+        return "settings_profiles"
+    return "settings_printers"
+
+
+def _settings_view(tab: str):
+    tab = (tab or "printers").strip().lower()
+    if tab not in {"printers", "profiles", "other"}:
+        tab = "printers"
+
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
 
@@ -1106,12 +1134,12 @@ def settings_page():
                 path = create_backup_archive(keep=bs.auto_backup_keep)
                 return redirect(
                     url_for(
-                        "settings_page",
+                        _settings_endpoint_for_action(action),
                         msg=f"Backup created: data/backups/{os.path.basename(path)}",
                     )
                 )
             except Exception as e:
-                return redirect(url_for("settings_page", error=f"Backup failed: {e}"))
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"Backup failed: {e}"))
 
         if action == "update_backup_settings":
             enabled = bool(request.form.get("auto_backup_enabled"))
@@ -1127,7 +1155,7 @@ def settings_page():
                 auto_backup_frequency=freq,
                 auto_backup_keep=keep,
             )
-            return redirect(url_for("settings_page", msg="Backup settings saved."))
+            return redirect(url_for(_settings_endpoint_for_action(action), msg="Backup settings saved."))
 
         if action == "delete_printer":
             printer = request.form.get("printer", "").strip()
@@ -1135,7 +1163,7 @@ def settings_page():
                 pricing.delete_printer(printer, delete_csv=False)
                 # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
                 pricing.hide_printer(printer)
-            return redirect(url_for("settings_page"))
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "save_printer_defaults":
             printer = request.form.get("printer")
@@ -1149,112 +1177,104 @@ def settings_page():
                     settings[printer]["filament_mode"] = request.form.get("filament_mode", "per_meter")
                     settings[printer]["filament_rate"] = float(request.form.get("filament_rate", 0.25))
                     settings[printer]["grams_per_meter"] = float(request.form.get("grams_per_meter", 3.0))
-                    save_settings(SETTINGS_FILE, DATA_DIR, settings)
-                except ValueError:
+                except (TypeError, ValueError):
                     pass
 
-        elif action == "update_columns":
-            selected = request.form.getlist("columns")
-            save_display_settings(DISPLAY_FILE, HEADERS, selected)
+                save_settings(SETTINGS_FILE, DATA_DIR, settings)
 
-        elif action == "rename_printer":
-            old_name = request.form.get("old_name")
-            new_name = request.form.get("new_name")
-            if old_name and new_name:
-                rename_printer(old_name, new_name, update_csv=True)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "merge_printers":
-            names_str = request.form.get("printer_names", "")
-            merged_name = request.form.get("merged_name", "")
-            if names_str and merged_name:
-                names = [n.strip() for n in names_str.split(",") if n.strip()]
-                if names:
-                    merge_printers(names, merged_name)
+        if action == "update_columns":
+            cols = request.form.getlist("columns")
+            display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+            display_settings["visible_columns"] = cols
+            save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "add_filament_profile":
+        if action == "rename_printer":
+            old = request.form.get("old_name", "").strip()
+            new = request.form.get("new_name", "").strip()
+            if old and new:
+                rename_printer(old, new)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
+
+        if action == "merge_printers":
+            primary = request.form.get("primary", "").strip()
+            secondary = request.form.get("secondary", "").strip()
+            if primary and secondary:
+                merge_printers(primary, secondary)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
+
+        if action == "add_filament_profile":
             name = request.form.get("profile_name", "").strip()
             material = request.form.get("material", "").strip()
-            filament_mode = request.form.get("filament_mode", "per_meter")
             brand = request.form.get("brand", "").strip()
             color = request.form.get("color", "").strip()
-            
+            mode = request.form.get("filament_mode", "per_meter").strip()
+            description = request.form.get("description", "").strip()
             try:
-                filament_rate = float(request.form.get("filament_rate", 0.25))
-                grams_per_meter = float(request.form.get("grams_per_meter", 3.0))
-                
-                if name:  # Only create if name is provided
-                    profile_data = {
-                        "name": name,
-                        "material": material,
-                        "brand": brand,
-                        "color": color,
-                        "filament_mode": filament_mode,
-                        "filament_rate": filament_rate,
-                        "grams_per_meter": grams_per_meter,
-                    }
-                    profiles.upsert_profile(profile_data)
-            except ValueError:
-                pass  # Invalid numeric input, skip
+                rate = float(request.form.get("filament_rate", 0.25))
+            except (TypeError, ValueError):
+                rate = None
+            try:
+                gpm = float(request.form.get("grams_per_meter", 3.0))
+            except (TypeError, ValueError):
+                gpm = None
+            if name and rate is not None:
+                profile = {
+                    "name": name,
+                    "material": material,
+                    "brand": brand,
+                    "color": color,
+                    "filament_mode": mode,
+                    "filament_rate": rate,
+                    "grams_per_meter": gpm,
+                    "description": description,
+                }
+                profiles.add_profile(profile)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "update_filament_profile":
+        if action == "update_filament_profile":
             profile_id = request.form.get("profile_id", "").strip()
             if profile_id:
-                existing = profiles.get_profile(profile_id)
-                if existing:
-                    updates = {}
-                    name = request.form.get("profile_name", "").strip()
-                    material = request.form.get("material", "").strip()
-                    brand = request.form.get("brand", "").strip()
-                    color = request.form.get("color", "").strip()
-                    filament_mode = request.form.get("filament_mode", "").strip()
+                updates = {}
+                name = request.form.get("profile_name", "").strip()
+                material = request.form.get("material", "").strip()
+                brand = request.form.get("brand", "").strip()
+                color = request.form.get("color", "").strip()
+                mode = request.form.get("filament_mode", "").strip()
+                if name:
+                    updates["name"] = name
+                updates["material"] = material
+                updates["brand"] = brand
+                updates["color"] = color
+                if mode:
+                    updates["filament_mode"] = mode
+                try:
+                    updates["filament_rate"] = float(request.form.get("filament_rate"))
+                except (TypeError, ValueError):
+                    updates["filament_rate"] = None
+                try:
+                    updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
+                except (TypeError, ValueError):
+                    updates["grams_per_meter"] = None
+                profiles.update_profile(profile_id, updates)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-                    if name:
-                        updates["name"] = name
-                    updates["material"] = material
-                    updates["brand"] = brand
-                    updates["color"] = color
-                    if filament_mode:
-                        updates["filament_mode"] = filament_mode
-
-                    try:
-                        updates["filament_rate"] = float(request.form.get("filament_rate"))
-                    except (TypeError, ValueError):
-                        updates["filament_rate"] = existing.get("filament_rate")
-
-                    try:
-                        updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
-                    except (TypeError, ValueError):
-                        updates["grams_per_meter"] = existing.get("grams_per_meter")
-
-                    profiles.update_profile(profile_id, updates)
-
-        elif action == "delete_filament_profile":
+        if action == "delete_filament_profile":
             profile_id = request.form.get("profile_id", "").strip()
             if profile_id:
-                # Safety check: verify profile exists before deleting
-                profile = profiles.get_profile(profile_id)
-                if profile:
-                    # Check if profile is in use
-                    mappings = profiles.get_all_printer_mappings()
-                    in_use = any(pid == profile_id for pid in mappings.values())
-                    
-                    if not in_use:
-                        profiles.delete_profile(profile_id)
-                    # If in use, silently fail (could add flash message in future)
+                profiles.delete_profile(profile_id)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "set_active_filament_profile":
+        if action == "set_active_filament_profile":
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("profile_id", "").strip()
-            
             if printer:
-                if profile_id == "" or profile_id == "none":
-                    # Clear the mapping
-                    profiles.set_printer_mapping(printer, None)
-                else:
-                    # Set the mapping
-                    profiles.set_printer_mapping(printer, profile_id)
+                profiles.set_printer_active_profile(printer, profile_id)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "add_rate_profile":
+        if action == "add_rate_profile":
             name = request.form.get("rate_profile_name", "").strip()
             description = request.form.get("rate_profile_description", "").strip()
             try:
@@ -1269,8 +1289,9 @@ def settings_page():
                     "rate_per_hour": rate_per_hour,
                 }
                 rates.upsert_rate_profile(rate_profile)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "update_rate_profile":
+        if action == "update_rate_profile":
             profile_id = request.form.get("rate_profile_id", "").strip()
             if profile_id:
                 updates = {}
@@ -1284,13 +1305,15 @@ def settings_page():
                 except (TypeError, ValueError):
                     updates["rate_per_hour"] = None
                 rates.update_rate_profile(profile_id, updates)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "delete_rate_profile":
+        if action == "delete_rate_profile":
             profile_id = request.form.get("rate_profile_id", "").strip()
             if profile_id:
                 rates.delete_rate_profile(profile_id)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        elif action == "set_active_rate_profile":
+        if action == "set_active_rate_profile":
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("rate_profile_id", "").strip()
             if printer:
@@ -1302,8 +1325,9 @@ def settings_page():
                 else:
                     settings[printer]["active_rate_profile_id"] = profile_id
                 save_settings(SETTINGS_FILE, DATA_DIR, settings)
+            return redirect(url_for(_settings_endpoint_for_action(action)))
 
-        return redirect(url_for("settings_page"))
+        return redirect(url_for(_settings_endpoint_for_action(action) if action else _settings_endpoint_for_action(tab)))
 
     # GET request
     message = request.args.get("msg", "").strip()
@@ -1312,11 +1336,11 @@ def settings_page():
     printers = pricing.get_configured_printers()
     discovered_printers = pricing.get_discovered_printers()
     settings = load_settings(SETTINGS_FILE)
-    
+
     printer_configs = {}
     for p in printers:
         printer_configs[p] = get_pricing_for_printer_raw(p)
-    
+
     active_rate_profiles = {}
     for p in printers:
         active_rate_profiles[p] = settings.get(p, {}).get("active_rate_profile_id", "")
@@ -1330,8 +1354,21 @@ def settings_page():
     rate_profiles = rates.list_rate_profiles()
     backup_settings = load_backup_settings()
 
+    template_by_tab = {
+        "printers": "settings/printers.html",
+        "profiles": "settings/profiles.html",
+        "other": "settings/other.html",
+    }
+    subtitle_by_tab = {
+        "printers": "Manage printers connected to KCD.",
+        "profiles": "Rates and material costs used for calculations.",
+        "other": "Display preferences, backups, and exports.",
+    }
+
     return render_template(
-        "settings.html",
+        template_by_tab[tab],
+        settings_tab=tab,
+        settings_subtitle=subtitle_by_tab[tab],
         message=message,
         error=error,
         printers=printers,
@@ -1346,6 +1383,21 @@ def settings_page():
         active_rate_profiles=active_rate_profiles,
         backup_settings=backup_settings,
     )
+
+
+@app.route("/settings/printers", methods=["GET", "POST"])
+def settings_printers():
+    return _settings_view(tab="printers")
+
+
+@app.route("/settings/profiles", methods=["GET", "POST"])
+def settings_profiles():
+    return _settings_view(tab="profiles")
+
+
+@app.route("/settings/other", methods=["GET", "POST"])
+def settings_other():
+    return _settings_view(tab="other")
 
 
 @app.route("/download-csv")
