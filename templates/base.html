@@ -20,9 +20,19 @@
 
 <body>
     <!-- Navigation Header -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="/">🖨️ Klipper Cost Dashboard</a>
+            <a class="navbar-brand" href="{{ url_for('index') }}">Klipper Cost Dashboard</a>
+            <div class="d-flex flex-wrap gap-2 ms-auto">
+                <a class="btn btn-sm btn-outline-light {% if request.path == '/' %}active{% endif %}"
+                    href="{{ url_for('index') }}">Dashboard</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/reports') %}active{% endif %}"
+                    href="{{ url_for('reports_page') }}">Reports</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/projects') %}active{% endif %}"
+                    href="{{ url_for('projects_page') }}">Projects</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
+                    href="{{ url_for('settings_page') }}">Settings</a>
+            </div>
         </div>
     </nav>
 

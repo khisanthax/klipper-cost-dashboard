@@ -3,14 +3,22 @@ Print Cost Dashboard - Flask Application
 
 Refactored to use modular core package.
 """
+import os
+import tempfile
+import uuid
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
+from werkzeug.utils import secure_filename
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
     DEFAULT_PRICING, SETTINGS_FILE, DISPLAY_FILE, DATA_DIR, TIMEZONE_OBJ
 )
 from core.storage import (
     load_settings, save_settings, load_display_settings, save_display_settings,
-    append_row, load_rows_raw, rewrite_csv_without_indices, rewrite_csv_mark_completed, ts_to_local_dt
+    append_row, load_rows_raw,
+    rewrite_csv_without_indices, rewrite_csv_mark_completed,
+    rewrite_csv_without_job_uids, rewrite_csv_mark_completed_job_uids,
+    rewrite_csv_recalculate_costs_job_uids,
+    ts_to_local_dt
 )
 from core.pricing import (
     compute_costs, get_known_printers, rename_printer, merge_printers,
@@ -25,6 +33,13 @@ from core import profiles
 from core import rates
 from core import pricing
 from core import live
+from core import projects
+from core.gcode_metadata import extract_gcode_metadata
+from core.printers import (
+    get_canonical_printer_names,
+    normalize_incoming_printer_and_filename,
+    looks_like_gcode_filename,
+)
 
 app = Flask(__name__)
 
@@ -56,14 +71,18 @@ def log_print():
     except ValueError:
         return jsonify({"status": "error", "error": "Numeric fields must be numbers"}), 400
 
-    printer_name = str(payload["printer"])
-    filename = str(payload["filename"])
+    printer_name_raw = str(payload["printer"])
+    filename_raw = str(payload["filename"])
 
-    # Make sure printer exists in settings
-    settings = load_settings(SETTINGS_FILE)
-    if printer_name not in settings:
-        settings[printer_name] = dict(DEFAULT_PRICING)
-        save_settings(SETTINGS_FILE, DATA_DIR, settings)
+    canonical = get_canonical_printer_names()
+    norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
+    if not norm.valid_printer:
+        app.logger.warning(norm.reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"status": "error", "error": norm.reason}), 400
+
+    printer_name = norm.printer_name
+    filename = norm.filename
 
     # Check for live job metadata
     from core import live
@@ -84,6 +103,7 @@ def log_print():
 
     row = {
         "timestamp": ts,
+        "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
         "duration_seconds": duration_seconds,
@@ -144,16 +164,19 @@ def job_start():
     from core import live
     
     data = request.get_json() or request.form.to_dict()
-    printer_name = data.get("printer_name")
-    filename = data.get("filename")
+    printer_name_raw = data.get("printer_name")
+    filename_raw = data.get("filename")
 
-    # Guard against swapped arguments (some clients may send filename as printer_name)
-    if printer_name and isinstance(printer_name, str):
-        lower = printer_name.lower()
-        if lower.endswith((".gcode", ".gco", ".g")):
-            # Likely swapped: printer_name looks like a file, so swap with filename
-            printer_name, filename = filename, printer_name
-    
+    canonical = get_canonical_printer_names()
+    norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
+    if not norm.valid_printer:
+        app.logger.warning(norm.reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": norm.reason}), 400
+
+    printer_name = norm.printer_name
+    filename = norm.filename
+
     if not printer_name or not filename:
         return jsonify({"success": False, "error": "Missing required fields: printer_name, filename"}), 400
     
@@ -197,6 +220,18 @@ def job_update():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     # Extract update fields (exclude printer_name from updates)
     updates = {k: v for k, v in data.items() if k != "printer_name"}
@@ -228,6 +263,18 @@ def job_pause():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     result = live.pause_job(printer_name)
     
@@ -248,6 +295,18 @@ def job_resume():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     result = live.resume_job(printer_name)
     
@@ -269,6 +328,18 @@ def job_cancel():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        error = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(error)
+        return jsonify({"success": False, "error": error}), 400
+
+    if printer_name not in canonical:
+        error = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(error)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": error}), 400
     
     result = live.cancel_job(printer_name, reason)
     
@@ -289,6 +360,18 @@ def job_end():
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
+
+    canonical = get_canonical_printer_names()
+    if looks_like_gcode_filename(printer_name):
+        reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
+        app.logger.warning(reason)
+        return jsonify({"success": False, "error": reason}), 400
+
+    if printer_name not in canonical:
+        reason = f"Unknown printer_name received: {printer_name!r}"
+        app.logger.warning(reason)
+        app.logger.warning("Allowed printers: %s", sorted(canonical))
+        return jsonify({"success": False, "error": reason}), 400
     
     result = live.end_job(printer_name)
     
@@ -316,21 +399,44 @@ def index():
             return redirect(url_for("index"))
 
         if action == "complete_rows":
-            indices_raw = request.form.getlist("delete_rows")
-            if indices_raw:
-                indices = [int(i) for i in indices_raw if str(i).strip().isdigit()]
-                rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+            selected = request.form.getlist("delete_rows")
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                    rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
+
+        if action == "recalc_costs":
+            selected = request.form.getlist("delete_rows")
+            job_uids = []
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = {int(i) for i in selected if str(i).strip().isdigit()}
+                    rows_for_map, _ = load_rows_raw(CSV_FILE)
+                    job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+
+            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_uids, compute_costs)
+            return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
 
         # Handle row deletion
         if action in ("delete_rows", "delete"):
-            indices_raw = request.form.getlist("delete_rows")
-            if indices_raw:
-                indices = [int(i) for i in indices_raw if str(i).strip().isdigit()]
-                rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+            selected = request.form.getlist("delete_rows")
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                    rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
 
     rows, error = load_rows_raw(CSV_FILE)
+    message = request.args.get("msg", "").strip()
     
     # Apply date filtering
     start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
@@ -361,7 +467,8 @@ def index():
     summary.setdefault("per_day", {})
     summary.setdefault("per_printer", {})
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-    visible_cols = display_settings.get("visible_columns", HEADERS)
+    selected_columns = display_settings.get("visible_columns") or HEADERS
+    visible_cols = selected_columns
 
     # Prepare chart data
     chart_cost_per_day = {"labels": [], "values": []}
@@ -398,6 +505,7 @@ def index():
         "index.html",
         rows=rows,
         error=error,
+        message=message,
         headers=HEADERS,
         friendly_headers=FRIENDLY_HEADERS,
         visible_cols=visible_cols,
@@ -471,6 +579,397 @@ def reports_page():
         start_date=request.args.get("start_date", ""),
         end_date=request.args.get("end_date", ""),
         error=error,
+    )
+
+
+@app.route("/projects", methods=["GET", "POST"])
+def projects_page():
+    """
+    Projects page:
+    - Projects are stored in data/projects.json
+    - Job membership is stored in data/project_assignments.json (job_uid -> project_id)
+    - Deleting a project unassigns jobs (no CSV rows are deleted)
+    """
+    error = None
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        redirect_args = {}
+        try:
+            if action == "create_project":
+                name = request.form.get("name", "").strip()
+                notes = request.form.get("notes", "").strip()
+                hourly_rate_override = request.form.get("hourly_rate_override", "").strip()
+                filament_cost_per_kg_override = request.form.get("filament_cost_per_kg_override", "").strip()
+                labor_only = bool(request.form.get("labor_only"))
+                projects.create_project(
+                    name=name,
+                    notes=notes,
+                    hourly_rate_override=hourly_rate_override,
+                    filament_cost_per_kg_override=filament_cost_per_kg_override,
+                    labor_only=labor_only,
+                )
+
+            elif action == "update_project":
+                project_id = request.form.get("project_id", "").strip()
+                name = request.form.get("name", "").strip()
+                notes = request.form.get("notes", "").strip()
+                hourly_rate_override = request.form.get("hourly_rate_override", "").strip()
+                filament_cost_per_kg_override = request.form.get("filament_cost_per_kg_override", "").strip()
+                labor_only = bool(request.form.get("labor_only"))
+                projects.update_project(
+                    project_id=project_id,
+                    name=name,
+                    notes=notes,
+                    hourly_rate_override=hourly_rate_override,
+                    filament_cost_per_kg_override=filament_cost_per_kg_override,
+                    labor_only=labor_only,
+                )
+
+            elif action == "delete_project":
+                project_id = request.form.get("project_id", "").strip()
+                projects.delete_project(project_id)
+
+            elif action == "assign_jobs":
+                project_id = request.form.get("project_id", "").strip()
+                job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
+                if project_id and job_ids:
+                    projects.assign_jobs(job_ids, project_id=project_id)
+
+            elif action == "unassign_job":
+                job_id = (request.form.get("job_uid") or request.form.get("job_key") or "").strip()
+                if job_id:
+                    projects.unassign_jobs([job_id])
+
+            elif action == "unassign_selected":
+                job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
+                if job_ids:
+                    projects.unassign_jobs(job_ids)
+
+            elif action == "recalc_costs":
+                job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
+                updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_ids, compute_costs)
+                redirect_args = {"msg": f"Recalculated costs for {updated} job(s)."}
+
+            elif action == "create_manual_job":
+                project_id = request.form.get("project_id", "").strip()
+                title = request.form.get("title", "").strip()
+                hours = request.form.get("hours", "").strip()
+                filament_g = request.form.get("filament_g", "").strip()
+                cost_override = request.form.get("cost_override", "").strip()
+                notes = request.form.get("notes", "").strip()
+                mj = projects.create_manual_job(
+                    project_id=project_id,
+                    title=title,
+                    hours=hours,
+                    filament_g=filament_g,
+                    cost_override=cost_override,
+                    notes=notes,
+                )
+                redirect_args = {"msg": "Manual job added.", "edit_project": project_id}
+
+            elif action == "update_manual_job":
+                manual_job_id = request.form.get("manual_job_id", "").strip()
+                project_id = request.form.get("project_id", "").strip()
+                title = request.form.get("title", "").strip()
+                hours = request.form.get("hours", "").strip()
+                filament_g = request.form.get("filament_g", "").strip()
+                cost_override = request.form.get("cost_override", "").strip()
+                notes = request.form.get("notes", "").strip()
+                projects.update_manual_job(
+                    manual_job_id=manual_job_id,
+                    title=title,
+                    hours=hours,
+                    filament_g=filament_g,
+                    cost_override=cost_override,
+                    notes=notes,
+                )
+                redirect_args = {"msg": "Manual job updated.", "edit_project": project_id, "edit_manual_job_id": manual_job_id}
+
+            elif action == "delete_manual_job":
+                manual_job_id = request.form.get("manual_job_id", "").strip()
+                projects.delete_manual_job(manual_job_id)
+                redirect_args = {"msg": "Manual job deleted."}
+
+            elif action == "upload_plan_gcode":
+                project_id = request.form.get("project_id", "").strip()
+                manual_time_hours = request.form.get("manual_time_hours", "").strip()
+                manual_filament_g = request.form.get("manual_filament_g", "").strip()
+                manual_cost = request.form.get("manual_cost", "").strip()
+                file = request.files.get("gcode_file")
+                if not project_id:
+                    raise ValueError("Project is required")
+                if not file or not file.filename:
+                    raise ValueError("Please choose a .gcode file to upload.")
+
+                original_name = os.path.basename(file.filename)
+                if not original_name.lower().endswith(".gcode"):
+                    raise ValueError("Only .gcode files are supported.")
+
+                # Basic guardrail (request size)
+                max_bytes = 150 * 1024 * 1024  # 150MB
+                if request.content_length and request.content_length > max_bytes:
+                    raise ValueError("Upload too large. Please upload a smaller .gcode file (max 150MB).")
+
+                tmp_path = None
+                try:
+                    safe_name = secure_filename(original_name) or "upload.gcode"
+                    with tempfile.NamedTemporaryFile(prefix="kcd_plan_", suffix="_" + safe_name, delete=False) as tf:
+                        tmp_path = tf.name
+                        total = 0
+                        while True:
+                            chunk = file.stream.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > max_bytes:
+                                raise ValueError("Upload too large. Please upload a smaller .gcode file (max 150MB).")
+                            tf.write(chunk)
+
+                    meta = extract_gcode_metadata(tmp_path)
+                    est_time_s = int(meta.time_s or 0)
+                    est_filament_g = meta.filament_g
+                    source = meta.slicer or ""
+
+                    # If slicer metadata is missing/incomplete, allow manual overrides.
+                    if not meta.found or not est_time_s:
+                        if manual_time_hours:
+                            try:
+                                est_time_s = int(float(manual_time_hours) * 3600.0)
+                            except (TypeError, ValueError):
+                                est_time_s = 0
+                            source = "Manual"
+                        if not est_time_s:
+                            raise ValueError(meta.error or "No slicer metadata found (missing estimated time).")
+
+                    if est_filament_g is None and manual_filament_g:
+                        try:
+                            est_filament_g = float(manual_filament_g)
+                        except (TypeError, ValueError):
+                            est_filament_g = None
+
+                    est_cost_override = None
+                    if manual_cost:
+                        try:
+                            est_cost_override = float(manual_cost)
+                        except (TypeError, ValueError):
+                            est_cost_override = None
+
+                    projects.create_plan_item(
+                        project_id=project_id,
+                        filename=original_name,
+                        est_time_s=est_time_s,
+                        est_filament_g=est_filament_g,
+                        source=source,
+                        est_cost_override=est_cost_override,
+                    )
+                    msg = "Planned item added."
+                    if meta.found and meta.filament_g is None and not manual_filament_g:
+                        msg = "Planned item added. Filament grams not found; use Edit to fill it in."
+                    if not meta.found:
+                        msg = "Planned item added using manual estimates."
+                    redirect_args = {"msg": msg, "edit_project": project_id}
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+
+            elif action == "update_plan_item":
+                plan_id = request.form.get("plan_id", "").strip()
+                project_id = request.form.get("project_id", "").strip()
+                filename = request.form.get("filename", "").strip()
+                time_hours = request.form.get("time_hours", "").strip()
+                filament_g = request.form.get("filament_g", "").strip()
+                est_cost = request.form.get("est_cost", "").strip()
+                source = request.form.get("source", "").strip()
+                notes = request.form.get("notes", "").strip()
+
+                try:
+                    est_time_s = int(float(time_hours) * 3600.0)
+                except (TypeError, ValueError):
+                    est_time_s = 0
+
+                filament_val = None
+                if filament_g != "":
+                    try:
+                        filament_val = float(filament_g)
+                    except (TypeError, ValueError):
+                        filament_val = None
+
+                cost_val = None
+                if est_cost != "":
+                    try:
+                        cost_val = float(est_cost)
+                    except (TypeError, ValueError):
+                        cost_val = None
+
+                projects.update_plan_item(
+                    plan_id,
+                    filename=filename,
+                    est_time_s=est_time_s,
+                    est_filament_g=filament_val,
+                    est_cost=cost_val,
+                    source=source,
+                    notes=notes,
+                )
+                redirect_args = {"msg": "Planned item updated.", "edit_project": project_id}
+
+            elif action == "fulfill_plan_item":
+                plan_id = request.form.get("plan_id", "").strip()
+                if plan_id:
+                    projects.set_plan_status(plan_id, "fulfilled")
+
+            elif action == "delete_plan_item":
+                plan_id = request.form.get("plan_id", "").strip()
+                if plan_id:
+                    projects.delete_plan_item(plan_id)
+
+            elif action == "convert_plan_to_manual":
+                project_id = request.form.get("project_id", "").strip()
+                plan_id = request.form.get("plan_id", "").strip()
+                mj = projects.convert_plan_item_to_manual(project_id=project_id, plan_id=plan_id)
+                redirect_args = {
+                    "msg": "Converted planned item to manual job.",
+                    "edit_project": project_id,
+                    "edit_manual_job_id": mj.manual_job_id,
+                }
+
+            # Always cleanup after any mutation
+            projects.recalculate_all()
+        except projects.ProjectsDataError as e:
+            error = str(e)
+        except ValueError as e:
+            error = str(e)
+        except Exception as e:
+            error = f"Unexpected error: {e}"
+
+        if error:
+            return redirect(url_for("projects_page", error=error))
+        return redirect(url_for("projects_page", **redirect_args))
+
+    # GET
+    rows, rows_error = load_rows_raw(CSV_FILE)
+    if rows_error:
+        error = rows_error
+
+    error = request.args.get("error") or error
+    message = request.args.get("msg", "").strip()
+    edit_project = request.args.get("edit_project", "").strip()
+    edit_manual_job_id = request.args.get("edit_manual_job_id", "").strip() or request.args.get("edit_manual", "").strip()
+    orphans_added = 0
+
+    try:
+        # Ensure legacy assignment keys are migrated to stable job_uids.
+        _, orphans_added = projects.migrate_assignments_to_job_uid(rows)
+
+        projects_map, assignments, manual_jobs_by_project, plans_by_project = projects.recalculate_all()
+        project_jobs, unassigned_jobs = projects.group_rows_by_project(rows)
+    except projects.ProjectsDataError as e:
+        return render_template(
+            "projects.html",
+            error=str(e),
+            projects=[],
+            unassigned_jobs=[],
+            projects_by_id={},
+        )
+
+    if orphans_added:
+        orphan_msg = (
+            f"Cleaned up {orphans_added} orphaned legacy assignment entr"
+            f"{'y' if orphans_added == 1 else 'ies'} (saved to project_assignments_orphans.json)."
+        )
+        message = f"{message} {orphan_msg}".strip() if message else orphan_msg
+
+    # Build view models (derived totals always computed from current membership)
+    project_rows = []
+    for pid, p in projects_map.items():
+        jobs = project_jobs.get(pid, [])
+        manual_jobs = manual_jobs_by_project.get(pid, [])
+        totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs, project=p)
+        plans = plans_by_project.get(pid, [])
+        projection = projects.compute_project_projection(plans, project=p)
+
+        manual_jobs_view = []
+        for mj in manual_jobs:
+            manual_jobs_view.append(
+                {
+                    "manual_job_id": mj.manual_job_id,
+                    "title": mj.title,
+                    "hours": mj.hours,
+                    "filament_g": mj.filament_g,
+                    "cost_override": mj.cost_override,
+                    "computed_cost": projects.compute_manual_job_cost(mj, project=p),
+                    "created_at": mj.created_at,
+                    "updated_at": mj.updated_at,
+                    "notes": mj.notes,
+                }
+            )
+        manual_jobs_view.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+        # Tracked (CSV) actual cost only (manual jobs are shown separately in totals).
+        tracked_cost = 0.0
+        for r in jobs:
+            try:
+                tracked_cost += float(r.get("total_cost") or 0.0)
+            except (TypeError, ValueError):
+                pass
+        manual_cost = max(float(totals.get("cost") or 0.0) - tracked_cost, 0.0)
+
+        plans_view = []
+        for pl in sorted(plans, key=lambda x: x.created_at or "", reverse=True):
+            effective_cost = projects.compute_planned_item_cost(pl, p)
+            plans_view.append(
+                {
+                    "plan_id": pl.plan_id,
+                    "filename": pl.filename,
+                    "created_at": pl.created_at,
+                    "est_time_s": pl.est_time_s,
+                    "est_filament_g": pl.est_filament_g,
+                    "est_cost": effective_cost,
+                    "status": pl.status,
+                    "source": pl.source,
+                    "converted_to_manual_job_id": pl.converted_to_manual_job_id,
+                    "est_cost_is_override": pl.est_cost_is_override,
+                    "notes": pl.notes,
+                }
+            )
+
+        project_rows.append(
+            {
+                "id": pid,
+                "name": p.name,
+                "notes": p.notes,
+                "hourly_rate_override": p.hourly_rate_override,
+                "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
+                "labor_only": bool(p.labor_only),
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+                "totals": totals,
+                "jobs": sorted(jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True),
+                "manual_jobs": manual_jobs_view,
+                "planned_items": plans_view,
+                "projected": projection,
+                "actual_tracked_cost": tracked_cost,
+                "actual_manual_cost": manual_cost,
+            }
+        )
+
+    project_rows.sort(key=lambda x: (x.get("updated_at") or 0.0, x.get("name") or ""), reverse=True)
+
+    # Sort unassigned by timestamp, newest first
+    unassigned_jobs_sorted = sorted(unassigned_jobs, key=lambda r: float(r.get("timestamp_raw") or 0), reverse=True)
+
+    return render_template(
+        "projects.html",
+        error=error,
+        message=message,
+        edit_project=edit_project,
+        edit_manual_job_id=edit_manual_job_id,
+        projects=project_rows,
+        unassigned_jobs=unassigned_jobs_sorted,
+        projects_by_id={p["id"]: p for p in project_rows},
     )
 
 
@@ -670,7 +1169,7 @@ def settings_page():
         active_rate_profiles[p] = settings.get(p, {}).get("active_rate_profile_id", "")
 
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-    visible_cols = display_settings.get("visible_columns", HEADERS)
+    selected_columns = display_settings.get("visible_columns") or HEADERS
 
     # Load profile data
     all_profiles = profiles.get_all_profiles()
@@ -682,9 +1181,9 @@ def settings_page():
         printers=printers,
         discovered_printers=discovered_printers,
         configs=printer_configs,
-        headers=HEADERS,
+        headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
-        visible_cols=visible_cols,
+        selected_columns=selected_columns,
         profiles=all_profiles,
         printer_mappings=printer_mappings,
         rate_profiles=rate_profiles,

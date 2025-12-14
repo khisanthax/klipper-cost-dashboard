@@ -5,7 +5,11 @@ import os
 import csv
 import json
 import secrets
+import hashlib
+import shutil
+import uuid
 from datetime import datetime, timezone
+from typing import Optional
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -46,7 +50,8 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
-        data = {"visible_columns": headers, "hidden_printers": []}
+        visible = [h for h in headers if h != "job_uid"]
+        data = {"visible_columns": visible, "hidden_printers": []}
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -58,25 +63,26 @@ def load_display_settings(display_file, headers):
         with open(display_file) as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"visible_columns": headers, "hidden_printers": []}
+                return {"visible_columns": [h for h in headers if h != "job_uid"], "hidden_printers": []}
             cols = data.get("visible_columns", headers)
             cols = [c for c in cols if c in headers]
+            cols = [c for c in cols if c != "job_uid"]
             if not cols:
-                cols = headers
+                cols = [h for h in headers if h != "job_uid"]
             hidden = data.get("hidden_printers", [])
             if not isinstance(hidden, list):
                 hidden = []
             hidden = [str(p) for p in hidden if str(p).strip()]
             return {"visible_columns": cols, "hidden_printers": hidden}
     except Exception:
-        return {"visible_columns": headers, "hidden_printers": []}
+        return {"visible_columns": [h for h in headers if h != "job_uid"], "hidden_printers": []}
 
 
 def save_display_settings(display_file, headers, visible_columns):
     """Save display settings to JSON file."""
-    visible = [c for c in visible_columns if c in headers]
+    visible = [c for c in visible_columns if c in headers and c != "job_uid"]
     if not visible:
-        visible = headers
+        visible = [h for h in headers if h != "job_uid"]
     # Preserve any additional display settings (e.g. hidden_printers).
     hidden = []
     try:
@@ -94,7 +100,7 @@ def save_display_settings(display_file, headers, visible_columns):
 def save_hidden_printers(display_file, headers, hidden_printers):
     """Persist hidden printer list while preserving visible column settings."""
     settings = load_display_settings(display_file, headers)
-    visible_cols = settings.get("visible_columns", headers)
+    visible_cols = settings.get("visible_columns", [h for h in headers if h != "job_uid"])
     hidden = hidden_printers if isinstance(hidden_printers, list) else []
     hidden = [str(p) for p in hidden if str(p).strip()]
     with open(display_file, "w") as f:
@@ -141,7 +147,20 @@ def ensure_api_key(secret_file=None, data_dir=None):
 
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
+    if "job_uid" in headers and not str(data.get("job_uid") or "").strip():
+        data["job_uid"] = str(uuid.uuid4())
+
     file_exists = os.path.exists(csv_file)
+    if file_exists:
+        # Migrate legacy CSV headers (no job_uid) before appending with the new schema.
+        try:
+            with open(csv_file, newline="") as f:
+                reader = csv.reader(f)
+                header_row = next(reader, [])
+            if "job_uid" in headers and "job_uid" not in header_row:
+                load_rows_raw(csv_file)
+        except Exception:
+            pass
     with open(csv_file, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         if not file_exists:
@@ -155,8 +174,12 @@ def load_rows_raw(csv_file):
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:
+        needs_writeback = False
+        file_fieldnames = []
         with open(csv_file, newline="") as f:
             reader = csv.DictReader(f)
+            file_fieldnames = list(reader.fieldnames or [])
+            has_uid_col = "job_uid" in file_fieldnames
             for idx, r in enumerate(reader):
                 r = dict(r)
                 
@@ -169,9 +192,11 @@ def load_rows_raw(csv_file):
                     r["status"] = "completed"
                 if "failure_reason" not in r:
                     r["failure_reason"] = ""
-                
+
                 r["row_index"] = idx
                 ts = r.get("timestamp", "")
+                # Preserve the raw timestamp as stored in CSV, even if we render a display timestamp.
+                r["timestamp_epoch"] = ts
                 if ts:
                     try:
                         ts_float = float(ts)
@@ -182,10 +207,89 @@ def load_rows_raw(csv_file):
                         r["timestamp_raw"] = None
                 else:
                     r["timestamp_raw"] = None
+
+                # Stable persisted ID for selection and project assignment.
+                uid = str(r.get("job_uid") or "").strip() if has_uid_col else ""
+                if not uid:
+                    uid = str(uuid.uuid4())
+                    needs_writeback = True
+                r["job_uid"] = uid
+
+                # Legacy computed ID (used only for migration of older assignment keys).
+                r["legacy_job_uid"] = compute_job_uid(r)
                 rows.append(r)
+
+        if "job_uid" not in file_fieldnames:
+            needs_writeback = True
+
+        if needs_writeback:
+            from core.config import HEADERS
+            with open(csv_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=HEADERS)
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow(_row_to_csv_dict(row, HEADERS))
         return rows, None
     except Exception as e:
         return [], f"Error reading CSV: {e}"
+
+
+def _canon_float(value, *, decimals: int = 6) -> str:
+    try:
+        return format(float(value), f".{decimals}f")
+    except Exception:
+        return str(value or "").strip()
+
+
+def compute_job_uid(row: dict) -> str:
+    """
+    Compute a stable identifier for a history row without modifying CSV schema.
+
+    The UID is deterministic and independent of table ordering, based on:
+      - timestamp (epoch if available, else raw string)
+      - printer
+      - filename
+      - duration_seconds
+      - filament_mm
+
+    This is used for safe selection/actions (delete/complete/recalculate) and
+    for project assignment mapping.
+    """
+    ts = row.get("timestamp_epoch")
+    if not ts:
+        ts = row.get("timestamp_raw")
+    if ts is None or ts == "":
+        ts = row.get("timestamp")
+
+    payload = [
+        _canon_float(ts),
+        str(row.get("printer") or "").strip(),
+        str(row.get("filename") or "").strip(),
+        _canon_float(row.get("duration_seconds")),
+        _canon_float(row.get("filament_mm")),
+    ]
+
+    digest = hashlib.sha1(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return f"job_{digest[:16]}"
+
+
+def _row_to_csv_dict(row: dict, headers: list) -> dict:
+    """
+    Convert an in-memory row (which may include display-only fields like
+    timestamp_raw / timestamp_display) into a dict suitable for writing to CSV.
+    """
+    out = {h: row.get(h, "") for h in headers}
+
+    if "timestamp" in out:
+        ts_epoch = row.get("timestamp_epoch")
+        if ts_epoch != "" and ts_epoch is not None:
+            out["timestamp"] = ts_epoch
+        else:
+            ts_raw = row.get("timestamp_raw")
+            if ts_raw is not None and ts_raw != "":
+                out["timestamp"] = ts_raw
+
+    return out
 
 
 def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
@@ -198,8 +302,7 @@ def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         for r in keep:
-            out = {h: r.get(h, "") for h in headers}
-            writer.writerow(out)
+            writer.writerow(_row_to_csv_dict(r, headers))
 
 
 def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
@@ -224,8 +327,107 @@ def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         for row in rows:
-            out = {h: row.get(h, "") for h in headers}
-            writer.writerow(out)
+            writer.writerow(_row_to_csv_dict(row, headers))
+
+
+def rewrite_csv_without_job_uids(csv_file, headers, job_uids_to_remove):
+    """Rewrite CSV file without rows whose computed job_uid is in job_uids_to_remove."""
+    if not os.path.exists(csv_file):
+        return
+    rows, _ = load_rows_raw(csv_file)
+    uid_set = {str(u or "").strip() for u in (job_uids_to_remove or []) if str(u or "").strip()}
+    keep = [r for r in rows if str(r.get("job_uid") or "").strip() not in uid_set]
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for r in keep:
+            writer.writerow(_row_to_csv_dict(r, headers))
+
+
+def rewrite_csv_mark_completed_job_uids(csv_file, headers, job_uids_to_complete):
+    """Mark specified rows as completed if they are currently printing, by job_uid."""
+    if not os.path.exists(csv_file):
+        return
+
+    rows, _ = load_rows_raw(csv_file)
+    uid_set = {str(u or "").strip() for u in (job_uids_to_complete or []) if str(u or "").strip()}
+
+    for row in rows:
+        if str(row.get("job_uid") or "").strip() not in uid_set:
+            continue
+
+        status = str(row.get("status", "")).lower()
+        if status == "printing":
+            row["status"] = "completed"
+            if "failure_reason" in row:
+                row["failure_reason"] = ""
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_row_to_csv_dict(row, headers))
+
+
+def _backup_file(csv_file: str) -> Optional[str]:
+    """
+    Create a timestamped backup alongside csv_file and return the backup path.
+
+    This is intentionally simple and always creates a new backup when called.
+    """
+    if not os.path.exists(csv_file):
+        return None
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = f"{csv_file}.bak.{ts}"
+    shutil.copy2(csv_file, backup_path)
+    return backup_path
+
+
+def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_costs_fn) -> int:
+    """
+    Recalculate pricing fields for selected rows identified by job_uid.
+
+    Returns the count of rows updated.
+    """
+    if not os.path.exists(csv_file):
+        return 0
+
+    uid_set = {str(u or "").strip() for u in (job_uids or []) if str(u or "").strip()}
+    if not uid_set:
+        return 0
+
+    # Safety: backup before bulk mutation.
+    _backup_file(csv_file)
+
+    rows, _ = load_rows_raw(csv_file)
+    updated = 0
+    for row in rows:
+        if str(row.get("job_uid") or "").strip() not in uid_set:
+            continue
+
+        printer_name = str(row.get("printer") or "").strip()
+        try:
+            duration_seconds = float(row.get("duration_seconds") or 0.0)
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        try:
+            filament_mm = float(row.get("filament_mm") or 0.0)
+        except (TypeError, ValueError):
+            filament_mm = 0.0
+
+        try:
+            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm))
+            updated += 1
+        except Exception:
+            continue
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_row_to_csv_dict(row, headers))
+
+    return updated
 
 
 # State management for installer (used by both app and installer)

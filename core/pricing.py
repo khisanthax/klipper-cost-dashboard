@@ -229,29 +229,19 @@ def compute_estimated_final_cost(printer_name, estimated_duration, estimated_fil
 
 def get_known_printers():
     """
-    Get list of all known printers from settings and CSV, excluding hidden printers.
+    Get canonical printer list from persisted registries, excluding hidden printers.
 
     Hidden printers are a soft-delete mechanism used to keep configuration UIs clean
     without deleting historical CSV rows.
     """
+    from core.printers import get_canonical_printer_names
+
     def _norm(name) -> str:
         return str(name or "").strip()
 
-    printers = set()
     hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
-    settings = load_settings(SETTINGS_FILE)
-    printers.update({_norm(p) for p in settings.keys() if _norm(p)})
-    if os.path.exists(CSV_FILE):
-        try:
-            with open(CSV_FILE, newline="") as f:
-                reader = csv.DictReader(f)
-                for r in reader:
-                    p = _norm(r.get("printer"))
-                    if p:
-                        printers.add(p)
-        except Exception:
-            pass
-    return sorted([p for p in printers if p not in hidden])
+    printers = get_canonical_printer_names(include_hidden=True)
+    return sorted([p for p in printers if p and p not in hidden])
 
 
 def get_configured_printers():

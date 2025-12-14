@@ -6,6 +6,7 @@ Merged from report_utils.py + additional reporting functions from app.py.
 from datetime import datetime, timedelta
 from core.config import DEFAULT_TIMEZONE, SETTINGS_FILE, DISPLAY_FILE, HEADERS
 from core.storage import ts_to_local_dt, load_settings, load_display_settings
+from core.printers import get_canonical_printer_names
 
 
 def _parse_date(s):
@@ -256,28 +257,12 @@ def compute_printer_summaries(rows, live_jobs_list):
 
     summaries = {}
 
-    # Get all known printers for status cards:
-    # 1) Persistent printers from settings.json
-    # 2) Printers from historical CSV rows
-    # 3) Printers from current live jobs
-    #
+    # Printers are registry-only: do not derive printer identities from CSV rows
+    # or live job payloads (which may contain swapped printer/filename fields).
     # Respect soft-delete ("hidden_printers") so deleted/hid printers don't keep
     # reappearing in the dashboard cards due to CSV history.
     hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
-
-    settings = load_settings(SETTINGS_FILE)
-    printers = {_norm(p) for p in settings.keys() if _norm(p)}
-
-    for r in rows:
-        pname = _norm(r.get("printer"))
-        if pname:
-            printers.add(pname)
-
-    for job in live_jobs_list:
-        pname = _norm(job.get("printer_name"))
-        if pname:
-            printers.add(pname)
-
+    printers = {p for p in get_canonical_printer_names(include_hidden=True) if _norm(p)}
     printers = {p for p in printers if p not in hidden and p != "Unknown"}
     
     # Compute for each printer

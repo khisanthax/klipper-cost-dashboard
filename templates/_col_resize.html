@@ -1,0 +1,181 @@
+<style>
+  table.kcd-col-resize-table {
+    table-layout: fixed;
+  }
+
+  .kcd-col-resize-table th {
+    position: relative;
+  }
+
+  .kcd-col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 10px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    touch-action: none;
+  }
+
+  .kcd-col-resizer::after {
+    content: "";
+    position: absolute;
+    right: 4px;
+    top: 20%;
+    width: 2px;
+    height: 60%;
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 2px;
+  }
+
+  .kcd-col-resize-active,
+  .kcd-col-resize-active * {
+    cursor: col-resize !important;
+    user-select: none !important;
+  }
+</style>
+
+<script>
+  (function () {
+    const MIN_WIDTH_PX = 60;
+
+    function tableKey(table) {
+      return table.getAttribute("data-kcd-table-id") || table.id || "";
+    }
+
+    function storageKeyFor(table) {
+      const key = tableKey(table);
+      return key ? `kcd_colwidths::${key}` : "";
+    }
+
+    function loadWidths(key) {
+      if (!key) return {};
+      try {
+        const raw = localStorage.getItem(key);
+        const obj = raw ? JSON.parse(raw) : {};
+        return obj && typeof obj === "object" ? obj : {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveWidths(key, widths) {
+      if (!key) return;
+      try {
+        localStorage.setItem(key, JSON.stringify(widths || {}));
+      } catch (e) { }
+    }
+
+    function ensureColgroup(table, colCount) {
+      let colgroup = table.querySelector("colgroup");
+      if (!colgroup) {
+        colgroup = document.createElement("colgroup");
+        const thead = table.querySelector("thead");
+        if (thead) {
+          table.insertBefore(colgroup, thead);
+        } else {
+          table.insertBefore(colgroup, table.firstChild);
+        }
+      }
+      const cols = colgroup.querySelectorAll("col");
+      const existing = cols.length;
+      for (let i = existing; i < colCount; i++) {
+        colgroup.appendChild(document.createElement("col"));
+      }
+      for (let i = colCount; i < colgroup.children.length; i++) {
+        colgroup.removeChild(colgroup.lastChild);
+      }
+      return colgroup.querySelectorAll("col");
+    }
+
+    function getColKey(th, index) {
+      return th.getAttribute("data-col") || th.textContent.trim() || `col_${index}`;
+    }
+
+    function initResizableTable(table) {
+      if (!table || table.dataset.kcdResizableInit === "1") return;
+      if (!tableKey(table)) return;
+
+      table.dataset.kcdResizableInit = "1";
+      table.classList.add("kcd-col-resize-table");
+
+      const headerRow = table.querySelector("thead tr");
+      if (!headerRow) return;
+
+      const ths = Array.from(headerRow.querySelectorAll("th"));
+      if (!ths.length) return;
+
+      const cols = ensureColgroup(table, ths.length);
+      const skey = storageKeyFor(table);
+      const widths = loadWidths(skey);
+
+      // Apply saved widths (ignore missing/hidden columns by only iterating current THs).
+      ths.forEach((th, i) => {
+        const colKey = getColKey(th, i);
+        const w = widths[colKey];
+        if (typeof w === "number" && w >= MIN_WIDTH_PX) {
+          cols[i].style.width = `${w}px`;
+        }
+      });
+
+      ths.forEach((th, i) => {
+        if (th.querySelector(".kcd-col-resizer")) return;
+        const resizer = document.createElement("div");
+        resizer.className = "kcd-col-resizer";
+        resizer.title = "Drag to resize. Double-click to reset.";
+        th.appendChild(resizer);
+
+        function resetColumn() {
+          const colKey = getColKey(th, i);
+          const current = loadWidths(skey);
+          delete current[colKey];
+          saveWidths(skey, current);
+          cols[i].style.width = "";
+        }
+
+        resizer.addEventListener("dblclick", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          resetColumn();
+        });
+
+        resizer.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const startX = e.clientX;
+          const startWidth = cols[i].getBoundingClientRect().width || th.getBoundingClientRect().width;
+
+          document.body.classList.add("kcd-col-resize-active");
+
+          function onMove(ev) {
+            const dx = ev.clientX - startX;
+            const next = Math.max(MIN_WIDTH_PX, Math.round(startWidth + dx));
+            cols[i].style.width = `${next}px`;
+          }
+
+          function onUp() {
+            document.removeEventListener("mousemove", onMove);
+            document.removeEventListener("mouseup", onUp);
+            document.body.classList.remove("kcd-col-resize-active");
+
+            const finalWidth = Math.round(cols[i].getBoundingClientRect().width);
+            const colKey = getColKey(th, i);
+            const current = loadWidths(skey);
+            current[colKey] = Math.max(MIN_WIDTH_PX, finalWidth);
+            saveWidths(skey, current);
+          }
+
+          document.addEventListener("mousemove", onMove);
+          document.addEventListener("mouseup", onUp);
+        });
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      document.querySelectorAll('table[data-kcd-resizable="true"]').forEach(initResizableTable);
+    });
+  })();
+</script>
+

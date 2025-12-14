@@ -1,0 +1,23 @@
+# Normalize line endings in repo (store as LF)
+
+* text=auto eol=lf
+
+
+# Explicit (optional but nice)
+
+*.py  text eol=lf
+
+*.sh  text eol=lf
+
+*.cfg text eol=lf
+
+*.json text eol=lf
+
+*.md  text eol=lf
+
+*.html text eol=lf
+
+*.css text eol=lf
+
+*.js  text eol=lf
+

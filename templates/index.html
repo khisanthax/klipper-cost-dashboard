@@ -189,16 +189,71 @@
     </div>
 </div>
 
+<style>
+    :root {
+        --kcd-card-min: 340px;
+    }
+
+    .kcd-printer-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(var(--kcd-card-min), 1fr));
+        gap: 1rem;
+    }
+</style>
+
+<script>
+    (function () {
+        const KEY = "kcd.card_size";
+        const DEFAULT = "M";
+        const map = { S: 280, M: 340, L: 460 };
+
+        function getSize() {
+            const raw = (localStorage.getItem(KEY) || DEFAULT).toUpperCase();
+            return map[raw] ? raw : DEFAULT;
+        }
+
+        function applySize(size) {
+            const s = (size || DEFAULT).toUpperCase();
+            if (!map[s]) return;
+            localStorage.setItem(KEY, s);
+            document.documentElement.style.setProperty("--kcd-card-min", map[s] + "px");
+            document.body.classList.remove("kcd-card-s", "kcd-card-m", "kcd-card-l");
+            document.body.classList.add("kcd-card-" + s.toLowerCase());
+
+            document.querySelectorAll("[data-kcd-card-size]").forEach((btn) => {
+                const isActive = (btn.getAttribute("data-kcd-card-size") || "").toUpperCase() === s;
+                btn.classList.toggle("btn-primary", isActive);
+                btn.classList.toggle("text-white", isActive);
+                btn.classList.toggle("btn-outline-primary", !isActive);
+            });
+        }
+
+        // Apply immediately (no flash)
+        applySize(getSize());
+
+        document.addEventListener("click", function (e) {
+            const btn = e.target.closest("[data-kcd-card-size]");
+            if (!btn) return;
+            e.preventDefault();
+            applySize(btn.getAttribute("data-kcd-card-size"));
+        });
+    })();
+</script>
+
 <!-- Printer Overview Section -->
 {% if printer_summaries %}
 <div class="card mb-4">
-    <div class="card-header">
+    <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Printer Overview</h5>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Printer card size">
+            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="S">S</button>
+            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="M">M</button>
+            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="L">L</button>
+        </div>
     </div>
     <div class="card-body">
-        <div class="row g-3">
+        <div class="kcd-printer-grid">
             {% for printer_name, ps in printer_summaries.items() %}
-            <div class="col-md-6 col-lg-4">
                 <div class="card h-100 bg-light">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -242,7 +297,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
             {% endfor %}
         </div>
     </div>
@@ -444,6 +498,10 @@
 <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
+{% if message %}
+<div class="alert alert-success">{{ message }}</div>
+{% endif %}
+
 <!-- Print History Table -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -453,19 +511,22 @@
         <form method="post">
             <div class="p-2 bg-light border-bottom d-flex gap-2">
                 <button type="submit" name="action" value="complete_rows" class="btn btn-success btn-sm" onclick="return ensureSelection()">Complete Selected</button>
+                <button type="submit" name="action" value="recalc_costs" class="btn btn-outline-secondary btn-sm" onclick="return ensureSelection()">Recalculate cost (selected)</button>
                 <button type="submit" name="action" value="delete_rows" class="btn btn-danger btn-sm" onclick="return confirmDelete()">Delete Selected</button>
             </div>
 
             <div class="table-responsive">
-                <table id="history-table" class="table table-striped table-hover table-sm mb-0">
+                <table id="history-table" class="table table-striped table-hover table-sm mb-0"
+                       data-kcd-resizable="true" data-kcd-table-id="history_table">
                     {% set visible = visible_cols if visible_cols and (visible_cols|length > 0) else headers %}
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 40px;"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
+                            <th style="width: 40px;" data-col="__select__"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
                             {% set col_index = 1 %}
                             {% for h in headers %}
                             {% if h in visible %}
                             <th class="col-{{ h|replace(' ', '-')|lower }}" style="cursor: pointer;"
+                                data-col="{{ h }}"
                                 onclick="sortTable({{ col_index }}, {{ 'true' if h in ['duration_seconds','duration_hours','filament_mm','filament_meters','total_cost','time_cost','material_cost'] else 'false' }})">
                                 {{ friendly_headers.get(h, h) }}
                             </th>
@@ -477,7 +538,7 @@
                     <tbody>
                         {% for row in rows %}
                         <tr>
-                            <td><input type="checkbox" name="delete_rows" value="{{ row.row_index }}"></td>
+                            <td><input type="checkbox" name="delete_rows" value="{{ row.job_uid }}"></td>
                             {% for h in headers %}
                             {% if h in visible %}
                             <td class="col-{{ h|replace(' ', '-')|lower }}">
@@ -510,4 +571,5 @@
     </div>
 </div>
 
+{% include "_col_resize.html" %}
 {% endblock %}
