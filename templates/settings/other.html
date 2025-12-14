@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h3 mb-0">Print Cost Settings</h1>
+        <div class="text-muted small">{{ settings_subtitle }}</div>
+    </div>
+    {% include "settings/submenu.html" %}
+</div>
+
 {% if error %}
 <div class="alert alert-danger" role="alert">{{ error }}</div>
 {% endif %}
@@ -8,8 +16,6 @@
 {% if message %}
 <div class="alert alert-success" role="alert">{{ message }}</div>
 {% endif %}
-
-<div class="text-muted small mb-3">{{ settings_subtitle }}</div>
 
 {% include "settings/partials/other.html" %}
 {% endblock %}

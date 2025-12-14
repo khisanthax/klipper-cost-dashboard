@@ -1,14 +1,14 @@
 <div class="btn-group">
     <a href="{{ url_for('settings_printers_page') }}"
-       class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings/printers') %}active{% endif %}">
+       class="btn btn-outline-primary {% if request.path.startswith('/settings/printers') %}active{% endif %}">
         Printers
     </a>
     <a href="{{ url_for('settings_profiles_page') }}"
-       class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings/profiles') %}active{% endif %}">
+       class="btn btn-outline-primary {% if request.path.startswith('/settings/profiles') %}active{% endif %}">
         Profiles
     </a>
     <a href="{{ url_for('settings_other_page') }}"
-       class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings/other') %}active{% endif %}">
+       class="btn btn-outline-primary {% if request.path.startswith('/settings/other') %}active{% endif %}">
         Other
     </a>
 </div>
