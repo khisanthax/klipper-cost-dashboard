@@ -858,10 +858,11 @@ def projects_page():
     message = request.args.get("msg", "").strip()
     edit_project = request.args.get("edit_project", "").strip()
     edit_manual_job_id = request.args.get("edit_manual_job_id", "").strip() or request.args.get("edit_manual", "").strip()
+    orphans_added = 0
 
     try:
         # Ensure legacy assignment keys are migrated to stable job_uids.
-        projects.migrate_assignments_to_job_uid(rows)
+        _, orphans_added = projects.migrate_assignments_to_job_uid(rows)
 
         projects_map, assignments, manual_jobs_by_project, plans_by_project = projects.recalculate_all()
         project_jobs, unassigned_jobs = projects.group_rows_by_project(rows)
@@ -873,6 +874,13 @@ def projects_page():
             unassigned_jobs=[],
             projects_by_id={},
         )
+
+    if orphans_added:
+        orphan_msg = (
+            f"Cleaned up {orphans_added} orphaned legacy assignment entr"
+            f"{'y' if orphans_added == 1 else 'ies'} (saved to project_assignments_orphans.json)."
+        )
+        message = f"{message} {orphan_msg}".strip() if message else orphan_msg
 
     # Build view models (derived totals always computed from current membership)
     project_rows = []

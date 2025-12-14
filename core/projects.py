@@ -31,6 +31,7 @@ from core.storage import compute_job_uid
 
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
 ASSIGNMENTS_FILE = os.path.join(DATA_DIR, "project_assignments.json")
+ASSIGNMENTS_ORPHANS_FILE = os.path.join(DATA_DIR, "project_assignments_orphans.json")
 MANUAL_JOBS_FILE = os.path.join(DATA_DIR, "project_manual_jobs.json")
 PLANS_FILE = os.path.join(DATA_DIR, "project_plans.json")
 
@@ -116,6 +117,45 @@ def ensure_projects_files() -> None:
         _write_json(MANUAL_JOBS_FILE, [])
     if not os.path.exists(PLANS_FILE):
         _write_json(PLANS_FILE, [])
+
+
+def _safe_read_orphaned_assignments() -> Optional[List[Dict[str, Any]]]:
+    """
+    Best-effort reader for the orphaned legacy assignments file.
+
+    This must never raise ProjectsDataError, because migration runs on /projects GET.
+    If the orphans file is corrupt/unreadable, return None so we can keep the live
+    assignments map intact (avoid silently discarding evidence).
+    """
+    if not os.path.exists(ASSIGNMENTS_ORPHANS_FILE):
+        return []
+    try:
+        with open(ASSIGNMENTS_ORPHANS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(data, list):
+        return None
+    cleaned: List[Dict[str, Any]] = []
+    for item in data:
+        if isinstance(item, dict):
+            cleaned.append(item)
+    return cleaned
+
+
+def _safe_write_orphaned_assignments(items: List[Dict[str, Any]]) -> bool:
+    """
+    Best-effort writer for orphaned legacy assignments.
+
+    Returns True on success. Never raises ProjectsDataError.
+    """
+    try:
+        _ensure_data_dir()
+        with open(ASSIGNMENTS_ORPHANS_FILE, "w", encoding="utf-8") as f:
+            json.dump(items, f, indent=2)
+        return True
+    except Exception:
+        return False
 
 
 def load_projects() -> Dict[str, Project]:
@@ -1171,19 +1211,21 @@ def job_uid(row: Dict[str, Any]) -> str:
     return ""
 
 
-def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]:
+def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, str], int]:
     """
     Migrate legacy assignment keys (job_key / legacy computed uid) to the persisted job_uid.
 
     This is safe and idempotent:
       - If assignments already use job_uid keys, it does nothing.
-      - If a legacy key cannot be mapped to a current row, it is dropped.
+      - If a legacy key cannot be mapped to a current row, it is removed from active
+        assignments and recorded to `data/project_assignments_orphans.json` (if possible).
 
-    Returns the (possibly migrated) assignments mapping.
+    Returns (assignments, orphans_added) where orphans_added counts newly recorded orphan
+    entries written during this run (useful for a one-time banner on /projects).
     """
     assignments = load_assignments()
     if not assignments:
-        return assignments
+        return assignments, 0
 
     def _looks_like_uid(k: str) -> bool:
         # Persisted UIDs are UUID4 strings; legacy computed IDs were "job_<hash>".
@@ -1210,6 +1252,7 @@ def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]
     changed = False
     dropped = 0
     migrated_count = 0
+    unresolved_legacy: List[Tuple[str, str]] = []
     for k, pid in assignments.items():
         key = str(k or "").strip()
         if not key:
@@ -1225,24 +1268,73 @@ def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Dict[str, str]
             changed = True
             migrated_count += 1
         else:
-            # Orphaned assignment (row not found); treat as unassigned.
-            changed = True
-            dropped += 1
+            unresolved_legacy.append((key, str(pid)))
+
+    orphans_added = 0
+    if unresolved_legacy:
+        # Record unresolved legacy keys before removing them from the active map.
+        existing_orphans = _safe_read_orphaned_assignments()
+        if existing_orphans is None:
+            # Preserve assignments map intact if we can't safely persist evidence.
+            try:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Could not read %s; skipping orphan cleanup of %s legacy assignment(s).",
+                    ASSIGNMENTS_ORPHANS_FILE,
+                    len(unresolved_legacy),
+                )
+            except Exception:
+                pass
+            return assignments, 0
+
+        existing_pairs = set()
+        for item in existing_orphans:
+            try:
+                existing_pairs.add((str(item.get("key") or ""), str(item.get("value") or "")))
+            except Exception:
+                continue
+
+        now = _iso_now()
+        for key, value in unresolved_legacy:
+            pair = (key, value)
+            if pair in existing_pairs:
+                continue
+            existing_orphans.append({"key": key, "value": value, "orphaned_at": now})
+            existing_pairs.add(pair)
+            orphans_added += 1
+
+        if not _safe_write_orphaned_assignments(existing_orphans):
+            # Preserve assignments map intact if we can't safely persist evidence.
+            try:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Could not write %s; skipping orphan cleanup of %s legacy assignment(s).",
+                    ASSIGNMENTS_ORPHANS_FILE,
+                    len(unresolved_legacy),
+                )
+            except Exception:
+                pass
+            return assignments, 0
+
+        # Now it's safe to drop unresolved legacy keys from active assignments.
+        changed = True
+        dropped += len(unresolved_legacy)
 
     if changed and migrated != assignments:
         save_assignments(migrated)
         try:
             import logging
             logging.getLogger(__name__).warning(
-                "Migrated project assignments to persisted job_uid: migrated=%s dropped=%s",
+                "Migrated project assignments to persisted job_uid: migrated=%s dropped=%s orphans_added=%s",
                 migrated_count,
                 dropped,
+                orphans_added,
             )
         except Exception:
             pass
-        return migrated
+        return migrated, orphans_added
 
-    return assignments
+    return assignments, 0
 
 
 def recalculate() -> Tuple[Dict[str, Project], Dict[str, str]]:
