@@ -349,6 +349,7 @@
                                                             <div style="min-width: 170px;">
                                                                 <label class="form-label text-muted small mb-0">Cost $ (optional)</label>
                                                                 <input type="text" class="form-control form-control-sm" name="manual_cost" placeholder="optional">
+                                                                <div class="text-muted small">Leave blank to use project defaults; enter a value to override.</div>
                                                             </div>
                                                         </div>
                                                         <div class="pb-0">
@@ -424,7 +425,12 @@
                                                         -
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-end text-nowrap">${{ "%.2f"|format(pl.est_cost) }}</td>
+                                                    <td class="text-end text-nowrap">
+                                                        ${{ "%.2f"|format(pl.est_cost) }}
+                                                        {% if pl.est_cost_is_override %}
+                                                        <div class="text-muted small">Override</div>
+                                                        {% endif %}
+                                                    </td>
                                                     <td class="text-nowrap">
                                                         {% if pl.status == 'active' %}
                                                         <span class="badge bg-primary">Active</span>
@@ -768,7 +774,7 @@
                         <div class="col-md-4">
                             <label class="form-label">Estimated cost ($)</label>
                             <input type="text" class="form-control" name="est_cost" id="kcdPlanCost" placeholder="optional">
-                            <div class="text-muted small">Leave blank to recalculate from defaults</div>
+                            <div class="text-muted small">Leave blank to use project defaults; enter a value to override.</div>
                         </div>
                         <div class="col-12">
                             <label class="form-label">Source</label>
