@@ -473,12 +473,11 @@
         <div class="text-muted">No unassigned jobs found.</div>
         {% else %}
         <form method="post">
-            <input type="hidden" name="action" value="assign_jobs">
 
             <div class="row g-2 align-items-end mb-3">
                 <div class="col-md-6">
                     <label class="form-label">Assign selected to</label>
-                    <select class="form-select" name="project_id" required>
+                    <select class="form-select" name="project_id">
                         <option value="" selected disabled>Select a project…</option>
                         {% for p in projects %}
                         <option value="{{ p.id }}">{{ p.name }}</option>
@@ -486,7 +485,13 @@
                     </select>
                 </div>
                 <div class="col-md-3 d-flex">
-                    <button type="submit" class="btn btn-primary w-100">Assign Selected</button>
+                    <button type="submit" name="action" value="assign_jobs" class="btn btn-primary w-100">Assign Selected</button>
+                </div>
+                <div class="col-md-3 d-flex">
+                    <button type="submit" name="action" value="recalc_costs" class="btn btn-outline-secondary w-100"
+                            onclick="return confirm('Recalculate costs for selected jobs using current pricing settings?')">
+                        Recalculate cost (selected)
+                    </button>
                 </div>
             </div>
 

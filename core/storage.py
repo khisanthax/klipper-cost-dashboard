@@ -6,7 +6,9 @@ import csv
 import json
 import secrets
 import hashlib
+import shutil
 from datetime import datetime, timezone
+from typing import Optional
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -327,6 +329,67 @@ def rewrite_csv_mark_completed_job_uids(csv_file, headers, job_uids_to_complete)
         writer.writeheader()
         for row in rows:
             writer.writerow(_row_to_csv_dict(row, headers))
+
+
+def _backup_file(csv_file: str) -> Optional[str]:
+    """
+    Create a timestamped backup alongside csv_file and return the backup path.
+
+    This is intentionally simple and always creates a new backup when called.
+    """
+    if not os.path.exists(csv_file):
+        return None
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = f"{csv_file}.bak.{ts}"
+    shutil.copy2(csv_file, backup_path)
+    return backup_path
+
+
+def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_costs_fn) -> int:
+    """
+    Recalculate pricing fields for selected rows identified by job_uid.
+
+    Returns the count of rows updated.
+    """
+    if not os.path.exists(csv_file):
+        return 0
+
+    uid_set = {str(u or "").strip() for u in (job_uids or []) if str(u or "").strip()}
+    if not uid_set:
+        return 0
+
+    # Safety: backup before bulk mutation.
+    _backup_file(csv_file)
+
+    rows, _ = load_rows_raw(csv_file)
+    updated = 0
+    for row in rows:
+        if str(row.get("job_uid") or "").strip() not in uid_set:
+            continue
+
+        printer_name = str(row.get("printer") or "").strip()
+        try:
+            duration_seconds = float(row.get("duration_seconds") or 0.0)
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        try:
+            filament_mm = float(row.get("filament_mm") or 0.0)
+        except (TypeError, ValueError):
+            filament_mm = 0.0
+
+        try:
+            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm))
+            updated += 1
+        except Exception:
+            continue
+
+    with open(csv_file, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_row_to_csv_dict(row, headers))
+
+    return updated
 
 
 # State management for installer (used by both app and installer)

@@ -498,6 +498,10 @@
 <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
 
+{% if message %}
+<div class="alert alert-success">{{ message }}</div>
+{% endif %}
+
 <!-- Print History Table -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -507,6 +511,7 @@
         <form method="post">
             <div class="p-2 bg-light border-bottom d-flex gap-2">
                 <button type="submit" name="action" value="complete_rows" class="btn btn-success btn-sm" onclick="return ensureSelection()">Complete Selected</button>
+                <button type="submit" name="action" value="recalc_costs" class="btn btn-outline-secondary btn-sm" onclick="return ensureSelection()">Recalculate cost (selected)</button>
                 <button type="submit" name="action" value="delete_rows" class="btn btn-danger btn-sm" onclick="return confirmDelete()">Delete Selected</button>
             </div>
 

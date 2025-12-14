@@ -16,6 +16,7 @@ from core.storage import (
     append_row, load_rows_raw,
     rewrite_csv_without_indices, rewrite_csv_mark_completed,
     rewrite_csv_without_job_uids, rewrite_csv_mark_completed_job_uids,
+    rewrite_csv_recalculate_costs_job_uids,
     ts_to_local_dt
 )
 from core.pricing import (
@@ -406,6 +407,20 @@ def index():
                     rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
 
+        if action == "recalc_costs":
+            selected = request.form.getlist("delete_rows")
+            job_uids = []
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = {int(i) for i in selected if str(i).strip().isdigit()}
+                    rows_for_map, _ = load_rows_raw(CSV_FILE)
+                    job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+
+            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_uids, compute_costs)
+            return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
+
         # Handle row deletion
         if action in ("delete_rows", "delete"):
             selected = request.form.getlist("delete_rows")
@@ -419,6 +434,7 @@ def index():
             return redirect(url_for("index"))
 
     rows, error = load_rows_raw(CSV_FILE)
+    message = request.args.get("msg", "").strip()
     
     # Apply date filtering
     start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
@@ -487,6 +503,7 @@ def index():
         "index.html",
         rows=rows,
         error=error,
+        message=message,
         headers=HEADERS,
         friendly_headers=FRIENDLY_HEADERS,
         visible_cols=visible_cols,
@@ -607,6 +624,11 @@ def projects_page():
                 job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
                 if job_ids:
                     projects.unassign_jobs(job_ids)
+
+            elif action == "recalc_costs":
+                job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
+                updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_ids, compute_costs)
+                redirect_args = {"msg": f"Recalculated costs for {updated} job(s)."}
 
             elif action == "create_manual_job":
                 project_id = request.form.get("project_id", "").strip()
