@@ -28,6 +28,7 @@ DEFAULT_PRICING = {
 # CSV columns (raw stats + pricing + computed costs)
 HEADERS = [
     "timestamp",
+    "job_uid",
     "printer",
     "filename",
     "duration_seconds",
@@ -50,6 +51,7 @@ HEADERS = [
 # User-friendly column names
 FRIENDLY_HEADERS = {
     "timestamp": "Date & Time",
+    "job_uid": "Job UID",
     "printer": "Printer",
     "filename": "File Name",
     "duration_seconds": "Duration (sec)",

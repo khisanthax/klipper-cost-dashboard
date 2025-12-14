@@ -5,6 +5,7 @@ Refactored to use modular core package.
 """
 import os
 import tempfile
+import uuid
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -102,6 +103,7 @@ def log_print():
 
     row = {
         "timestamp": ts,
+        "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
         "duration_seconds": duration_seconds,
@@ -1146,7 +1148,7 @@ def settings_page():
         printers=printers,
         discovered_printers=discovered_printers,
         configs=printer_configs,
-        headers=HEADERS,
+        headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,
         profiles=all_profiles,

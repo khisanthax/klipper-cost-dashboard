@@ -7,6 +7,7 @@ import json
 import secrets
 import hashlib
 import shutil
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 try:
@@ -49,7 +50,8 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
-        data = {"visible_columns": headers, "hidden_printers": []}
+        visible = [h for h in headers if h != "job_uid"]
+        data = {"visible_columns": visible, "hidden_printers": []}
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -61,25 +63,26 @@ def load_display_settings(display_file, headers):
         with open(display_file) as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"visible_columns": headers, "hidden_printers": []}
+                return {"visible_columns": [h for h in headers if h != "job_uid"], "hidden_printers": []}
             cols = data.get("visible_columns", headers)
             cols = [c for c in cols if c in headers]
+            cols = [c for c in cols if c != "job_uid"]
             if not cols:
-                cols = headers
+                cols = [h for h in headers if h != "job_uid"]
             hidden = data.get("hidden_printers", [])
             if not isinstance(hidden, list):
                 hidden = []
             hidden = [str(p) for p in hidden if str(p).strip()]
             return {"visible_columns": cols, "hidden_printers": hidden}
     except Exception:
-        return {"visible_columns": headers, "hidden_printers": []}
+        return {"visible_columns": [h for h in headers if h != "job_uid"], "hidden_printers": []}
 
 
 def save_display_settings(display_file, headers, visible_columns):
     """Save display settings to JSON file."""
-    visible = [c for c in visible_columns if c in headers]
+    visible = [c for c in visible_columns if c in headers and c != "job_uid"]
     if not visible:
-        visible = headers
+        visible = [h for h in headers if h != "job_uid"]
     # Preserve any additional display settings (e.g. hidden_printers).
     hidden = []
     try:
@@ -97,7 +100,7 @@ def save_display_settings(display_file, headers, visible_columns):
 def save_hidden_printers(display_file, headers, hidden_printers):
     """Persist hidden printer list while preserving visible column settings."""
     settings = load_display_settings(display_file, headers)
-    visible_cols = settings.get("visible_columns", headers)
+    visible_cols = settings.get("visible_columns", [h for h in headers if h != "job_uid"])
     hidden = hidden_printers if isinstance(hidden_printers, list) else []
     hidden = [str(p) for p in hidden if str(p).strip()]
     with open(display_file, "w") as f:
@@ -144,7 +147,20 @@ def ensure_api_key(secret_file=None, data_dir=None):
 
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
+    if "job_uid" in headers and not str(data.get("job_uid") or "").strip():
+        data["job_uid"] = str(uuid.uuid4())
+
     file_exists = os.path.exists(csv_file)
+    if file_exists:
+        # Migrate legacy CSV headers (no job_uid) before appending with the new schema.
+        try:
+            with open(csv_file, newline="") as f:
+                reader = csv.reader(f)
+                header_row = next(reader, [])
+            if "job_uid" in headers and "job_uid" not in header_row:
+                load_rows_raw(csv_file)
+        except Exception:
+            pass
     with open(csv_file, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         if not file_exists:
@@ -158,8 +174,12 @@ def load_rows_raw(csv_file):
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:
+        needs_writeback = False
+        file_fieldnames = []
         with open(csv_file, newline="") as f:
             reader = csv.DictReader(f)
+            file_fieldnames = list(reader.fieldnames or [])
+            has_uid_col = "job_uid" in file_fieldnames
             for idx, r in enumerate(reader):
                 r = dict(r)
                 
@@ -188,9 +208,27 @@ def load_rows_raw(csv_file):
                 else:
                     r["timestamp_raw"] = None
 
-                # Stable ID for selection and project assignment
-                r["job_uid"] = compute_job_uid(r)
+                # Stable persisted ID for selection and project assignment.
+                uid = str(r.get("job_uid") or "").strip() if has_uid_col else ""
+                if not uid:
+                    uid = str(uuid.uuid4())
+                    needs_writeback = True
+                r["job_uid"] = uid
+
+                # Legacy computed ID (used only for migration of older assignment keys).
+                r["legacy_job_uid"] = compute_job_uid(r)
                 rows.append(r)
+
+        if "job_uid" not in file_fieldnames:
+            needs_writeback = True
+
+        if needs_writeback:
+            from core.config import HEADERS
+            with open(csv_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=HEADERS)
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow(_row_to_csv_dict(row, HEADERS))
         return rows, None
     except Exception as e:
         return [], f"Error reading CSV: {e}"
