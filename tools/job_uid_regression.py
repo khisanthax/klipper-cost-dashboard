@@ -56,13 +56,22 @@ def main() -> int:
         print(f"OK: {len(rows)} row(s) have job_uid; no duplicates detected.")
 
     assignments = projects.load_assignments()
-    legacy = [k for k in assignments.keys() if not str(k).startswith("job_")]
+    def _looks_like_uid(k: str) -> bool:
+        try:
+            import uuid as _uuid
+            _uuid.UUID(k)
+            return True
+        except Exception:
+            return False
+
+    legacy = [k for k in assignments.keys() if not _looks_like_uid(str(k))]
     if legacy:
         print(f"WARN: found {len(legacy)} legacy assignment key(s) (non-job_uid).")
         mapping = {}
         for r in rows:
             try:
                 mapping[projects.job_key(r)] = r.get("job_uid")
+                mapping[str(r.get("legacy_job_uid") or projects.compute_job_uid(r) or "").strip()] = r.get("job_uid")
             except Exception:
                 continue
         unresolved = [k for k in legacy if k not in mapping]
@@ -72,10 +81,26 @@ def main() -> int:
         print("OK: assignments use job_uid keys only.")
 
     if args.migrate:
-        before = len(projects.load_assignments())
-        projects.migrate_assignments_to_job_uid(rows)
-        after = len(projects.load_assignments())
-        print(f"MIGRATE: assignments entries before={before} after={after}")
+        before_map = projects.load_assignments()
+        before = len(before_map)
+        legacy_before = [k for k in before_map.keys() if not _looks_like_uid(str(k))]
+        _, orphans_added = projects.migrate_assignments_to_job_uid(rows)
+        after_map = projects.load_assignments()
+        after = len(after_map)
+        legacy_after = [k for k in after_map.keys() if not _looks_like_uid(str(k))]
+
+        print(f"MIGRATE: assignments entries before={before} after={after} orphans_added={orphans_added}")
+        if legacy_after:
+            print(f"FAIL: still have {len(legacy_after)} legacy assignment key(s) after migration.")
+            return 9
+
+        if legacy_before and orphans_added:
+            # Optional sanity check: orphans file exists after cleanup.
+            import os
+            orphans_path = os.path.join(projects.DATA_DIR, "project_assignments_orphans.json")
+            if not os.path.exists(orphans_path):
+                print("FAIL: expected orphaned assignments file to exist after migration cleanup.")
+                return 10
 
     if args.recalc:
         n = int(args.recalc or 0)
