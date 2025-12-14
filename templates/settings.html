@@ -92,7 +92,21 @@
                 </div>
             </div>
             <div class="d-flex justify-content-between align-items-center mt-3">
-                <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
+
+                    {% if loop.first %}
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-muted small text-nowrap">Dashboard card size</span>
+                        <div class="btn-group btn-group-sm" role="group" aria-label="Dashboard card size">
+                            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="S">S</button>
+                            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="M">M</button>
+                            <button type="button" class="btn btn-outline-primary" data-kcd-card-size="L">L</button>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+
                 <button type="submit" class="btn btn-outline-danger" name="action" value="delete_printer"
                         onclick="return confirm('Delete printer {{ p }}?')">
                     Delete printer
@@ -102,6 +116,43 @@
     </div>
 </div>
 {% endfor %}
+
+<script>
+    (function () {
+        const KEY = "kcd.card_size";
+        const DEFAULT = "M";
+        const allowed = new Set(["S", "M", "L"]);
+
+        function getSize() {
+            const v = (localStorage.getItem(KEY) || DEFAULT).toUpperCase();
+            return allowed.has(v) ? v : DEFAULT;
+        }
+
+        function applySize(size) {
+            const s = (size || DEFAULT).toUpperCase();
+            if (!allowed.has(s)) return;
+            localStorage.setItem(KEY, s);
+
+            document.querySelectorAll("[data-kcd-card-size]").forEach((btn) => {
+                const isActive = (btn.getAttribute("data-kcd-card-size") || "").toUpperCase() === s;
+                btn.classList.toggle("btn-primary", isActive);
+                btn.classList.toggle("text-white", isActive);
+                btn.classList.toggle("btn-outline-primary", !isActive);
+            });
+        }
+
+        document.addEventListener("click", function (e) {
+            const btn = e.target.closest("[data-kcd-card-size]");
+            if (!btn) return;
+            e.preventDefault();
+            applySize(btn.getAttribute("data-kcd-card-size"));
+        });
+
+        document.addEventListener("DOMContentLoaded", function () {
+            applySize(getSize());
+        });
+    })();
+</script>
 
 {% if discovered_printers %}
 <div class="card mb-4 border-warning">
