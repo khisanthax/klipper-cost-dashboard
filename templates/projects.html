@@ -94,7 +94,7 @@
             <table class="table table-striped table-hover align-middle"
                 data-kcd-resizable="true" data-kcd-table-id="projects_table">
                 <thead class="table-light">
-                    <tr>
+                          <tr data-printer="{{ j.printer|e }}">
                         <th style="width: 1%;" data-col="expand"></th>
                         <th data-col="project">Project</th>
                         <th class="text-end" data-col="prints">Prints</th>
@@ -204,19 +204,19 @@
                                             <tbody>
                                                 {% for j in p.jobs %}
                                                 <tr>
-                                                    <td class="text-nowrap">{{ j.timestamp }}</td>
-                                                    <td class="text-nowrap">{{ j.printer }}</td>
-                                                    <td class="text-break">{{ j.filename }}</td>
-                                                    <td class="text-nowrap">{{ j.status }}</td>
-                                                    <td class="text-end">{{ "%.2f"|format(j.duration_hours|float) }}</td>
-                                                    <td class="text-end text-nowrap">
+                              <td class="text-nowrap" data-sort="{{ j.timestamp_raw or 0 }}" data-sort-key="date">{{ j.timestamp }}</td>
+                              <td class="text-nowrap" data-sort="{{ j.printer|lower }}" data-sort-key="printer">{{ j.printer }}</td>
+                              <td class="text-break" data-sort="{{ j.filename|lower }}" data-sort-key="filename">{{ j.filename }}</td>
+                             <td class="text-nowrap" data-sort="{{ j.status|lower }}" data-sort-key="status">{{ j.status }}</td>
+                             <td class="text-end" data-sort="{{ j.duration_hours or 0 }}" data-sort-key="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
+                             <td class="text-end text-nowrap" data-sort="{{ j.filament_meters or 0 }}" data-sort-key="filament">
                                                         {% if j.filament_meters %}
                                                         {{ "%.2f"|format(j.filament_meters|float) }} m
                                                         {% else %}
                                                         —
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-end">${{ "%.2f"|format(j.total_cost|float) }}</td>
+                             <td class="text-end" data-sort="{{ j.total_cost or 0 }}" data-sort-key="cost">${{ "%.2f"|format(j.total_cost|float) }}</td>
                                                     <td class="text-nowrap">
                                                          <form method="post" class="m-0">
                                                              <input type="hidden" name="action" value="unassign_job">
@@ -539,19 +539,28 @@
                 </div>
             </div>
 
+            <div class="row g-2 align-items-end mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Filter by printer</label>
+                    <select class="form-select" id="kcdUnassignedPrinterFilter">
+                        <option value="" selected>All printers</option>
+                    </select>
+                </div>
+            </div>
+
             <div class="table-responsive">
-                <table class="table table-striped table-hover align-middle"
+                <table class="table table-striped table-hover align-middle" id="kcdUnassignedJobsTable"
                     data-kcd-resizable="true" data-kcd-table-id="projects_unassigned_jobs_table">
                     <thead class="table-light">
                         <tr>
                             <th style="width: 1%;" data-col="__select__"></th>
-                            <th data-col="date">Date</th>
-                            <th data-col="printer">Printer</th>
-                            <th data-col="filename">Filename</th>
-                            <th data-col="status">Status</th>
-                            <th class="text-end" data-col="hours">Hours</th>
-                            <th class="text-end" data-col="filament">Filament</th>
-                            <th class="text-end" data-col="cost">Cost</th>
+                            <th data-col="date" data-sort-key="date" role="button" class="kcd-sortable">Date <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th data-col="printer" data-sort-key="printer" role="button" class="kcd-sortable">Printer <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th data-col="filename" data-sort-key="filename" role="button" class="kcd-sortable">Filename <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th data-col="status" data-sort-key="status" role="button" class="kcd-sortable">Status <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th class="text-end" data-col="hours" data-sort-key="hours" role="button" class="kcd-sortable">Hours <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th class="text-end" data-col="filament" data-sort-key="filament" role="button" class="kcd-sortable">Filament <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th class="text-end" data-col="cost" data-sort-key="cost" role="button" class="kcd-sortable">Cost <span class="text-muted small kcd-sort-indicator"></span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -582,6 +591,126 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+    (function () {
+        function initUnassignedJobs() {
+            const table = document.getElementById("kcdUnassignedJobsTable");
+            if (!table) return;
+
+            const tbody = table.querySelector("tbody");
+            if (!tbody) return;
+
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            const filterEl = document.getElementById("kcdUnassignedPrinterFilter");
+
+            if (filterEl) {
+                const printers = new Set();
+                for (const r of rows) {
+                    const p = (r.getAttribute("data-printer") || "").trim();
+                    if (p) printers.add(p);
+                }
+                const list = Array.from(printers).sort((a, b) => a.localeCompare(b));
+                for (const p of list) {
+                    const opt = document.createElement("option");
+                    opt.value = p;
+                    opt.textContent = p;
+                    filterEl.appendChild(opt);
+                }
+
+                const saved = localStorage.getItem("kcd.unassigned_printer_filter") || "";
+                if (saved) filterEl.value = saved;
+            }
+
+            function applyFilter() {
+                const printer = filterEl ? (filterEl.value || "") : "";
+                if (filterEl) localStorage.setItem("kcd.unassigned_printer_filter", printer);
+
+                for (const r of rows) {
+                    const rp = (r.getAttribute("data-printer") || "").trim();
+                    const match = !printer || rp === printer;
+                    r.classList.toggle("d-none", !match);
+
+                    const cb = r.querySelector('input[type="checkbox"][name="job_uid"]');
+                    if (cb) {
+                        cb.disabled = !match;
+                        if (!match) cb.checked = false;
+                    }
+                }
+            }
+
+            if (filterEl) {
+                filterEl.addEventListener("change", applyFilter);
+                applyFilter();
+            }
+
+            const headers = Array.from(table.querySelectorAll("thead th.kcd-sortable[data-sort-key]"));
+            function setSortIndicators(activeKey, dir) {
+                for (const th of headers) {
+                    const el = th.querySelector(".kcd-sort-indicator");
+                    if (!el) continue;
+                    if (th.getAttribute("data-sort-key") === activeKey) {
+                        el.textContent = dir === "asc" ? "▲" : "▼";
+                    } else {
+                        el.textContent = "";
+                    }
+                }
+            }
+
+            function getSortValue(row, key) {
+                const cell = row.querySelector(`[data-sort-key="${key}"]`);
+                if (!cell) return "";
+                const raw = cell.getAttribute("data-sort");
+                return raw == null ? (cell.textContent || "").trim() : raw;
+            }
+
+            function sortBy(key, dir) {
+                const currentRows = Array.from(tbody.querySelectorAll("tr"));
+                const numericKeys = new Set(["date", "hours", "filament", "cost"]);
+                const isNumeric = numericKeys.has(key);
+
+                currentRows.sort((a, b) => {
+                    const av = getSortValue(a, key);
+                    const bv = getSortValue(b, key);
+                    if (isNumeric) {
+                        const an = parseFloat(av) || 0;
+                        const bn = parseFloat(bv) || 0;
+                        return dir === "asc" ? an - bn : bn - an;
+                    }
+                    const as = String(av).toLowerCase();
+                    const bs = String(bv).toLowerCase();
+                    const cmp = as.localeCompare(bs);
+                    return dir === "asc" ? cmp : -cmp;
+                });
+
+                for (const r of currentRows) tbody.appendChild(r);
+
+                localStorage.setItem("kcd.unassigned_sort_key", key);
+                localStorage.setItem("kcd.unassigned_sort_dir", dir);
+                setSortIndicators(key, dir);
+            }
+
+            for (const th of headers) {
+                th.style.cursor = "pointer";
+                th.addEventListener("click", () => {
+                    const key = th.getAttribute("data-sort-key");
+                    if (!key) return;
+                    const currentKey = localStorage.getItem("kcd.unassigned_sort_key") || "date";
+                    const currentDir = localStorage.getItem("kcd.unassigned_sort_dir") || "desc";
+                    const dir = key === currentKey ? (currentDir === "asc" ? "desc" : "asc") : "asc";
+                    sortBy(key, dir);
+                });
+            }
+
+            const initKey = localStorage.getItem("kcd.unassigned_sort_key") || "date";
+            const initDir = localStorage.getItem("kcd.unassigned_sort_dir") || "desc";
+            setSortIndicators(initKey, initDir);
+            sortBy(initKey, initDir);
+        }
+
+        document.addEventListener("DOMContentLoaded", initUnassignedJobs);
+    })();
+</script>
 
 <script>
     window.kcdProjectsUploadStart = function (form) {
