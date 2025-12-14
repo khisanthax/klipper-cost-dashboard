@@ -193,6 +193,14 @@ def load_rows_raw(csv_file):
                 if "failure_reason" not in r:
                     r["failure_reason"] = ""
 
+                # History rows should represent finalized jobs only. If older rows
+                # incorrectly captured transient live states, normalize them for display.
+                try:
+                    if str(r.get("status") or "").strip().lower() in ("printing", "paused"):
+                        r["status"] = "completed"
+                except Exception:
+                    pass
+
                 r["row_index"] = idx
                 ts = r.get("timestamp", "")
                 # Preserve the raw timestamp as stored in CSV, even if we render a display timestamp.

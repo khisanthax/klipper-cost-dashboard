@@ -92,12 +92,28 @@ def log_print():
     status = "completed"
     failure_reason = ""
     
-    # If live job exists and matches filename, get status/reason from it
+    # History rows represent completed/canceled/failed jobs only. If /log-print is called
+    # at end-of-print, we should not persist transient live states like "printing".
+    incoming_status = str(payload.get("status") or "").strip().lower()
+    if incoming_status:
+        if incoming_status in ("completed", "complete", "success", "succeeded"):
+            status = "completed"
+        elif incoming_status in ("canceled", "cancelled", "canceled_print", "cancelled_print"):
+            status = "canceled"
+        elif incoming_status in ("failed", "error"):
+            status = "failed"
+
+    # If live job exists and matches filename, optionally capture failure/cancel reason.
+    # Only allow cancel/failed to override completed; never write "printing"/"paused" to history.
     if live_metadata and live_metadata.get("filename") == filename:
         live_job = live.get_job(printer_name)
         if live_job:
-            status = live_job.get("status", "completed")
-            failure_reason = live_job.get("failure_reason", "")
+            live_status = str(live_job.get("status") or "").strip().lower()
+            if live_status in ("canceled", "cancelled"):
+                status = "canceled"
+            elif live_status == "failed":
+                status = "failed"
+            failure_reason = str(live_job.get("failure_reason") or "").strip()
 
     cost_data = compute_costs(printer_name, duration_seconds, filament_mm)
 
