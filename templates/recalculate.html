@@ -172,7 +172,7 @@
     </div>
     <div class="card-body">
         <form method="post" action="{{ url_for('recalculate_run') }}" id="kcd-recalc-form">
-            <input type="hidden" name="select_filtered" id="kcd-select-filtered" value="0">
+            <input type="hidden" name="select_filtered" id="kcd-select-filtered" value="{% if select_filtered %}1{% else %}0{% endif %}">
 
             {# Preserve filter params for run + redirect #}
             <input type="hidden" name="printer" value="{{ selected_printer or 'All' }}">
@@ -197,7 +197,15 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-select-filtered-btn">Select all filtered</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-clear">Clear</button>
                 </div>
-                <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn">Recalculate selected</button>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <button type="submit"
+                            class="btn btn-sm btn-outline-primary"
+                            id="kcd-preview-btn"
+                            formaction="{{ url_for('recalculate_preview') }}">
+                        Preview changes
+                    </button>
+                    <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn">Recalculate selected</button>
+                </div>
             </div>
 
             <div class="table-responsive">
@@ -222,7 +230,8 @@
                                 <input type="checkbox"
                                        class="form-check-input kcd-job-cb"
                                        name="job_uids"
-                                       value="{{ r.job_uid }}">
+                                       value="{{ r.job_uid }}"
+                                       {% if selected_job_uids and (r.job_uid in selected_job_uids) %}checked{% endif %}>
                             </td>
                             <td class="text-nowrap">{{ r.printer }}</td>
                             <td class="text-truncate" style="max-width: 420px;" title="{{ r.filename }}">{{ r.filename }}</td>
@@ -269,12 +278,64 @@
     </div>
 </div>
 
+{% if preview %}
+<div class="card mb-3">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="fw-semibold">Preview</div>
+        <div class="text-muted small">No changes were written. Use “Recalculate selected” to apply.</div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap gap-3 mb-2">
+            <div><span class="text-muted small">Before:</span> <span class="fw-semibold">{{ "%.2f"|format(preview.totals.before) }}</span></div>
+            <div><span class="text-muted small">After:</span> <span class="fw-semibold">{{ "%.2f"|format(preview.totals.after) }}</span></div>
+            <div>
+                <span class="text-muted small">Delta:</span>
+                {% set d = preview.totals.delta %}
+                <span class="fw-semibold {% if d > 0 %}text-danger{% elif d < 0 %}text-success{% endif %}">{{ "%.2f"|format(d) }}</span>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped table-hover table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>Printer</th>
+                        <th>Filename</th>
+                        <th class="text-end">Old ($)</th>
+                        <th class="text-end">New ($)</th>
+                        <th class="text-end">Delta ($)</th>
+                        <th class="text-muted">Job UID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in preview.rows %}
+                    <tr>
+                        <td class="text-nowrap">{{ p.printer }}</td>
+                        <td class="text-truncate" style="max-width: 420px;" title="{{ p.filename }}">{{ p.filename }}</td>
+                        <td class="text-end">{{ "%.2f"|format(p.old_total) }}</td>
+                        <td class="text-end">{{ "%.2f"|format(p.new_total) }}</td>
+                        <td class="text-end {% if p.delta > 0 %}text-danger{% elif p.delta < 0 %}text-success{% endif %}">{{ "%.2f"|format(p.delta) }}</td>
+                        <td class="text-muted small text-truncate" style="max-width: 240px;" title="{{ p.job_uid }}">{{ p.job_uid }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not preview.rows %}
+                    <tr>
+                        <td colspan="6" class="text-muted text-center py-4">No selected jobs to preview.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
 (() => {
   const totalFiltered = {{ pager.total|int }};
   const selectFilteredInput = document.getElementById('kcd-select-filtered');
   const selectedSummary = document.getElementById('kcd-selected-summary');
   const recalcBtn = document.getElementById('kcd-recalc-btn');
+  const previewBtn = document.getElementById('kcd-preview-btn');
 
   function getCheckboxes() {
     return Array.from(document.querySelectorAll('.kcd-job-cb'));
@@ -289,6 +350,7 @@
       selectedSummary.textContent = checked ? `Selected: ${checked}` : '';
     }
     recalcBtn.disabled = (!selectFiltered && checked === 0);
+    previewBtn.disabled = (!selectFiltered && checked === 0);
   }
 
   document.getElementById('kcd-toggle-all').addEventListener('change', (e) => {
