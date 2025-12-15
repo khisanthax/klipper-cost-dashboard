@@ -134,8 +134,8 @@
                         <td colspan="7" class="p-0">
                             <div class="collapse" id="proj-{{ p.id }}">
                                 <div class="p-3">
-                                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
-                                        <form method="post" class="row g-2 align-items-end flex-grow-1">
+                                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+                                         <form method="post" class="row g-2 align-items-end flex-grow-1">
                                             <input type="hidden" name="action" value="update_project">
                                             <input type="hidden" name="project_id" value="{{ p.id }}">
                                             <div class="col-md-4">
@@ -167,20 +167,28 @@
                                                     <label class="form-check-label" for="labor_only_{{ p.id }}">Labor-only</label>
                                                 </div>
                                             </div>
-                                            <div class="col-md-2 d-flex">
-                                                <button type="submit" class="btn btn-outline-primary w-100">Save</button>
-                                            </div>
-                                        </form>
+                                             <div class="col-md-2 d-flex">
+                                                 <button type="submit" class="btn btn-outline-primary w-100">Save</button>
+                                             </div>
+                                         </form>
 
-                                        <form method="post" class="m-0">
-                                            <input type="hidden" name="action" value="delete_project">
-                                            <input type="hidden" name="project_id" value="{{ p.id }}">
-                                            <button type="submit" class="btn btn-outline-danger"
-                                                    onclick="return confirm('Delete project {{ p.name }}? Jobs will be unassigned and history will remain.')">
-                                                Delete Project
-                                            </button>
-                                        </form>
-                                    </div>
+                                         <div class="d-flex align-items-start gap-2 flex-wrap">
+                                             <a class="btn btn-outline-secondary"
+                                                href="{{ url_for('recalculate_page', project=p.id) }}"
+                                                title="Open Recalculate Center filtered to this project">
+                                                 Advanced Recalculate…
+                                             </a>
+                                             <form method="post" class="m-0">
+                                                 <input type="hidden" name="action" value="delete_project">
+                                                 <input type="hidden" name="project_id" value="{{ p.id }}">
+                                                 <button type="submit" class="btn btn-outline-danger"
+                                                         onclick="return confirm('Delete project {{ p.name }}? Jobs will be unassigned and history will remain.')">
+                                                     Delete Project
+                                                 </button>
+                                             </form>
+                                         </div>
+
+                                     </div>
 
                                     <h6 class="mb-2">Jobs in this project</h6>
                                     {% if not p.jobs %}

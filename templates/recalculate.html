@@ -23,6 +23,15 @@
     <div class="card-body">
         <form method="get" class="row g-3 align-items-end">
             <div class="col-md-3">
+                <label class="form-label">Project (optional)</label>
+                <select name="project" class="form-select">
+                    <option value="" {% if not selected_project %}selected{% endif %}>All projects</option>
+                    {% for p in projects %}
+                    <option value="{{ p.id }}" {% if selected_project == p.id %}selected{% endif %}>{{ p.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
                 <label class="form-label">Printer</label>
                 <select name="printer" class="form-select">
                     <option value="All" {% if (selected_printer or 'All') == 'All' %}selected{% endif %}>All</option>
@@ -155,6 +164,7 @@
             <input type="hidden" name="select_filtered" id="kcd-select-filtered" value="0">
 
             {# Preserve filter params for run + redirect #}
+            <input type="hidden" name="project" value="{{ selected_project or '' }}">
             <input type="hidden" name="printer" value="{{ selected_printer or 'All' }}">
             <input type="hidden" name="status" value="{{ status or 'All' }}">
             <input type="hidden" name="q" value="{{ q or '' }}">
@@ -267,6 +277,7 @@
         <div class="btn-group">
             <a class="btn btn-sm btn-outline-secondary {% if not pager.has_prev %}disabled{% endif %}"
                href="{{ url_for('recalculate_page',
+                                project=(selected_project or ''),
                                 printer=(selected_printer or 'All'),
                                 status=(status or 'All'),
                                 q=(q or ''),
@@ -277,6 +288,7 @@
                                 page=pager.page-1) }}">Prev</a>
             <a class="btn btn-sm btn-outline-secondary {% if not pager.has_next %}disabled{% endif %}"
                href="{{ url_for('recalculate_page',
+                                project=(selected_project or ''),
                                 printer=(selected_printer or 'All'),
                                 status=(status or 'All'),
                                 q=(q or ''),

@@ -614,7 +614,7 @@ def reports_page():
     )
 
 
-def _filter_history_rows_for_recalc(rows, args):
+def _filter_history_rows_for_recalc(rows, args, allowed_job_uids=None):
     printer = (args.get("printer") or "").strip()
     q = (args.get("q") or "").strip().lower()
     status = (args.get("status") or "").strip().lower()
@@ -623,6 +623,11 @@ def _filter_history_rows_for_recalc(rows, args):
 
     filtered = []
     for r in rows:
+        if allowed_job_uids is not None:
+            uid = str(r.get("job_uid") or "").strip()
+            if not uid or uid not in allowed_job_uids:
+                continue
+
         if printer and printer.lower() != "all":
             if str(r.get("printer") or "").strip() != printer:
                 continue
@@ -654,6 +659,17 @@ def _filter_history_rows_for_recalc(rows, args):
     return filtered, start_dt, end_dt
 
 
+def _project_allowed_job_uids(project_id: str):
+    pid = (project_id or "").strip()
+    if not pid:
+        return None
+    try:
+        assignments = projects.load_assignments()
+    except Exception:
+        return None
+    return {uid for uid, proj_id in (assignments or {}).items() if proj_id == pid}
+
+
 def _parse_int(value, default):
     try:
         return int(value)
@@ -674,7 +690,10 @@ def recalculate_page():
     rows, error = load_rows_raw(CSV_FILE)
     message = request.args.get("msg", "").strip()
 
-    filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args)
+    selected_project = (request.args.get("project") or "").strip()
+    allowed_uids = _project_allowed_job_uids(selected_project)
+
+    filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args, allowed_job_uids=allowed_uids)
     filtered_total = len(filtered)
 
     per_page = _parse_int(request.args.get("per_page"), 25)
@@ -692,11 +711,15 @@ def recalculate_page():
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
+    project_map, _assignments = projects.recalculate()
+    project_list = list(project_map.values()) if project_map else []
     return render_template(
         "recalculate.html",
         error=error,
         message=message,
         printers=canonical_printers,
+        projects=project_list,
+        selected_project=selected_project,
         filament_profiles=filament_profiles,
         rate_profiles=rate_profiles,
         selected_printer=request.args.get("printer", "All"),
@@ -807,8 +830,11 @@ def recalculate_preview():
 
     existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
 
+    selected_project = (request.form.get("project") or "").strip()
+    allowed_uids = _project_allowed_job_uids(selected_project)
+
     if select_filtered:
-        filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form)
+        filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form, allowed_job_uids=allowed_uids)
         requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
     else:
         requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
@@ -852,6 +878,7 @@ def recalculate_preview():
         "printer",
         "q",
         "status",
+        "project",
         "start_date",
         "end_date",
         "quick_range",
@@ -868,7 +895,9 @@ def recalculate_preview():
             redirect_params[key] = v
 
     # Re-render with the same filtering + pager, but inject preview results.
-    filtered_rows, start_dt, end_dt = _filter_history_rows_for_recalc(rows, redirect_params)
+    selected_project = (redirect_params.get("project") or "").strip()
+    allowed_uids = _project_allowed_job_uids(selected_project)
+    filtered_rows, start_dt, end_dt = _filter_history_rows_for_recalc(rows, redirect_params, allowed_job_uids=allowed_uids)
     filtered_total = len(filtered_rows)
     per_page = _parse_int(redirect_params.get("per_page"), 25)
     if per_page not in (10, 25, 50, 100):
@@ -883,11 +912,15 @@ def recalculate_preview():
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
+    project_map, _assignments = projects.recalculate()
+    project_list = list(project_map.values()) if project_map else []
     return render_template(
         "recalculate.html",
         error="",
         message="",
         printers=canonical_printers,
+        projects=project_list,
+        selected_project=selected_project,
         filament_profiles=filament_profiles,
         rate_profiles=rate_profiles,
         selected_printer=redirect_params.get("printer", "All"),
@@ -931,7 +964,9 @@ def recalculate_run():
     existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
 
     if select_filtered:
-        filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form)
+        selected_project = (request.form.get("project") or "").strip()
+        allowed_uids = _project_allowed_job_uids(selected_project)
+        filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form, allowed_job_uids=allowed_uids)
         requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
     else:
         requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
@@ -974,6 +1009,7 @@ def recalculate_run():
         "printer",
         "q",
         "status",
+        "project",
         "start_date",
         "end_date",
         "quick_range",
