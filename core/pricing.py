@@ -176,6 +176,112 @@ def compute_costs(printer_name: str, duration_seconds: float, filament_mm: float
     }
 
 
+def compute_costs_with_overrides(
+    printer_name: str,
+    duration_seconds: float,
+    filament_mm: float,
+    *,
+    filament_profile_id: str | None = None,
+    rate_profile_id: str | None = None,
+) -> dict:
+    """
+    Compute costs for a print job, optionally overriding the filament profile and/or rate profile.
+
+    This does NOT modify printer defaults or active profile mappings. It is intended for one-off
+    recalculation scenarios (e.g. Recalculate Center plan application).
+
+    When no overrides are provided, the behavior matches compute_costs() (same pricing rules).
+    """
+    # --- Rate override (optional) ---
+    rate_per_hour = None
+    if rate_profile_id:
+        profile = rates.get_rate_profile(rate_profile_id)
+        if profile:
+            try:
+                rate_per_hour = float(profile.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"]))
+            except (TypeError, ValueError):
+                rate_per_hour = None
+    if rate_per_hour is None:
+        rate_per_hour = float(get_effective_rate_per_hour(printer_name))
+
+    # --- Filament override (optional) ---
+    profile_id = ""
+    profile_material = ""
+    filament_mode = None
+    filament_rate = None
+    grams_per_meter = None
+
+    if filament_profile_id:
+        profile_data = profiles.get_profile(filament_profile_id)
+        if profile_data:
+            has_mode = "filament_mode" in profile_data
+            has_rate = "filament_rate" in profile_data
+            has_grams = "grams_per_meter" in profile_data
+            if has_mode and has_rate and has_grams:
+                profile_id = filament_profile_id
+                profile_material = profile_data.get("material", "") or ""
+                filament_mode = profile_data["filament_mode"]
+                filament_rate = profile_data["filament_rate"]
+                grams_per_meter = profile_data["grams_per_meter"]
+
+    if filament_mode is None or filament_rate is None or grams_per_meter is None:
+        filament_pricing = _get_effective_filament_pricing(printer_name)
+        filament_mode = filament_pricing["filament_mode"]
+        filament_rate = filament_pricing["filament_rate"]
+        grams_per_meter = filament_pricing["grams_per_meter"]
+
+        # Tracking info from the printer's active mapping
+        profile_id = profiles.get_printer_mapping(printer_name) or ""
+        if profile_id:
+            profile_data = profiles.get_profile(profile_id)
+            if profile_data:
+                profile_material = profile_data.get("material", "") or ""
+        else:
+            profile_id = ""
+
+    filament_rate = float(filament_rate)
+    grams_per_meter = float(grams_per_meter)
+
+    # Actual usage metrics
+    duration_hours = duration_seconds / 3600.0
+    filament_meters = filament_mm / 1000.0
+    grams = filament_meters * grams_per_meter
+
+    # Billing rule: minimum 1 hour for any non-zero job
+    if duration_seconds > 0:
+        billable_hours = max(1.0, duration_hours)
+    else:
+        billable_hours = 0.0
+
+    time_cost = billable_hours * rate_per_hour
+
+    if filament_mode == "per_meter":
+        material_cost = filament_meters * filament_rate
+    elif filament_mode == "per_gram":
+        material_cost = grams * filament_rate
+    elif filament_mode == "per_kg":
+        kg = grams / 1000.0
+        material_cost = kg * filament_rate
+    else:
+        material_cost = 0.0
+
+    total_cost = time_cost + material_cost
+
+    return {
+        "duration_hours": duration_hours,
+        "filament_meters": filament_meters,
+        "rate_per_hour": rate_per_hour,
+        "filament_mode": filament_mode,
+        "filament_rate": filament_rate,
+        "grams_per_meter": grams_per_meter,
+        "time_cost": time_cost,
+        "material_cost": material_cost,
+        "total_cost": total_cost,
+        "filament_profile_id": profile_id,
+        "filament_material": profile_material,
+    }
+
+
 def compute_live_time_cost(printer_name, elapsed_seconds):
     """
     Compute time cost for an in-progress job.

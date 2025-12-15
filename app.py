@@ -799,14 +799,23 @@ def recalculate_page():
     rows_page = filtered[start_idx:end_idx]
 
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
+    filament_profiles = profiles.get_all_profiles()
+    rate_profiles = rates.list_rate_profiles()
     return render_template(
         "recalculate.html",
         error=error,
         message=message,
         printers=canonical_printers,
+        filament_profiles=filament_profiles,
+        rate_profiles=rate_profiles,
         selected_printer=request.args.get("printer", "All"),
         q=request.args.get("q", "").strip(),
         status=request.args.get("status", "All"),
+        recompute_mode=request.args.get("recompute_mode", "pricing_only"),
+        apply_filament_profile=request.args.get("apply_filament_profile", "") == "1",
+        apply_rate_profile=request.args.get("apply_rate_profile", "") == "1",
+        filament_profile_id=request.args.get("filament_profile_id", "").strip(),
+        rate_profile_id=request.args.get("rate_profile_id", "").strip(),
         quick_range=request.args.get("quick_range", "").strip(),
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
@@ -826,10 +835,34 @@ def recalculate_page():
 def recalculate_run():
     """Run a bulk recalc for selected job_uids (Phase 1)."""
     select_filtered = (request.form.get("select_filtered") or "").strip() == "1"
+    recompute_mode = (request.form.get("recompute_mode") or "pricing_only").strip()
+    apply_rate_profile = (request.form.get("apply_rate_profile") or "").strip() == "1"
+    apply_filament_profile = (request.form.get("apply_filament_profile") or "").strip() == "1"
+    rate_profile_id = (request.form.get("rate_profile_id") or "").strip()
+    filament_profile_id = (request.form.get("filament_profile_id") or "").strip()
 
     rows, error = load_rows_raw(CSV_FILE)
     if error:
         return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
+
+    if recompute_mode not in ("pricing_only", "full"):
+        recompute_mode = "pricing_only"
+
+    if recompute_mode == "full":
+        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
+
+    # Validate plan inputs up-front so we don't partially mutate CSV.
+    if apply_rate_profile:
+        if not rate_profile_id:
+            return redirect(url_for("recalculate_page", msg="Select a rate profile (or uncheck Apply hourly rate profile)."))
+        if not rates.get_rate_profile(rate_profile_id):
+            return redirect(url_for("recalculate_page", msg=f"Rate profile not found: {rate_profile_id}"))
+
+    if apply_filament_profile:
+        if not filament_profile_id:
+            return redirect(url_for("recalculate_page", msg="Select a filament profile (or uncheck Apply filament profile)."))
+        if not profiles.get_profile(filament_profile_id):
+            return redirect(url_for("recalculate_page", msg=f"Filament profile not found: {filament_profile_id}"))
 
     existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
 
@@ -844,13 +877,41 @@ def recalculate_run():
 
     updated = 0
     if to_update:
-        updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_costs)
+        if apply_rate_profile or apply_filament_profile:
+            from core.pricing import compute_costs_with_overrides
+
+            def compute_fn(p, d, f):
+                return compute_costs_with_overrides(
+                    p,
+                    d,
+                    f,
+                    filament_profile_id=filament_profile_id if apply_filament_profile else None,
+                    rate_profile_id=rate_profile_id if apply_rate_profile else None,
+                )
+
+            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
+        else:
+            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_costs)
 
     skipped = len(missing)
 
     # Preserve current filters on redirect.
     redirect_params = {}
-    for key in ("printer", "q", "status", "start_date", "end_date", "quick_range", "per_page", "page"):
+    for key in (
+        "printer",
+        "q",
+        "status",
+        "start_date",
+        "end_date",
+        "quick_range",
+        "per_page",
+        "page",
+        "recompute_mode",
+        "apply_filament_profile",
+        "apply_rate_profile",
+        "filament_profile_id",
+        "rate_profile_id",
+    ):
         v = (request.form.get(key) or "").strip()
         if v:
             redirect_params[key] = v

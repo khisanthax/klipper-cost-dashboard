@@ -81,7 +81,28 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(self._read_total_cost(), before)
 
+    def test_recalculate_run_with_rate_profile_override_changes_total(self):
+        # Duration is 3600s -> billable_hours = 1.0, so total should match rate_per_hour when filament is 0.
+        def fake_get_rate_profile(_profile_id):
+            return {"rate_per_hour": 12.0}
+
+        with patch.object(self.app_module.pricing.rates, "get_rate_profile", fake_get_rate_profile):
+            resp = self.client.post(
+                "/recalculate/run",
+                data={
+                    "job_uids": ["test-job-uid-1"],
+                    "recompute_mode": "pricing_only",
+                    "apply_rate_profile": "1",
+                    "rate_profile_id": "rp1",
+                    "apply_filament_profile": "0",
+                    "filament_profile_id": "",
+                },
+                follow_redirects=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/recalculate", resp.headers.get("Location", ""))
+        self.assertEqual(self._read_total_cost(), "12.0")
+
 
 if __name__ == "__main__":
     unittest.main()
-
