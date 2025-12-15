@@ -4,9 +4,11 @@ Print Cost Dashboard - Flask Application
 Refactored to use modular core package.
 """
 import os
+import json
 import tempfile
 import uuid
 import math
+import hashlib
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
@@ -822,6 +824,9 @@ def recalculate_page():
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
         rows_page=rows_page,
+        selected_job_uids=set(),
+        select_filtered=False,
+        preview=None,
         pager={
             "page": page,
             "per_page": per_page,
@@ -836,6 +841,82 @@ def recalculate_page():
 @app.route("/recalculate/run", methods=["POST"], endpoint="recalculate_run")
 def recalculate_run():
     """Run a bulk recalc for selected job_uids (Phase 1)."""
+    def _parse_optional_nonneg_float(raw):
+        raw = (raw or "").strip()
+        if not raw:
+            return None, None
+        try:
+            value = float(raw)
+            if value < 0:
+                raise ValueError()
+            return value, None
+        except Exception:
+            return None, "Invalid value (must be a non-negative number)."
+
+    def _build_compute_fn(
+        apply_rate_profile,
+        apply_filament_profile,
+        rate_profile_id,
+        filament_profile_id,
+        rate_per_hour_override_raw,
+        filament_rate_per_meter_override_raw,
+    ):
+        if apply_rate_profile:
+            if not rate_profile_id:
+                return None, "Select a rate profile (or uncheck Apply hourly rate profile).", None
+            if not rates.get_rate_profile(rate_profile_id):
+                return None, f"Rate profile not found: {rate_profile_id}", None
+
+        if apply_filament_profile:
+            if not filament_profile_id:
+                return None, "Select a filament profile (or uncheck Apply filament profile).", None
+            if not profiles.get_profile(filament_profile_id):
+                return None, f"Filament profile not found: {filament_profile_id}", None
+
+        rate_per_hour_override, err = _parse_optional_nonneg_float(rate_per_hour_override_raw)
+        if err:
+            return None, "Invalid hourly rate override (must be a non-negative number).", None
+
+        filament_rate_per_meter_override, err = _parse_optional_nonneg_float(filament_rate_per_meter_override_raw)
+        if err:
+            return None, "Invalid filament $/meter override (must be a non-negative number).", None
+
+        plan = {
+            "apply_rate_profile": bool(apply_rate_profile),
+            "apply_filament_profile": bool(apply_filament_profile),
+            "rate_profile_id": rate_profile_id if apply_rate_profile else None,
+            "filament_profile_id": filament_profile_id if apply_filament_profile else None,
+            "rate_per_hour_override": rate_per_hour_override,
+            "filament_rate_per_meter_override": filament_rate_per_meter_override,
+        }
+
+        if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
+            from core.pricing import compute_costs_with_overrides
+
+            def compute_fn(p, d, f):
+                return compute_costs_with_overrides(
+                    p,
+                    d,
+                    f,
+                    filament_profile_id=filament_profile_id if apply_filament_profile else None,
+                    rate_profile_id=rate_profile_id if apply_rate_profile else None,
+                    rate_per_hour_override=rate_per_hour_override,
+                    filament_rate_per_meter_override=filament_rate_per_meter_override,
+                )
+
+            return compute_fn, None, plan
+
+        return compute_costs, None, plan
+
+    def _append_recalc_audit_log(record):
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            path = os.path.join(DATA_DIR, "recalc_runs.jsonl")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            app.logger.warning("Failed to write recalc audit log: %s", e)
+
     select_filtered = (request.form.get("select_filtered") or "").strip() == "1"
     recompute_mode = (request.form.get("recompute_mode") or "pricing_only").strip()
     apply_rate_profile = (request.form.get("apply_rate_profile") or "").strip() == "1"
@@ -855,36 +936,16 @@ def recalculate_run():
     if recompute_mode == "full":
         return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
 
-    # Validate plan inputs up-front so we don't partially mutate CSV.
-    rate_per_hour_override = None
-    if rate_per_hour_override_raw:
-        try:
-            rate_per_hour_override = float(rate_per_hour_override_raw)
-            if rate_per_hour_override < 0:
-                raise ValueError()
-        except Exception:
-            return redirect(url_for("recalculate_page", msg="Invalid hourly rate override (must be a non-negative number)."))
-
-    filament_rate_per_meter_override = None
-    if filament_rate_per_meter_override_raw:
-        try:
-            filament_rate_per_meter_override = float(filament_rate_per_meter_override_raw)
-            if filament_rate_per_meter_override < 0:
-                raise ValueError()
-        except Exception:
-            return redirect(url_for("recalculate_page", msg="Invalid filament $/meter override (must be a non-negative number)."))
-
-    if apply_rate_profile:
-        if not rate_profile_id:
-            return redirect(url_for("recalculate_page", msg="Select a rate profile (or uncheck Apply hourly rate profile)."))
-        if not rates.get_rate_profile(rate_profile_id):
-            return redirect(url_for("recalculate_page", msg=f"Rate profile not found: {rate_profile_id}"))
-
-    if apply_filament_profile:
-        if not filament_profile_id:
-            return redirect(url_for("recalculate_page", msg="Select a filament profile (or uncheck Apply filament profile)."))
-        if not profiles.get_profile(filament_profile_id):
-            return redirect(url_for("recalculate_page", msg=f"Filament profile not found: {filament_profile_id}"))
+    compute_fn, plan_err, plan = _build_compute_fn(
+        apply_rate_profile,
+        apply_filament_profile,
+        rate_profile_id,
+        filament_profile_id,
+        rate_per_hour_override_raw,
+        filament_rate_per_meter_override_raw,
+    )
+    if plan_err:
+        return redirect(url_for("recalculate_page", msg=plan_err))
 
     existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
 
@@ -899,23 +960,48 @@ def recalculate_run():
 
     updated = 0
     if to_update:
-        if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
-            from core.pricing import compute_costs_with_overrides
+        before_total = 0.0
+        for r in rows:
+            uid = str(r.get("job_uid") or "").strip()
+            if uid and uid in to_update:
+                try:
+                    before_total += float(r.get("total_cost") or 0.0)
+                except Exception:
+                    continue
 
-            def compute_fn(p, d, f):
-                return compute_costs_with_overrides(
-                    p,
-                    d,
-                    f,
-                    filament_profile_id=filament_profile_id if apply_filament_profile else None,
-                    rate_profile_id=rate_profile_id if apply_rate_profile else None,
-                    rate_per_hour_override=rate_per_hour_override,
-                    filament_rate_per_meter_override=filament_rate_per_meter_override,
-                )
+        updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
 
-            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
-        else:
-            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_costs)
+        after_rows, after_error = load_rows_raw(CSV_FILE)
+        after_total = 0.0
+        if not after_error:
+            for r in (after_rows or []):
+                uid = str(r.get("job_uid") or "").strip()
+                if uid and uid in to_update:
+                    try:
+                        after_total += float(r.get("total_cost") or 0.0)
+                    except Exception:
+                        continue
+
+        uids_sorted = sorted(to_update)
+        uids_hash = hashlib.sha256(("|".join(uids_sorted)).encode("utf-8")).hexdigest()
+        record = {
+            "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
+            "count_requested": len(requested_uids),
+            "count_updated": int(updated),
+            "count_skipped_missing": int(len(missing)),
+            "select_filtered": bool(select_filtered),
+            "recompute_mode": "pricing_only",
+            "plan": plan,
+            "job_uids_count": len(to_update),
+            "job_uids_hash": uids_hash,
+            "job_uids_sample": uids_sorted[:20],
+            "totals": {
+                "before": before_total,
+                "after": after_total,
+                "delta": after_total - before_total,
+            },
+        }
+        _append_recalc_audit_log(record)
 
     skipped = len(missing)
 
@@ -948,6 +1034,219 @@ def recalculate_run():
     redirect_params["msg"] = msg
 
     return redirect(url_for("recalculate_page", **redirect_params))
+
+
+@app.route("/recalculate/preview", methods=["POST"], endpoint="recalculate_preview")
+def recalculate_preview():
+    """Preview a bulk recalc without writing any history (Phase 3)."""
+
+    def _parse_optional_nonneg_float(raw):
+        raw = (raw or "").strip()
+        if not raw:
+            return None, None
+        try:
+            value = float(raw)
+            if value < 0:
+                raise ValueError()
+            return value, None
+        except Exception:
+            return None, "Invalid value (must be a non-negative number)."
+
+    def _build_compute_fn(
+        apply_rate_profile,
+        apply_filament_profile,
+        rate_profile_id,
+        filament_profile_id,
+        rate_per_hour_override_raw,
+        filament_rate_per_meter_override_raw,
+    ):
+        if apply_rate_profile:
+            if not rate_profile_id:
+                return None, "Select a rate profile (or uncheck Apply hourly rate profile)."
+            if not rates.get_rate_profile(rate_profile_id):
+                return None, f"Rate profile not found: {rate_profile_id}"
+
+        if apply_filament_profile:
+            if not filament_profile_id:
+                return None, "Select a filament profile (or uncheck Apply filament profile)."
+            if not profiles.get_profile(filament_profile_id):
+                return None, f"Filament profile not found: {filament_profile_id}"
+
+        rate_per_hour_override, err = _parse_optional_nonneg_float(rate_per_hour_override_raw)
+        if err:
+            return None, "Invalid hourly rate override (must be a non-negative number)."
+
+        filament_rate_per_meter_override, err = _parse_optional_nonneg_float(filament_rate_per_meter_override_raw)
+        if err:
+            return None, "Invalid filament $/meter override (must be a non-negative number)."
+
+        plan = {
+            "apply_rate_profile": bool(apply_rate_profile),
+            "apply_filament_profile": bool(apply_filament_profile),
+            "rate_profile_id": rate_profile_id if apply_rate_profile else None,
+            "filament_profile_id": filament_profile_id if apply_filament_profile else None,
+            "rate_per_hour_override": rate_per_hour_override,
+            "filament_rate_per_meter_override": filament_rate_per_meter_override,
+        }
+
+        if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
+            from core.pricing import compute_costs_with_overrides
+
+            def compute_fn(p, d, f):
+                return compute_costs_with_overrides(
+                    p,
+                    d,
+                    f,
+                    filament_profile_id=filament_profile_id if apply_filament_profile else None,
+                    rate_profile_id=rate_profile_id if apply_rate_profile else None,
+                    rate_per_hour_override=rate_per_hour_override,
+                    filament_rate_per_meter_override=filament_rate_per_meter_override,
+                )
+
+            return compute_fn, plan
+
+        return compute_costs, plan
+
+    select_filtered = (request.form.get("select_filtered") or "").strip() == "1"
+    recompute_mode = (request.form.get("recompute_mode") or "pricing_only").strip()
+    apply_rate_profile = (request.form.get("apply_rate_profile") or "").strip() == "1"
+    apply_filament_profile = (request.form.get("apply_filament_profile") or "").strip() == "1"
+    rate_profile_id = (request.form.get("rate_profile_id") or "").strip()
+    filament_profile_id = (request.form.get("filament_profile_id") or "").strip()
+    rate_per_hour_override_raw = (request.form.get("rate_per_hour_override") or "").strip()
+    filament_rate_per_meter_override_raw = (request.form.get("filament_rate_per_meter_override") or "").strip()
+
+    rows, error = load_rows_raw(CSV_FILE)
+    if error:
+        return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
+
+    if recompute_mode not in ("pricing_only", "full"):
+        recompute_mode = "pricing_only"
+    if recompute_mode == "full":
+        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
+
+    compute_fn, plan_or_err = _build_compute_fn(
+        apply_rate_profile,
+        apply_filament_profile,
+        rate_profile_id,
+        filament_profile_id,
+        rate_per_hour_override_raw,
+        filament_rate_per_meter_override_raw,
+    )
+    if compute_fn is None:
+        return redirect(url_for("recalculate_page", msg=plan_or_err))
+    plan = plan_or_err
+
+    filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.form)
+    filtered_total = len(filtered)
+
+    per_page = _parse_int(request.form.get("per_page"), 25)
+    if per_page not in (10, 25, 50, 100):
+        per_page = 25
+    page = max(1, _parse_int(request.form.get("page"), 1))
+
+    pages = max(1, (filtered_total + per_page - 1) // per_page)
+    page = min(page, pages)
+
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    rows_page = filtered[start_idx:end_idx]
+
+    existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
+    if select_filtered:
+        requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
+    else:
+        requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
+
+    missing = {u for u in requested_uids if u not in existing_uids}
+    to_preview = {u for u in requested_uids if u in existing_uids}
+
+    preview_rows = []
+    before_total = 0.0
+    after_total = 0.0
+    for r in filtered:
+        uid = str(r.get("job_uid") or "").strip()
+        if not uid or uid not in to_preview:
+            continue
+
+        printer_name = str(r.get("printer") or "")
+        try:
+            duration_seconds = float(r.get("duration_seconds") or 0.0)
+        except Exception:
+            duration_seconds = 0.0
+        try:
+            filament_mm = float(r.get("filament_mm") or 0.0)
+        except Exception:
+            filament_mm = 0.0
+        try:
+            old_total = float(r.get("total_cost") or 0.0)
+        except Exception:
+            old_total = 0.0
+
+        computed = compute_fn(printer_name, duration_seconds, filament_mm) or {}
+        try:
+            new_total = float(computed.get("total_cost") or 0.0)
+        except Exception:
+            new_total = 0.0
+
+        before_total += old_total
+        after_total += new_total
+        preview_rows.append(
+            {
+                "job_uid": uid,
+                "printer": printer_name,
+                "filename": str(r.get("filename") or ""),
+                "old_total": old_total,
+                "new_total": new_total,
+                "delta": new_total - old_total,
+            }
+        )
+
+    canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
+    filament_profiles = profiles.get_all_profiles()
+    rate_profiles = rates.list_rate_profiles()
+
+    msg = f"Previewing {len(preview_rows)} job(s)."
+    if missing:
+        msg += f" {len(missing)} selected job(s) were missing from history."
+
+    return render_template(
+        "recalculate.html",
+        error=error,
+        message=msg,
+        printers=canonical_printers,
+        filament_profiles=filament_profiles,
+        rate_profiles=rate_profiles,
+        selected_printer=request.form.get("printer", "All"),
+        q=request.form.get("q", "").strip(),
+        status=request.form.get("status", "All"),
+        recompute_mode="pricing_only",
+        apply_filament_profile=apply_filament_profile,
+        apply_rate_profile=apply_rate_profile,
+        filament_profile_id=filament_profile_id,
+        rate_profile_id=rate_profile_id,
+        rate_per_hour_override=rate_per_hour_override_raw,
+        filament_rate_per_meter_override=filament_rate_per_meter_override_raw,
+        quick_range=request.form.get("quick_range", "").strip(),
+        start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
+        end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
+        rows_page=rows_page,
+        selected_job_uids=to_preview,
+        select_filtered=select_filtered,
+        preview={
+            "rows": preview_rows,
+            "totals": {"before": before_total, "after": after_total, "delta": after_total - before_total},
+            "plan": plan,
+        },
+        pager={
+            "page": page,
+            "per_page": per_page,
+            "total": filtered_total,
+            "pages": pages,
+            "has_prev": page > 1,
+            "has_next": page < pages,
+        },
+    )
 
 
 @app.route("/projects", methods=["GET", "POST"])
