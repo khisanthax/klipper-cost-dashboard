@@ -175,8 +175,50 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-select-filtered-btn">Select all filtered</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-clear">Clear</button>
                 </div>
-                <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn">Recalculate selected</button>
+                <div class="d-flex gap-2">
+                    <button type="submit"
+                            class="btn btn-sm btn-outline-primary"
+                            formmethod="post"
+                            formaction="{{ url_for('recalculate_preview') }}"
+                            id="kcd-preview-btn">
+                        Preview changes
+                    </button>
+                    <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn">Recalculate selected</button>
+                </div>
             </div>
+
+            {% if preview_results %}
+            <div class="alert alert-light border mb-2">
+                <div class="fw-semibold mb-1">Preview (non-destructive)</div>
+                <div class="text-muted small">No history rows were changed. Apply to persist.</div>
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm table-striped table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Printer</th>
+                                <th>Filename</th>
+                                <th class="text-end">Old Total</th>
+                                <th class="text-end">New Total</th>
+                                <th class="text-end">Delta</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in preview_results %}
+                            <tr>
+                                <td class="text-nowrap">{{ p.printer }}</td>
+                                <td class="text-truncate" style="max-width: 420px;" title="{{ p.filename }}">{{ p.filename }}</td>
+                                <td class="text-end">{{ "%.2f"|format(p.old_total) }}</td>
+                                <td class="text-end">{{ "%.2f"|format(p.new_total) }}</td>
+                                <td class="text-end {% if p.delta > 0 %}text-danger{% elif p.delta < 0 %}text-success{% endif %}">
+                                    {{ "%.2f"|format(p.delta) }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
 
             <div class="table-responsive">
                 <table class="table table-striped table-hover table-sm align-middle mb-0">
@@ -253,6 +295,7 @@
   const selectFilteredInput = document.getElementById('kcd-select-filtered');
   const selectedSummary = document.getElementById('kcd-selected-summary');
   const recalcBtn = document.getElementById('kcd-recalc-btn');
+  const previewBtn = document.getElementById('kcd-preview-btn');
 
   function getCheckboxes() {
     return Array.from(document.querySelectorAll('.kcd-job-cb'));
@@ -267,6 +310,7 @@
       selectedSummary.textContent = checked ? `Selected: ${checked}` : '';
     }
     recalcBtn.disabled = (!selectFiltered && checked === 0);
+    previewBtn.disabled = (!selectFiltered && checked === 0);
   }
 
   document.getElementById('kcd-toggle-all').addEventListener('change', (e) => {

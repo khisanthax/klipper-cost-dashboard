@@ -6,6 +6,8 @@ Refactored to use modular core package.
 import os
 import tempfile
 import uuid
+import json
+from datetime import datetime
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -708,6 +710,198 @@ def recalculate_page():
         quick_range=request.args.get("quick_range", "").strip(),
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
+        preview_results=None,
+        rows_page=rows_page,
+        pager={
+            "page": page,
+            "per_page": per_page,
+            "total": filtered_total,
+            "pages": pages,
+            "has_prev": page > 1,
+            "has_next": page < pages,
+        },
+    )
+
+
+def _recalc_plan_from_form(form):
+    recompute_mode = (form.get("recompute_mode") or "pricing_only").strip()
+    apply_rate_profile = (form.get("apply_rate_profile") or "").strip() == "1"
+    apply_filament_profile = (form.get("apply_filament_profile") or "").strip() == "1"
+    rate_profile_id = (form.get("rate_profile_id") or "").strip()
+    filament_profile_id = (form.get("filament_profile_id") or "").strip()
+    return {
+        "recompute_mode": recompute_mode,
+        "apply_rate_profile": apply_rate_profile,
+        "apply_filament_profile": apply_filament_profile,
+        "rate_profile_id": rate_profile_id,
+        "filament_profile_id": filament_profile_id,
+    }
+
+
+def _validate_recalc_plan(plan):
+    recompute_mode = plan.get("recompute_mode") or "pricing_only"
+    if recompute_mode not in ("pricing_only", "full"):
+        recompute_mode = "pricing_only"
+    if recompute_mode == "full":
+        return False, "Full recompute is not supported yet; use pricing-only."
+
+    if plan.get("apply_rate_profile"):
+        rid = plan.get("rate_profile_id") or ""
+        if not rid:
+            return False, "Select a rate profile (or uncheck Apply hourly rate profile)."
+        if not rates.get_rate_profile(rid):
+            return False, f"Rate profile not found: {rid}"
+
+    if plan.get("apply_filament_profile"):
+        fid = plan.get("filament_profile_id") or ""
+        if not fid:
+            return False, "Select a filament profile (or uncheck Apply filament profile)."
+        if not profiles.get_profile(fid):
+            return False, f"Filament profile not found: {fid}"
+
+    return True, ""
+
+
+def _compute_costs_fn_for_plan(plan):
+    if plan.get("apply_rate_profile") or plan.get("apply_filament_profile"):
+        from core.pricing import compute_costs_with_overrides
+
+        def compute_fn(p, d, f):
+            return compute_costs_with_overrides(
+                p,
+                d,
+                f,
+                filament_profile_id=plan.get("filament_profile_id") if plan.get("apply_filament_profile") else None,
+                rate_profile_id=plan.get("rate_profile_id") if plan.get("apply_rate_profile") else None,
+            )
+
+        return compute_fn
+    return compute_costs
+
+
+def _append_recalc_audit_record(record):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        path = os.path.join(DATA_DIR, "recalc_runs.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+@app.route("/recalculate/preview", methods=["POST"], endpoint="recalculate_preview")
+def recalculate_preview():
+    """
+    Non-destructive preview: compute old/new totals and deltas without writing history.
+    """
+    select_filtered = (request.form.get("select_filtered") or "").strip() == "1"
+
+    rows, error = load_rows_raw(CSV_FILE)
+    if error:
+        return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
+
+    plan = _recalc_plan_from_form(request.form)
+    ok, err = _validate_recalc_plan(plan)
+    if not ok:
+        return redirect(url_for("recalculate_page", msg=err))
+
+    existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
+
+    if select_filtered:
+        filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form)
+        requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
+    else:
+        requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
+
+    requested_uids = [u for u in requested_uids if u in existing_uids]
+    row_by_uid = {str(r.get("job_uid") or "").strip(): r for r in rows if str(r.get("job_uid") or "").strip()}
+
+    compute_fn = _compute_costs_fn_for_plan(plan)
+    preview = []
+    for uid in requested_uids:
+        r = row_by_uid.get(uid)
+        if not r:
+            continue
+        try:
+            old_total = float(r.get("total_cost") or 0.0)
+        except Exception:
+            old_total = 0.0
+        new_fields = compute_fn(
+            str(r.get("printer") or "").strip(),
+            float(r.get("duration_seconds") or 0.0),
+            float(r.get("filament_mm") or 0.0),
+        )
+        try:
+            new_total = float(new_fields.get("total_cost") or 0.0)
+        except Exception:
+            new_total = 0.0
+        preview.append(
+            {
+                "job_uid": uid,
+                "printer": r.get("printer"),
+                "filename": r.get("filename"),
+                "old_total": old_total,
+                "new_total": new_total,
+                "delta": new_total - old_total,
+            }
+        )
+
+    # Render the page with preview results. Keep current filters in the query string.
+    redirect_params = {}
+    for key in (
+        "printer",
+        "q",
+        "status",
+        "start_date",
+        "end_date",
+        "quick_range",
+        "per_page",
+        "page",
+        "recompute_mode",
+        "apply_filament_profile",
+        "apply_rate_profile",
+        "filament_profile_id",
+        "rate_profile_id",
+    ):
+        v = (request.form.get(key) or "").strip()
+        if v:
+            redirect_params[key] = v
+
+    # Re-render with the same filtering + pager, but inject preview results.
+    filtered_rows, start_dt, end_dt = _filter_history_rows_for_recalc(rows, redirect_params)
+    filtered_total = len(filtered_rows)
+    per_page = _parse_int(redirect_params.get("per_page"), 25)
+    if per_page not in (10, 25, 50, 100):
+        per_page = 25
+    page = max(1, _parse_int(redirect_params.get("page"), 1))
+    pages = max(1, (filtered_total + per_page - 1) // per_page)
+    page = min(page, pages)
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    rows_page = filtered_rows[start_idx:end_idx]
+
+    canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
+    filament_profiles = profiles.get_all_profiles()
+    rate_profiles = rates.list_rate_profiles()
+    return render_template(
+        "recalculate.html",
+        error="",
+        message="",
+        printers=canonical_printers,
+        filament_profiles=filament_profiles,
+        rate_profiles=rate_profiles,
+        selected_printer=redirect_params.get("printer", "All"),
+        q=redirect_params.get("q", "").strip(),
+        status=redirect_params.get("status", "All"),
+        recompute_mode=redirect_params.get("recompute_mode", "pricing_only"),
+        apply_filament_profile=redirect_params.get("apply_filament_profile", "") == "1",
+        apply_rate_profile=redirect_params.get("apply_rate_profile", "") == "1",
+        filament_profile_id=redirect_params.get("filament_profile_id", "").strip(),
+        rate_profile_id=redirect_params.get("rate_profile_id", "").strip(),
+        quick_range=redirect_params.get("quick_range", "").strip(),
+        start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
+        end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
+        preview_results=preview,
         rows_page=rows_page,
         pager={
             "page": page,
@@ -724,34 +918,15 @@ def recalculate_page():
 def recalculate_run():
     """Run a bulk recalc for selected job_uids (Phase 1)."""
     select_filtered = (request.form.get("select_filtered") or "").strip() == "1"
-    recompute_mode = (request.form.get("recompute_mode") or "pricing_only").strip()
-    apply_rate_profile = (request.form.get("apply_rate_profile") or "").strip() == "1"
-    apply_filament_profile = (request.form.get("apply_filament_profile") or "").strip() == "1"
-    rate_profile_id = (request.form.get("rate_profile_id") or "").strip()
-    filament_profile_id = (request.form.get("filament_profile_id") or "").strip()
+    plan = _recalc_plan_from_form(request.form)
 
     rows, error = load_rows_raw(CSV_FILE)
     if error:
         return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
 
-    if recompute_mode not in ("pricing_only", "full"):
-        recompute_mode = "pricing_only"
-
-    if recompute_mode == "full":
-        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
-
-    # Validate plan inputs up-front so we don't partially mutate CSV.
-    if apply_rate_profile:
-        if not rate_profile_id:
-            return redirect(url_for("recalculate_page", msg="Select a rate profile (or uncheck Apply hourly rate profile)."))
-        if not rates.get_rate_profile(rate_profile_id):
-            return redirect(url_for("recalculate_page", msg=f"Rate profile not found: {rate_profile_id}"))
-
-    if apply_filament_profile:
-        if not filament_profile_id:
-            return redirect(url_for("recalculate_page", msg="Select a filament profile (or uncheck Apply filament profile)."))
-        if not profiles.get_profile(filament_profile_id):
-            return redirect(url_for("recalculate_page", msg=f"Filament profile not found: {filament_profile_id}"))
+    ok, err = _validate_recalc_plan(plan)
+    if not ok:
+        return redirect(url_for("recalculate_page", msg=err))
 
     existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
 
@@ -764,23 +939,32 @@ def recalculate_run():
     missing = {u for u in requested_uids if u not in existing_uids}
     to_update = [u for u in requested_uids if u in existing_uids]
 
+    # Compute pre-run totals for audit log.
+    row_by_uid = {str(r.get("job_uid") or "").strip(): r for r in rows if str(r.get("job_uid") or "").strip()}
+    compute_fn = _compute_costs_fn_for_plan(plan)
+    before_total = 0.0
+    after_total = 0.0
+    for uid in to_update:
+        r = row_by_uid.get(uid)
+        if not r:
+            continue
+        try:
+            before_total += float(r.get("total_cost") or 0.0)
+        except Exception:
+            pass
+        new_fields = compute_fn(
+            str(r.get("printer") or "").strip(),
+            float(r.get("duration_seconds") or 0.0),
+            float(r.get("filament_mm") or 0.0),
+        )
+        try:
+            after_total += float(new_fields.get("total_cost") or 0.0)
+        except Exception:
+            pass
+
     updated = 0
     if to_update:
-        if apply_rate_profile or apply_filament_profile:
-            from core.pricing import compute_costs_with_overrides
-
-            def compute_fn(p, d, f):
-                return compute_costs_with_overrides(
-                    p,
-                    d,
-                    f,
-                    filament_profile_id=filament_profile_id if apply_filament_profile else None,
-                    rate_profile_id=rate_profile_id if apply_rate_profile else None,
-                )
-
-            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
-        else:
-            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_costs)
+        updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
 
     skipped = len(missing)
 
@@ -809,6 +993,24 @@ def recalculate_run():
     if skipped:
         msg += f" Skipped {skipped} missing job(s)."
     redirect_params["msg"] = msg
+
+    _append_recalc_audit_record(
+        {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "count_requested": len(requested_uids),
+            "count_updated": int(updated),
+            "count_skipped": int(skipped),
+            "plan": {
+                "recompute_mode": plan.get("recompute_mode"),
+                "apply_rate_profile": bool(plan.get("apply_rate_profile")),
+                "rate_profile_id": plan.get("rate_profile_id") if plan.get("apply_rate_profile") else None,
+                "apply_filament_profile": bool(plan.get("apply_filament_profile")),
+                "filament_profile_id": plan.get("filament_profile_id") if plan.get("apply_filament_profile") else None,
+            },
+            "total_cost_before": before_total,
+            "total_cost_after": after_total,
+        }
+    )
 
     return redirect(url_for("recalculate_page", **redirect_params))
 
