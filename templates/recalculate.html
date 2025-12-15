@@ -103,6 +103,26 @@
                                 </select>
                             </div>
 
+                            <div class="col-md-3">
+                                <label class="form-label mb-1">Hourly rate override</label>
+                                <input type="text"
+                                       name="rate_per_hour_override"
+                                       value="{{ rate_per_hour_override or '' }}"
+                                       class="form-control form-control-sm"
+                                       placeholder="$/hr (optional)">
+                                <div class="text-muted small">If set, overrides the selected rate profile.</div>
+                            </div>
+
+                            <div class="col-md-3">
+                                <label class="form-label mb-1">Filament override</label>
+                                <input type="text"
+                                       name="filament_rate_per_meter_override"
+                                       value="{{ filament_rate_per_meter_override or '' }}"
+                                       class="form-control form-control-sm"
+                                       placeholder="$/meter (optional)">
+                                <div class="text-muted small">If set, uses per-meter pricing (no profile).</div>
+                            </div>
+
                             <div class="col-md-4">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" name="apply_rate_profile" value="1"
@@ -168,6 +188,8 @@
             <input type="hidden" name="apply_filament_profile" value="{% if apply_filament_profile %}1{% else %}0{% endif %}">
             <input type="hidden" name="rate_profile_id" value="{{ rate_profile_id or '' }}">
             <input type="hidden" name="filament_profile_id" value="{{ filament_profile_id or '' }}">
+            <input type="hidden" name="rate_per_hour_override" value="{{ rate_per_hour_override or '' }}">
+            <input type="hidden" name="filament_rate_per_meter_override" value="{{ filament_rate_per_meter_override or '' }}">
 
             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">

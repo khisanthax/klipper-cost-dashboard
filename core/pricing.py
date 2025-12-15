@@ -183,6 +183,8 @@ def compute_costs_with_overrides(
     *,
     filament_profile_id: str | None = None,
     rate_profile_id: str | None = None,
+    rate_per_hour_override: float | None = None,
+    filament_rate_per_meter_override: float | None = None,
 ) -> dict:
     """
     Compute costs for a print job, optionally overriding the filament profile and/or rate profile.
@@ -194,6 +196,11 @@ def compute_costs_with_overrides(
     """
     # --- Rate override (optional) ---
     rate_per_hour = None
+    if rate_per_hour_override is not None:
+        try:
+            rate_per_hour = float(rate_per_hour_override)
+        except (TypeError, ValueError):
+            rate_per_hour = None
     if rate_profile_id:
         profile = rates.get_rate_profile(rate_profile_id)
         if profile:
@@ -210,6 +217,14 @@ def compute_costs_with_overrides(
     filament_mode = None
     filament_rate = None
     grams_per_meter = None
+
+    if filament_rate_per_meter_override is not None:
+        try:
+            filament_mode = "per_meter"
+            filament_rate = float(filament_rate_per_meter_override)
+        except (TypeError, ValueError):
+            filament_mode = None
+            filament_rate = None
 
     if filament_profile_id:
         profile_data = profiles.get_profile(filament_profile_id)
@@ -230,14 +245,15 @@ def compute_costs_with_overrides(
         filament_rate = filament_pricing["filament_rate"]
         grams_per_meter = filament_pricing["grams_per_meter"]
 
-        # Tracking info from the printer's active mapping
-        profile_id = profiles.get_printer_mapping(printer_name) or ""
-        if profile_id:
-            profile_data = profiles.get_profile(profile_id)
-            if profile_data:
-                profile_material = profile_data.get("material", "") or ""
-        else:
-            profile_id = ""
+        # Tracking info from the printer's active mapping (unless a manual per-meter override is used)
+        if filament_rate_per_meter_override is None:
+            profile_id = profiles.get_printer_mapping(printer_name) or ""
+            if profile_id:
+                profile_data = profiles.get_profile(profile_id)
+                if profile_data:
+                    profile_material = profile_data.get("material", "") or ""
+            else:
+                profile_id = ""
 
     filament_rate = float(filament_rate)
     grams_per_meter = float(grams_per_meter)
