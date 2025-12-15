@@ -816,6 +816,8 @@ def recalculate_page():
         apply_rate_profile=request.args.get("apply_rate_profile", "") == "1",
         filament_profile_id=request.args.get("filament_profile_id", "").strip(),
         rate_profile_id=request.args.get("rate_profile_id", "").strip(),
+        rate_per_hour_override=request.args.get("rate_per_hour_override", "").strip(),
+        filament_rate_per_meter_override=request.args.get("filament_rate_per_meter_override", "").strip(),
         quick_range=request.args.get("quick_range", "").strip(),
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
@@ -840,6 +842,8 @@ def recalculate_run():
     apply_filament_profile = (request.form.get("apply_filament_profile") or "").strip() == "1"
     rate_profile_id = (request.form.get("rate_profile_id") or "").strip()
     filament_profile_id = (request.form.get("filament_profile_id") or "").strip()
+    rate_per_hour_override_raw = (request.form.get("rate_per_hour_override") or "").strip()
+    filament_rate_per_meter_override_raw = (request.form.get("filament_rate_per_meter_override") or "").strip()
 
     rows, error = load_rows_raw(CSV_FILE)
     if error:
@@ -852,6 +856,24 @@ def recalculate_run():
         return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
 
     # Validate plan inputs up-front so we don't partially mutate CSV.
+    rate_per_hour_override = None
+    if rate_per_hour_override_raw:
+        try:
+            rate_per_hour_override = float(rate_per_hour_override_raw)
+            if rate_per_hour_override < 0:
+                raise ValueError()
+        except Exception:
+            return redirect(url_for("recalculate_page", msg="Invalid hourly rate override (must be a non-negative number)."))
+
+    filament_rate_per_meter_override = None
+    if filament_rate_per_meter_override_raw:
+        try:
+            filament_rate_per_meter_override = float(filament_rate_per_meter_override_raw)
+            if filament_rate_per_meter_override < 0:
+                raise ValueError()
+        except Exception:
+            return redirect(url_for("recalculate_page", msg="Invalid filament $/meter override (must be a non-negative number)."))
+
     if apply_rate_profile:
         if not rate_profile_id:
             return redirect(url_for("recalculate_page", msg="Select a rate profile (or uncheck Apply hourly rate profile)."))
@@ -877,7 +899,7 @@ def recalculate_run():
 
     updated = 0
     if to_update:
-        if apply_rate_profile or apply_filament_profile:
+        if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
             from core.pricing import compute_costs_with_overrides
 
             def compute_fn(p, d, f):
@@ -887,6 +909,8 @@ def recalculate_run():
                     f,
                     filament_profile_id=filament_profile_id if apply_filament_profile else None,
                     rate_profile_id=rate_profile_id if apply_rate_profile else None,
+                    rate_per_hour_override=rate_per_hour_override,
+                    filament_rate_per_meter_override=filament_rate_per_meter_override,
                 )
 
             updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
@@ -911,6 +935,8 @@ def recalculate_run():
         "apply_rate_profile",
         "filament_profile_id",
         "rate_profile_id",
+        "rate_per_hour_override",
+        "filament_rate_per_meter_override",
     ):
         v = (request.form.get(key) or "").strip()
         if v:

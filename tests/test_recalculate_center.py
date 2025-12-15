@@ -103,6 +103,35 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertIn("/recalculate", resp.headers.get("Location", ""))
         self.assertEqual(self._read_total_cost(), "12.0")
 
+    def test_recalculate_run_with_manual_hourly_override_changes_total(self):
+        # Make material cost zero so hourly rate override drives total.
+        from core.config import HEADERS
+
+        with open(self.csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        rows[0]["filament_mm"] = "0"
+        with open(self.csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADERS)
+            writer.writeheader()
+            writer.writerow(rows[0])
+
+        resp = self.client.post(
+            "/recalculate/run",
+            data={
+                "job_uids": ["test-job-uid-1"],
+                "recompute_mode": "pricing_only",
+                "apply_rate_profile": "0",
+                "apply_filament_profile": "0",
+                "rate_per_hour_override": "12.0",
+                "filament_rate_per_meter_override": "",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/recalculate", resp.headers.get("Location", ""))
+        self.assertEqual(self._read_total_cost(), "12.0")
+
 
 if __name__ == "__main__":
     unittest.main()
