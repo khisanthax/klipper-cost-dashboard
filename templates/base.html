@@ -30,6 +30,8 @@
                     href="{{ url_for('reports_page') }}">Reports</a>
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/projects') %}active{% endif %}"
                     href="{{ url_for('projects_page') }}">Projects</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/recalculate') %}active{% endif %}"
+                    href="{{ url_for('recalculate_page') }}">Recalculate</a>
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
                     href="{{ url_for('settings_page') }}">Settings</a>
             </div>
