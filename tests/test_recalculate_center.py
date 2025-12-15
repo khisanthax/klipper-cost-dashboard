@@ -153,5 +153,36 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
             lines = [ln.strip() for ln in f.read().splitlines() if ln.strip()]
         self.assertGreaterEqual(len(lines), 1)
 
+    def test_recalculate_project_filter_limits_rows(self):
+        from core.config import HEADERS
+
+        # Add a second job row.
+        row2 = {h: "" for h in HEADERS}
+        row2.update(
+            {
+                "timestamp": "1700000100",
+                "job_uid": "test-job-uid-2",
+                "printer": "SV07",
+                "filename": "Other.gcode",
+                "duration_seconds": "1200",
+                "filament_mm": "0",
+                "status": "completed",
+                "total_cost": "0.00",
+            }
+        )
+        with open(self.csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADERS)
+            writer.writerow(row2)
+
+        def fake_load_assignments():
+            return {"test-job-uid-1": "proj1"}
+
+        with patch.object(self.app_module.projects, "load_assignments", fake_load_assignments):
+            resp = self.client.get("/recalculate?project=proj1")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("test-job-uid-1", body)
+        self.assertNotIn("test-job-uid-2", body)
+
 if __name__ == "__main__":
     unittest.main()
