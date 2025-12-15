@@ -172,6 +172,11 @@
                                             </div>
                                         </form>
 
+                                        <a class="btn btn-outline-secondary"
+                                           href="{{ url_for('recalculate_page', project=p.id) }}">
+                                            Advanced Recalculate…
+                                        </a>
+
                                         <form method="post" class="m-0">
                                             <input type="hidden" name="action" value="delete_project">
                                             <input type="hidden" name="project_id" value="{{ p.id }}">

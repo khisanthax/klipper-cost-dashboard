@@ -726,14 +726,31 @@ def reports_page():
 
 
 def _filter_history_rows_for_recalc(rows, args):
+    project_id = (args.get("project") or "").strip()
     printer = (args.get("printer") or "").strip()
     q = (args.get("q") or "").strip().lower()
     status = (args.get("status") or "").strip().lower()
 
     start_dt, end_dt, _range_label, _quick_range = get_date_range_from_params(args)
 
+    assignments = None
+    if project_id:
+        try:
+            assignments = projects.load_assignments()
+        except Exception:
+            assignments = {}
+
     filtered = []
     for r in rows:
+        if project_id:
+            uid = str(r.get("job_uid") or "").strip()
+            if not uid:
+                continue
+            if assignments is None:
+                continue
+            if assignments.get(uid) != project_id and assignments.get(projects.job_key(r)) != project_id:
+                continue
+
         if printer and printer.lower() != "all":
             if str(r.get("printer") or "").strip() != printer:
                 continue
@@ -788,6 +805,15 @@ def recalculate_page():
     filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args)
     filtered_total = len(filtered)
 
+    project_id = (request.args.get("project") or "").strip()
+    project_name = ""
+    if project_id:
+        try:
+            project = projects.load_projects().get(project_id)
+            project_name = project.name if project else ""
+        except Exception:
+            project_name = ""
+
     per_page = _parse_int(request.args.get("per_page"), 25)
     if per_page not in (10, 25, 50, 100):
         per_page = 25
@@ -807,6 +833,8 @@ def recalculate_page():
         "recalculate.html",
         error=error,
         message=message,
+        project_id=project_id,
+        project_name=project_name,
         printers=canonical_printers,
         filament_profiles=filament_profiles,
         rate_profiles=rate_profiles,
@@ -1008,6 +1036,7 @@ def recalculate_run():
     # Preserve current filters on redirect.
     redirect_params = {}
     for key in (
+        "project",
         "printer",
         "q",
         "status",
@@ -1214,6 +1243,8 @@ def recalculate_preview():
         "recalculate.html",
         error=error,
         message=msg,
+        project_id=(request.form.get("project") or "").strip(),
+        project_name="",
         printers=canonical_printers,
         filament_profiles=filament_profiles,
         rate_profiles=rate_profiles,
