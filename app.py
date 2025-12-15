@@ -723,6 +723,146 @@ def reports_page():
     )
 
 
+def _filter_history_rows_for_recalc(rows, args):
+    printer = (args.get("printer") or "").strip()
+    q = (args.get("q") or "").strip().lower()
+    status = (args.get("status") or "").strip().lower()
+
+    start_dt, end_dt, _range_label, _quick_range = get_date_range_from_params(args)
+
+    filtered = []
+    for r in rows:
+        if printer and printer.lower() != "all":
+            if str(r.get("printer") or "").strip() != printer:
+                continue
+
+        if status and status != "all":
+            if str(r.get("status") or "").strip().lower() != status:
+                continue
+
+        if q:
+            fname = str(r.get("filename") or "").lower()
+            if q not in fname:
+                continue
+
+        if start_dt or end_dt:
+            ts_raw = r.get("timestamp_raw")
+            if not ts_raw:
+                continue
+            try:
+                row_dt = ts_to_local_dt(float(ts_raw))
+            except Exception:
+                continue
+            if start_dt and row_dt < start_dt:
+                continue
+            if end_dt and row_dt > end_dt:
+                continue
+
+        filtered.append(r)
+
+    return filtered, start_dt, end_dt
+
+
+def _parse_int(value, default):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+@app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
+def recalculate_page():
+    """
+    Recalculate Center (Phase 1): select historical jobs by job_uid and rerun pricing.
+
+    Data safety:
+      - Never deletes rows
+      - Never changes job_uid / printer / filename / timestamps
+      - Only rewrites computed pricing fields (same behavior as existing bulk recalc)
+    """
+    rows, error = load_rows_raw(CSV_FILE)
+    message = request.args.get("msg", "").strip()
+
+    filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args)
+    filtered_total = len(filtered)
+
+    per_page = _parse_int(request.args.get("per_page"), 25)
+    if per_page not in (10, 25, 50, 100):
+        per_page = 25
+    page = max(1, _parse_int(request.args.get("page"), 1))
+
+    pages = max(1, (filtered_total + per_page - 1) // per_page)
+    page = min(page, pages)
+
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    rows_page = filtered[start_idx:end_idx]
+
+    canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
+    return render_template(
+        "recalculate.html",
+        error=error,
+        message=message,
+        printers=canonical_printers,
+        selected_printer=request.args.get("printer", "All"),
+        q=request.args.get("q", "").strip(),
+        status=request.args.get("status", "All"),
+        quick_range=request.args.get("quick_range", "").strip(),
+        start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
+        end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
+        rows_page=rows_page,
+        pager={
+            "page": page,
+            "per_page": per_page,
+            "total": filtered_total,
+            "pages": pages,
+            "has_prev": page > 1,
+            "has_next": page < pages,
+        },
+    )
+
+
+@app.route("/recalculate/run", methods=["POST"], endpoint="recalculate_run")
+def recalculate_run():
+    """Run a bulk recalc for selected job_uids (Phase 1)."""
+    select_filtered = (request.form.get("select_filtered") or "").strip() == "1"
+
+    rows, error = load_rows_raw(CSV_FILE)
+    if error:
+        return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
+
+    existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
+
+    if select_filtered:
+        filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form)
+        requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
+    else:
+        requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
+
+    missing = {u for u in requested_uids if u not in existing_uids}
+    to_update = [u for u in requested_uids if u in existing_uids]
+
+    updated = 0
+    if to_update:
+        updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_costs)
+
+    skipped = len(missing)
+
+    # Preserve current filters on redirect.
+    redirect_params = {}
+    for key in ("printer", "q", "status", "start_date", "end_date", "quick_range", "per_page", "page"):
+        v = (request.form.get(key) or "").strip()
+        if v:
+            redirect_params[key] = v
+
+    msg = f"Recalculated costs for {updated} job(s)."
+    if skipped:
+        msg += f" Skipped {skipped} missing job(s)."
+    redirect_params["msg"] = msg
+
+    return redirect(url_for("recalculate_page", **redirect_params))
+
+
 @app.route("/projects", methods=["GET", "POST"])
 def projects_page():
     """

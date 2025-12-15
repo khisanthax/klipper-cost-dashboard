@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1 class="h3 mb-0">Recalculate Center</h1>
+        <div class="text-muted small">Bulk re-run pricing for selected historical jobs (history only; no live jobs).</div>
+    </div>
+</div>
+
+{% if error %}
+<div class="alert alert-danger" role="alert">{{ error }}</div>
+{% endif %}
+
+{% if message %}
+<div class="alert alert-success" role="alert">{{ message }}</div>
+{% endif %}
+
+<div class="card mb-3">
+    <div class="card-header">
+        Filters
+    </div>
+    <div class="card-body">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Printer</label>
+                <select name="printer" class="form-select">
+                    <option value="All" {% if (selected_printer or 'All') == 'All' %}selected{% endif %}>All</option>
+                    {% for p in printers %}
+                    <option value="{{ p }}" {% if selected_printer == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Status</label>
+                <select name="status" class="form-select">
+                    {% set s = (status or 'All') %}
+                    <option value="All" {% if s == 'All' or s == 'all' %}selected{% endif %}>All</option>
+                    <option value="COMPLETED" {% if s|lower == 'completed' %}selected{% endif %}>COMPLETED</option>
+                    <option value="CANCELLED" {% if s|lower == 'cancelled' %}selected{% endif %}>CANCELLED</option>
+                    <option value="FAILED" {% if s|lower == 'failed' %}selected{% endif %}>FAILED</option>
+                    <option value="PRINTING" {% if s|lower == 'printing' %}selected{% endif %}>PRINTING</option>
+                    <option value="PAUSED" {% if s|lower == 'paused' %}selected{% endif %}>PAUSED</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Filename contains</label>
+                <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="e.g. cube_petg">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Quick range</label>
+                <select name="quick_range" class="form-select">
+                    <option value="" {% if not quick_range %}selected{% endif %}>All time</option>
+                    <option value="last7" {% if quick_range == 'last7' %}selected{% endif %}>Last 7 days</option>
+                    <option value="last30" {% if quick_range == 'last30' %}selected{% endif %}>Last 30 days</option>
+                    <option value="this_month" {% if quick_range == 'this_month' %}selected{% endif %}>This month</option>
+                    <option value="last_month" {% if quick_range == 'last_month' %}selected{% endif %}>Last month</option>
+                </select>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Start date</label>
+                <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">End date</label>
+                <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Rows per page</label>
+                <select name="per_page" class="form-select" onchange="this.form.page.value='1'; this.form.submit();">
+                    {% for n in [10, 25, 50, 100] %}
+                    <option value="{{ n }}" {% if pager.per_page == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+                <input type="hidden" name="page" value="{{ pager.page }}">
+            </div>
+
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary">Apply</button>
+                <a class="btn btn-outline-secondary" href="{{ url_for('recalculate_page') }}">Reset</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+            Jobs
+            <span class="text-muted small ms-2">Filtered: <span class="fw-semibold">{{ pager.total }}</span></span>
+        </div>
+        <div class="text-muted small" id="kcd-selected-summary"></div>
+    </div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('recalculate_run') }}" id="kcd-recalc-form">
+            <input type="hidden" name="select_filtered" id="kcd-select-filtered" value="0">
+
+            {# Preserve filter params for run + redirect #}
+            <input type="hidden" name="printer" value="{{ selected_printer or 'All' }}">
+            <input type="hidden" name="status" value="{{ status or 'All' }}">
+            <input type="hidden" name="q" value="{{ q or '' }}">
+            <input type="hidden" name="quick_range" value="{{ quick_range or '' }}">
+            <input type="hidden" name="start_date" value="{{ start_date or '' }}">
+            <input type="hidden" name="end_date" value="{{ end_date or '' }}">
+            <input type="hidden" name="per_page" value="{{ pager.per_page }}">
+            <input type="hidden" name="page" value="{{ pager.page }}">
+
+            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-select-page">Select page</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-select-filtered-btn">Select all filtered</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-clear">Clear</button>
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn">Recalculate selected</button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-striped table-hover table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th style="width: 36px;">
+                                <input type="checkbox" class="form-check-input" id="kcd-toggle-all">
+                            </th>
+                            <th>Printer</th>
+                            <th>Filename</th>
+                            <th>Status</th>
+                            <th class="text-end">Hours</th>
+                            <th class="text-end">Total ($)</th>
+                            <th class="text-muted">Job UID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in rows_page %}
+                        <tr>
+                            <td>
+                                <input type="checkbox"
+                                       class="form-check-input kcd-job-cb"
+                                       name="job_uids"
+                                       value="{{ r.job_uid }}">
+                            </td>
+                            <td class="text-nowrap">{{ r.printer }}</td>
+                            <td class="text-truncate" style="max-width: 420px;" title="{{ r.filename }}">{{ r.filename }}</td>
+                            <td class="text-nowrap">{{ r.status }}</td>
+                            <td class="text-end">{{ "%.2f"|format(r.duration_hours|float) }}</td>
+                            <td class="text-end">{{ "%.2f"|format(r.total_cost|float) }}</td>
+                            <td class="text-muted small text-truncate" style="max-width: 240px;" title="{{ r.job_uid }}">{{ r.job_uid }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not rows_page %}
+                        <tr>
+                            <td colspan="7" class="text-muted text-center py-4">No jobs match the current filters.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    </div>
+    <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="text-muted small">Page {{ pager.page }} of {{ pager.pages }}</div>
+        <div class="btn-group">
+            <a class="btn btn-sm btn-outline-secondary {% if not pager.has_prev %}disabled{% endif %}"
+               href="{{ url_for('recalculate_page',
+                                printer=(selected_printer or 'All'),
+                                status=(status or 'All'),
+                                q=(q or ''),
+                                quick_range=(quick_range or ''),
+                                start_date=(start_date or ''),
+                                end_date=(end_date or ''),
+                                per_page=pager.per_page,
+                                page=pager.page-1) }}">Prev</a>
+            <a class="btn btn-sm btn-outline-secondary {% if not pager.has_next %}disabled{% endif %}"
+               href="{{ url_for('recalculate_page',
+                                printer=(selected_printer or 'All'),
+                                status=(status or 'All'),
+                                q=(q or ''),
+                                quick_range=(quick_range or ''),
+                                start_date=(start_date or ''),
+                                end_date=(end_date or ''),
+                                per_page=pager.per_page,
+                                page=pager.page+1) }}">Next</a>
+        </div>
+    </div>
+</div>
+
+<script>
+(() => {
+  const totalFiltered = {{ pager.total|int }};
+  const selectFilteredInput = document.getElementById('kcd-select-filtered');
+  const selectedSummary = document.getElementById('kcd-selected-summary');
+  const recalcBtn = document.getElementById('kcd-recalc-btn');
+
+  function getCheckboxes() {
+    return Array.from(document.querySelectorAll('.kcd-job-cb'));
+  }
+
+  function updateSummary() {
+    const checked = getCheckboxes().filter(cb => cb.checked).length;
+    const selectFiltered = (selectFilteredInput.value === '1');
+    if (selectFiltered) {
+      selectedSummary.textContent = `Selected: all filtered (${totalFiltered})`;
+    } else {
+      selectedSummary.textContent = checked ? `Selected: ${checked}` : '';
+    }
+    recalcBtn.disabled = (!selectFiltered && checked === 0);
+  }
+
+  document.getElementById('kcd-toggle-all').addEventListener('change', (e) => {
+    selectFilteredInput.value = '0';
+    getCheckboxes().forEach(cb => cb.checked = e.target.checked);
+    updateSummary();
+  });
+
+  document.getElementById('kcd-select-page').addEventListener('click', () => {
+    selectFilteredInput.value = '0';
+    getCheckboxes().forEach(cb => cb.checked = true);
+    updateSummary();
+  });
+
+  document.getElementById('kcd-select-filtered-btn').addEventListener('click', () => {
+    selectFilteredInput.value = '1';
+    getCheckboxes().forEach(cb => cb.checked = true);
+    updateSummary();
+  });
+
+  document.getElementById('kcd-clear').addEventListener('click', () => {
+    selectFilteredInput.value = '0';
+    document.getElementById('kcd-toggle-all').checked = false;
+    getCheckboxes().forEach(cb => cb.checked = false);
+    updateSummary();
+  });
+
+  getCheckboxes().forEach(cb => cb.addEventListener('change', () => {
+    selectFilteredInput.value = '0';
+    updateSummary();
+  }));
+
+  updateSummary();
+})();
+</script>
+{% endblock %}
