@@ -807,12 +807,17 @@ def recalculate_page():
 
     project_id = (request.args.get("project") or "").strip()
     project_name = ""
-    if project_id:
-        try:
-            project = projects.load_projects().get(project_id)
+    project_options = []
+    try:
+        projects_map = projects.load_projects()
+        project_options = [{"id": pid, "name": p.name} for pid, p in projects_map.items()]
+        project_options.sort(key=lambda x: (x.get("name") or "").lower())
+        if project_id:
+            project = projects_map.get(project_id)
             project_name = project.name if project else ""
-        except Exception:
-            project_name = ""
+    except Exception:
+        project_options = []
+        project_name = ""
 
     per_page = _parse_int(request.args.get("per_page"), 25)
     if per_page not in (10, 25, 50, 100):
@@ -835,6 +840,7 @@ def recalculate_page():
         message=message,
         project_id=project_id,
         project_name=project_name,
+        project_options=project_options,
         printers=canonical_printers,
         filament_profiles=filament_profiles,
         rate_profiles=rate_profiles,
@@ -1239,12 +1245,27 @@ def recalculate_preview():
     if missing:
         msg += f" {len(missing)} selected job(s) were missing from history."
 
+    project_id = (request.form.get("project") or "").strip()
+    project_name = ""
+    project_options = []
+    try:
+        projects_map = projects.load_projects()
+        project_options = [{"id": pid, "name": p.name} for pid, p in projects_map.items()]
+        project_options.sort(key=lambda x: (x.get("name") or "").lower())
+        if project_id:
+            project = projects_map.get(project_id)
+            project_name = project.name if project else ""
+    except Exception:
+        project_options = []
+        project_name = ""
+
     return render_template(
         "recalculate.html",
         error=error,
         message=msg,
-        project_id=(request.form.get("project") or "").strip(),
-        project_name="",
+        project_id=project_id,
+        project_name=project_name,
+        project_options=project_options,
         printers=canonical_printers,
         filament_profiles=filament_profiles,
         rate_profiles=rate_profiles,
