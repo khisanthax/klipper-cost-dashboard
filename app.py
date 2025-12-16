@@ -436,15 +436,17 @@ def job_cancel():
     printer_name = norm.printer_name
     filename = norm.filename
 
-    if not filename:
-        return jsonify({"success": False, "error": "Missing required field: filename"}), 400
-
     elapsed_seconds = None
     if elapsed_raw is not None and str(elapsed_raw).strip() != "":
         try:
             elapsed_seconds = float(elapsed_raw)
         except Exception:
             return jsonify({"success": False, "error": "elapsed_seconds must be a number"}), 400
+
+    # Prefer the currently active job for this printer (more reliable than inbound payload).
+    active_before = live.get_job(printer_name)
+    if active_before and not filename:
+        filename = str(active_before.get("filename") or "").strip()
 
     # Mark canceled in live state (this also removes it from active jobs).
     live_result = live.cancel_job(printer_name, reason)
@@ -453,6 +455,40 @@ def job_cancel():
 
     if elapsed_seconds is None:
         elapsed_seconds = 0.0
+
+    # Idempotency + safety:
+    # - If there's no active job to cancel, treat as a no-op and avoid duplicating history rows.
+    # - If the most recent history row for this printer/filename is already completed/canceled,
+    #   don't append a new canceled row.
+    if live_result is None:
+        def _find_recent_status():
+            rows, _err = load_rows_raw(CSV_FILE)
+            if not rows:
+                return None
+            target_printer = printer_name
+            target_filename = str(filename or "").strip()
+            for r in reversed(rows):
+                if (r.get("printer") or "") != target_printer:
+                    continue
+                if target_filename and (r.get("filename") or "") != target_filename:
+                    continue
+                status = (r.get("status") or "").strip().lower()
+                try:
+                    ts = float(r.get("timestamp") or 0.0)
+                except Exception:
+                    ts = 0.0
+                return {"status": status, "timestamp": ts, "row": r}
+            return None
+
+        recent = _find_recent_status()
+        if recent:
+            age = max(0.0, time.time() - float(recent.get("timestamp") or 0.0))
+            recent_status = (recent.get("status") or "").lower()
+            if recent_status in ("canceled", "cancelled") and age < 6 * 3600:
+                return jsonify({"success": True, "job": None, "history": "already_canceled"}), 200
+            if recent_status in ("completed", "complete") and age < 6 * 3600:
+                return jsonify({"success": True, "job": None, "history": "already_completed"}), 200
+        return jsonify({"success": True, "job": None, "history": "no_active_job"}), 200
 
     # Record a canceled job in history so it appears in Print History.
     ts = time.time()
