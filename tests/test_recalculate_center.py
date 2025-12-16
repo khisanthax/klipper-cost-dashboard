@@ -1,4 +1,5 @@
 import csv
+import csv
 import os
 import tempfile
 import unittest
@@ -45,16 +46,18 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.app_module.DATA_DIR = self._orig_data_dir
         self._tmp.cleanup()
 
-    def _read_total_cost(self):
+    def _read_total_cost(self, job_uid="test-job-uid-1"):
         from core.config import HEADERS
 
         with open(self.csv_path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].get("job_uid"), "test-job-uid-1")
+        self.assertTrue(rows)
         self.assertEqual(set(rows[0].keys()), set(HEADERS))
-        return rows[0].get("total_cost")
+        for r in rows:
+            if r.get("job_uid") == job_uid:
+                return r.get("total_cost")
+        self.fail(f"job_uid not found in CSV: {job_uid}")
 
     def test_recalculate_run_updates_known_job_uid(self):
         def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
@@ -189,6 +192,52 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         record = _json.loads(lines[-1])
         self.assertEqual(record.get("count_updated"), 1)
         self.assertIn("totals", record)
+
+    def test_recalculate_requires_confirmation_for_large_runs(self):
+        from core.config import HEADERS
+
+        more_uids = []
+        with open(self.csv_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=HEADERS)
+            for i in range(2, 54):
+                uid = f"bulk-{i}"
+                more_uids.append(uid)
+                row = {h: "" for h in HEADERS}
+                row.update(
+                    {
+                        "timestamp": str(1700000000 + i),
+                        "job_uid": uid,
+                        "printer": "SV08",
+                        "filename": f"f{i}.gcode",
+                        "duration_seconds": "60",
+                        "filament_mm": "0",
+                        "status": "completed",
+                        "total_cost": "0.00",
+                    }
+                )
+                writer.writerow(row)
+
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+            return {"total_cost": 5.0}
+
+        before = self._read_total_cost()
+        with patch.object(self.app_module, "compute_costs", fake_compute_costs):
+            resp = self.client.post(
+                "/recalculate/run",
+                data={"job_uids": ["test-job-uid-1"] + more_uids},
+                follow_redirects=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._read_total_cost(), before)
+
+        with patch.object(self.app_module, "compute_costs", fake_compute_costs):
+            resp = self.client.post(
+                "/recalculate/run",
+                data={"job_uids": ["test-job-uid-1"] + more_uids, "confirm": "RECALC"},
+                follow_redirects=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._read_total_cost(), "5.0")
 
 
 if __name__ == "__main__":
