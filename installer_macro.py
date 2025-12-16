@@ -3,6 +3,7 @@
 # Description: Macro integration helpers for Print Cost Dashboard installer.
 #  - Finds and patches END_PRINT-style macros to send cost data (KCD block).
 #  - Finds and patches START_PRINT-style macros to call KCD_JOB_START.
+#  - Finds and patches CANCEL_PRINT-style macros to call KCD_JOB_CANCEL.
 #  - STRICT mode for end macros: insert KCD block before heater/fan/stepper shutdown.
 #  - CLEAN mode: remove only KCD marker blocks we previously inserted.
 #  - Optional user hook: "### KCD_INSERT_CODE ###" inside a macro to control insertion.
@@ -24,6 +25,9 @@ KCD_END_END_MARKER = "### KCD END (END_PRINT)"
 
 KCD_START_START_MARKER = "### KCD START (START_PRINT)"
 KCD_END_START_MARKER = "### KCD END (START_PRINT)"
+
+KCD_START_CANCEL_MARKER = "### KCD START (CANCEL_PRINT)"
+KCD_END_CANCEL_MARKER = "### KCD END (CANCEL_PRINT)"
 
 
 def _clean_marked_block(block_lines, start_marker, end_marker):
@@ -469,6 +473,247 @@ def find_start_macros_in_dir(config_dir):
     return macros
 
 
+def find_cancel_macros_in_dir(config_dir):
+    """
+    Scans all .cfg files in the directory for macros that look like print cancel macros.
+    Returns a list of (filename, macro_name, line_number) tuples.
+    """
+    if not os.path.exists(config_dir):
+        return []
+
+    macros = []
+    target_names = ["CANCEL_PRINT", "PRINT_CANCEL", "CANCEL_JOB", "ABORT_PRINT"]
+    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+
+    for path in cfg_files:
+        filename = os.path.basename(path)
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+            for i, line in enumerate(lines):
+                line_stripped = line.strip()
+                if line_stripped.startswith("[gcode_macro"):
+                    match = re.search(r"\[gcode_macro\s+([^\]]+)\]", line_stripped, re.IGNORECASE)
+                    if match:
+                        name = match.group(1).strip()
+                        upper_name = name.upper()
+                        if any(t in upper_name for t in target_names):
+                            macros.append((filename, name, i + 1))
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    return macros
+
+
+def insert_cancel_macro_call(macro_name, path, macro_to_call):
+    """
+    Inserts a macro call line (e.g., 'KCD_JOB_CANCEL') into an existing cancel macro's gcode block.
+
+    - CLEAN: remove previously inserted CANCEL_PRINT block between the CANCEL markers.
+    - HOOK: if '### KCD_INSERT_CODE ###' exists inside the macro, we replace that line
+      with the KCD block.
+    - AUTO: otherwise, insert before CANCEL_PRINT_BASE if present; else insert at top of gcode.
+    """
+    if not os.path.exists(path):
+        return False, "File not found"
+
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return False, f"Read error: {e}"
+
+    start_index, end_index = _find_macro_block(lines, macro_name)
+    if start_index == -1:
+        return False, f"Macro '{macro_name}' not found"
+
+    macro_block = lines[start_index:end_index]
+
+    # If a KCD CANCEL_PRINT block is already present, skip repatching.
+    if any(KCD_START_CANCEL_MARKER in ln for ln in macro_block) and any(
+        KCD_END_CANCEL_MARKER in ln for ln in macro_block
+    ):
+        return True, "Call already present"
+
+    # CLEAN: remove any previous KCD CANCEL_PRINT block
+    macro_block = _clean_marked_block(macro_block, KCD_START_CANCEL_MARKER, KCD_END_CANCEL_MARKER)
+    lines[start_index:end_index] = macro_block
+    end_index = start_index + len(macro_block)
+
+    # Check if macro already calls macro_to_call (without our markers)
+    for i in range(start_index, end_index):
+        if macro_to_call in lines[i]:
+            return True, "Call already present"
+
+    # Determine insertion index:
+    # 1) Try user hook
+    insertion_index, end_index, used_hook = _apply_insert_hook_or_auto(
+        lines, start_index, end_index, patterns_for_auto=None
+    )
+
+    # Determine indentation
+    macro_block = lines[start_index:end_index]
+    indent = _detect_indent(macro_block)
+
+    # Build KCD CANCEL block
+    kcd_block = [
+        f"{indent}{KCD_START_CANCEL_MARKER} - DO NOT MODIFY OR DELETE THIS BLOCK ###\n",
+        f"{indent}# KCD: log print cancel\n",
+        f"{indent}{macro_to_call}\n",
+        f"{indent}{KCD_END_CANCEL_MARKER} ###\n",
+        "\n",
+    ]
+
+    if insertion_index is not None:
+        # Hook used: we already removed the hook line; just insert here
+        lines[insertion_index:insertion_index] = kcd_block
+    else:
+        # AUTO mode:
+        # Prefer inserting before CANCEL_PRINT_BASE if present.
+        cancel_base_idx = None
+        for i in range(start_index, end_index):
+            if re.search(r"\bCANCEL_PRINT_BASE\b", lines[i], re.IGNORECASE):
+                cancel_base_idx = i
+                break
+        if cancel_base_idx is not None:
+            lines[cancel_base_idx:cancel_base_idx] = kcd_block
+        else:
+            # Otherwise insert immediately after 'gcode:' line, or create 'gcode:'.
+            gcode_start = -1
+            for i in range(start_index, end_index):
+                if lines[i].strip().startswith("gcode:"):
+                    gcode_start = i
+                    break
+
+            if gcode_start == -1:
+                gcode_line_index = start_index + 1
+                lines.insert(gcode_line_index, "gcode:\n")
+                lines[gcode_line_index + 1:gcode_line_index + 1] = kcd_block
+            else:
+                lines[gcode_start + 1:gcode_start + 1] = kcd_block
+
+    try:
+        with open(path, "w") as f:
+            f.writelines(lines)
+        return True, "Success"
+    except Exception as e:
+        return False, f"Write error: {e}"
+
+
+def create_default_cancel_print_macro(path, printer_name):
+    """
+    Appends a default CANCEL_PRINT macro to the file.
+    """
+    content = f"""
+
+[gcode_macro CANCEL_PRINT]
+description: Cancel print macro (auto-generated)
+rename_existing: CANCEL_PRINT_BASE
+gcode:
+    {KCD_START_CANCEL_MARKER} - DO NOT MODIFY OR DELETE THIS BLOCK ###
+    # KCD: log print cancel
+    KCD_JOB_CANCEL
+    {KCD_END_CANCEL_MARKER} ###
+
+    CANCEL_PRINT_BASE
+"""
+    try:
+        with open(path, "a") as f:
+            f.write(content)
+        return True, "Created new CANCEL_PRINT macro."
+    except Exception as e:
+        return False, f"Failed to append macro: {e}"
+
+
+def prompt_cancel_macro_insertion(printer_name, config_dir, default_macro=None, default_file=None):
+    """
+    Interactive wizard to find and patch a cancel macro to call KCD_JOB_CANCEL.
+    Returns (macro_name, target_file) if patched or already present, else (None, None).
+    """
+    print("\n=== Automatic Cancel Macro Integration ===")
+    print("Scanning for CANCEL_PRINT macros in all .cfg files...")
+
+    # Fast path if defaults provided
+    if default_macro and default_file:
+        full_path = os.path.join(config_dir, default_file)
+        success, msg = insert_cancel_macro_call(default_macro, full_path, "KCD_JOB_CANCEL")
+        if success:
+            if msg == "Call already present":
+                print("  - Call already present; skipping.")
+            else:
+                print(f"  - Patched {default_macro} in {default_file}.")
+            return default_macro, default_file
+        else:
+            print(f"  - Default cancel macro patch failed ({msg}), falling back to manual selection.")
+
+    macros = find_cancel_macros_in_dir(config_dir)
+
+    target_macro = None
+    target_file = None
+
+    if macros:
+        print(f"Found {len(macros)} potential cancel macro(s):")
+        for i, (fname, name, line) in enumerate(macros):
+            print(f"  {i+1}) {name} in {fname} (line {line})")
+        print("  0) None of these / Enter manually")
+        choice = input("Select cancel macro to patch [1] (or 's' to skip): ").strip()
+        if choice.lower() == "s":
+            print("Skipping cancel macro integration.")
+            return None, None
+        if not choice:
+            choice = "1"
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(macros):
+                target_file = macros[idx - 1][0]
+                target_macro = macros[idx - 1][1]
+        except ValueError:
+            target_macro = None
+    else:
+        print("No obvious CANCEL_PRINT macros found.")
+
+    if not target_macro:
+        print("\nOptions:")
+        print("  1) Enter macro name manually (assumes it is in printer.cfg)")
+        print("  2) Create a new default [gcode_macro CANCEL_PRINT] in printer.cfg")
+        print("  3) Skip")
+
+        ans = input("Select option [2]: ").strip()
+        if ans == "1":
+            target_macro = input("Enter macro name: ").strip()
+            target_file = "printer.cfg"
+        elif ans == "3" or ans.lower() == "s":
+            print("Skipping cancel macro integration.")
+            return None, None
+        else:
+            target_macro = "CANCEL_PRINT"
+            target_file = "printer.cfg"
+            full_path = os.path.join(config_dir, target_file)
+            success, msg = create_default_cancel_print_macro(full_path, printer_name)
+            if success:
+                print(f"  - {msg}")
+            else:
+                print(f"  - Failed: {msg}")
+            return target_macro, target_file
+
+    if not target_macro:
+        return None, None
+
+    full_path = os.path.join(config_dir, target_file)
+    print(f"Attempting to patch cancel macro '{target_macro}' in {target_file}...")
+    success, msg = insert_cancel_macro_call(target_macro, full_path, "KCD_JOB_CANCEL")
+    if success:
+        if msg == "Call already present":
+            print(f"  - {msg}, skipping.")
+        else:
+            print("  - Success! Added KCD_JOB_CANCEL via KCD block.")
+    else:
+        print(f"  - Failed: {msg}")
+        print("  - Please add the following line to your cancel macro manually:")
+        print("    KCD_JOB_CANCEL")
+        return None, None
+
+    return target_macro, target_file
+
 def insert_macro_call(macro_name, path, macro_to_call):
     """
     Inserts a macro call line (e.g., 'KCD_JOB_START') into an existing macro's gcode block.
@@ -676,3 +921,4 @@ def run_macro_integration(printer_name: str, config_dir: str) -> None:
     """
     prompt_macro_insertion(printer_name, config_dir)
     prompt_start_macro_insertion(printer_name, config_dir)
+    prompt_cancel_macro_insertion(printer_name, config_dir)
