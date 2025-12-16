@@ -197,6 +197,7 @@
                                             <thead class="table-light">
                                                 <tr>
                                                     <th data-col="date">Date</th>
+                                                    <th style="width: 72px;" data-col="thumbnail">Thumb</th>
                                                     <th data-col="printer">Printer</th>
                                                     <th data-col="filename">Filename</th>
                                                     <th data-col="status">Status</th>
@@ -210,6 +211,14 @@
                                                 {% for j in p.jobs %}
                                                 <tr>
                               <td class="text-nowrap" data-sort="{{ j.timestamp_raw or 0 }}" data-sort-key="date">{{ j.timestamp }}</td>
+                              <td>
+                                  {% if j._thumbs_enabled %}
+                                      {% set thumb_url = j._thumb_small %}
+                                      {% set size = "small" %}
+                                      {% set alt = j.filename %}
+                                      {% include "partials/_thumbnail.html" %}
+                                  {% endif %}
+                              </td>
                               <td class="text-nowrap" data-sort="{{ j.printer|lower }}" data-sort-key="printer">{{ j.printer }}</td>
                               <td class="text-break" data-sort="{{ j.filename|lower }}" data-sort-key="filename">{{ j.filename }}</td>
                              <td class="text-nowrap" data-sort="{{ j.status|lower }}" data-sort-key="status">{{ j.status }}</td>
@@ -559,6 +568,7 @@
                     <thead class="table-light">
                         <tr>
                             <th style="width: 1%;" data-col="__select__"></th>
+                            <th style="width: 72px;" data-col="thumbnail">Thumb</th>
                             <th data-col="date" data-sort-key="date" role="button" class="kcd-sortable">Date <span class="text-muted small kcd-sort-indicator"></span></th>
                             <th data-col="printer" data-sort-key="printer" role="button" class="kcd-sortable">Printer <span class="text-muted small kcd-sort-indicator"></span></th>
                             <th data-col="filename" data-sort-key="filename" role="button" class="kcd-sortable">Filename <span class="text-muted small kcd-sort-indicator"></span></th>
@@ -574,6 +584,14 @@
                               <td>
                                  <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}">
                               </td>
+                             <td>
+                                 {% if j._thumbs_enabled %}
+                                     {% set thumb_url = j._thumb_small %}
+                                     {% set size = "small" %}
+                                     {% set alt = j.filename %}
+                                     {% include "partials/_thumbnail.html" %}
+                                 {% endif %}
+                             </td>
                              <td class="text-nowrap">{{ j.timestamp }}</td>
                              <td class="text-nowrap">{{ j.printer }}</td>
                              <td class="text-break">{{ j.filename }}</td>

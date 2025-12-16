@@ -50,7 +50,8 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
-        visible = [h for h in headers if h != "job_uid"]
+        # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
+        visible = [h for h in headers if h not in ("job_uid", "thumbnail")]
         data = {"visible_columns": visible, "hidden_printers": []}
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
@@ -63,19 +64,19 @@ def load_display_settings(display_file, headers):
         with open(display_file) as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"visible_columns": [h for h in headers if h != "job_uid"], "hidden_printers": []}
+                return {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")], "hidden_printers": []}
             cols = data.get("visible_columns", headers)
             cols = [c for c in cols if c in headers]
             cols = [c for c in cols if c != "job_uid"]
             if not cols:
-                cols = [h for h in headers if h != "job_uid"]
+                cols = [h for h in headers if h not in ("job_uid", "thumbnail")]
             hidden = data.get("hidden_printers", [])
             if not isinstance(hidden, list):
                 hidden = []
             hidden = [str(p) for p in hidden if str(p).strip()]
             return {"visible_columns": cols, "hidden_printers": hidden}
     except Exception:
-        return {"visible_columns": [h for h in headers if h != "job_uid"], "hidden_printers": []}
+        return {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")], "hidden_printers": []}
 
 
 def save_display_settings(display_file, headers, visible_columns):

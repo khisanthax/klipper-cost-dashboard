@@ -279,6 +279,14 @@
                             </div>
                         </div>
                         <div class="card-text small mt-3">
+                            {% if ps._thumb_cards_enabled %}
+                            <div class="mb-3">
+                                {% set thumb_url = ps._thumb_card %}
+                                {% set size = "card" %}
+                                {% set alt = ps.last_job_name or ("Thumbnail " ~ printer_name) %}
+                                {% include "partials/_thumbnail.html" %}
+                            </div>
+                            {% endif %}
                             <div class="mb-2">
                                 <span class="text-muted">Last Job:</span>
                                 <span class="fw-semibold">{{ ps.last_job_name[:30] }}{% if ps.last_job_name|length > 30 %}...{% endif %}</span>
@@ -314,6 +322,7 @@
                 <thead class="table-light">
                     <tr>
                         <th>Printer</th>
+                        <th style="width: 72px;">Thumb</th>
                         <th>File</th>
                         <th>Status</th>
                         <th>Elapsed</th>
@@ -330,6 +339,14 @@
                                   style="background-color: {{ printer_colors.get(job.printer_name, '#eee') }}">
                                 {{ job.printer_name }}
                             </span>
+                        </td>
+                        <td>
+                            {% if job._thumb_cards_enabled %}
+                                {% set thumb_url = job._thumb_small %}
+                                {% set size = "small" %}
+                                {% set alt = job.filename %}
+                                {% include "partials/_thumbnail.html" %}
+                            {% endif %}
                         </td>
                         <td>{{ job.filename }}</td>
                         <td>
@@ -560,7 +577,14 @@
                             {% for h in headers %}
                             {% if h in visible %}
                             <td class="col-{{ h|replace(' ', '-')|lower }}">
-                                {% if h == 'printer' %}
+                                {% if h == 'thumbnail' %}
+                                    {% if row.get('_thumbs_enabled') %}
+                                        {% set thumb_url = row.get('_thumb_small') %}
+                                        {% set size = "small" %}
+                                        {% set alt = row.get('filename', 'Thumbnail') %}
+                                        {% include "partials/_thumbnail.html" %}
+                                    {% endif %}
+                                {% elif h == 'printer' %}
                                 <span class="printer-tag"
                                       style="background-color: {{ printer_colors.get(row.get(h, ''), '#eee') }}">
                                     {{ row.get(h, '') }}

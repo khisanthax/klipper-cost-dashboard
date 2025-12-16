@@ -1,0 +1,19 @@
+{# Usage:
+   {% set thumb_url = ... %}
+   {% set size = "small" or "card" %}
+   {% set alt = ... %}
+   {% include "partials/_thumbnail.html" %}
+ #}
+{% set _size = size|default("small") %}
+{% if thumb_url %}
+  <img
+    src="{{ thumb_url }}"
+    alt="{{ alt|default('Thumbnail') }}"
+    class="kcd-thumb kcd-thumb-{{ _size }}"
+    loading="lazy"
+    decoding="async"
+  >
+{% else %}
+  <span class="kcd-thumb-placeholder kcd-thumb-{{ _size }}" aria-hidden="true"></span>
+{% endif %}
+
