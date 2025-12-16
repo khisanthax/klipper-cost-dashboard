@@ -222,6 +222,12 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="kcd-clear">Clear</button>
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <div class="d-none" id="kcd-confirm-wrap">
+                        <input type="text"
+                               name="confirm"
+                               class="form-control form-control-sm"
+                               placeholder="Type RECALC to confirm">
+                    </div>
                     <button type="submit"
                             class="btn btn-sm btn-outline-primary"
                             id="kcd-preview-btn"
@@ -358,10 +364,12 @@
 <script>
 (() => {
   const totalFiltered = {{ pager.total|int }};
+  const confirmThreshold = 50;
   const selectFilteredInput = document.getElementById('kcd-select-filtered');
   const selectedSummary = document.getElementById('kcd-selected-summary');
   const recalcBtn = document.getElementById('kcd-recalc-btn');
   const previewBtn = document.getElementById('kcd-preview-btn');
+  const confirmWrap = document.getElementById('kcd-confirm-wrap');
 
   function getCheckboxes() {
     return Array.from(document.querySelectorAll('.kcd-job-cb'));
@@ -377,6 +385,11 @@
     }
     recalcBtn.disabled = (!selectFiltered && checked === 0);
     previewBtn.disabled = (!selectFiltered && checked === 0);
+
+    const needsConfirm = (selectFiltered && totalFiltered > confirmThreshold) || (!selectFiltered && checked > confirmThreshold);
+    if (confirmWrap) {
+      confirmWrap.classList.toggle('d-none', !needsConfirm);
+    }
   }
 
   document.getElementById('kcd-toggle-all').addEventListener('change', (e) => {

@@ -49,6 +49,7 @@ from core.backup import load_backup_settings, save_backup_settings, create_backu
 app = Flask(__name__)
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
+RECALC_CONFIRM_THRESHOLD = 50
 
 
 def _parse_per_page(raw, default=25):
@@ -991,6 +992,33 @@ def recalculate_run():
 
     missing = {u for u in requested_uids if u not in existing_uids}
     to_update = [u for u in requested_uids if u in existing_uids]
+
+    confirm = (request.form.get("confirm") or "").strip().upper()
+    if len(to_update) > RECALC_CONFIRM_THRESHOLD and confirm != "RECALC":
+        redirect_params = {}
+        for key in (
+            "project",
+            "printer",
+            "q",
+            "status",
+            "start_date",
+            "end_date",
+            "quick_range",
+            "per_page",
+            "page",
+            "recompute_mode",
+            "apply_filament_profile",
+            "apply_rate_profile",
+            "filament_profile_id",
+            "rate_profile_id",
+            "rate_per_hour_override",
+            "filament_rate_per_meter_override",
+        ):
+            v = (request.form.get(key) or "").strip()
+            if v:
+                redirect_params[key] = v
+        redirect_params["msg"] = f"Confirm large run: type RECALC to recalculate {len(to_update)} jobs."
+        return redirect(url_for("recalculate_page", **redirect_params))
 
     updated = 0
     if to_update:
