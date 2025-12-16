@@ -9,6 +9,7 @@ import tempfile
 import uuid
 import math
 import hashlib
+import time
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
@@ -420,31 +421,65 @@ def job_cancel():
     from core import live
     
     data = request.get_json() or request.form.to_dict()
-    printer_name = data.get("printer_name")
+    printer_name_raw = data.get("printer_name")
+    filename_raw = data.get("filename")
     reason = data.get("reason")  # Optional failure/cancel reason
+    elapsed_raw = data.get("elapsed_seconds")
     
-    if not printer_name:
-        return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
-
     canonical = get_canonical_printer_names()
-    if looks_like_gcode_filename(printer_name):
-        error = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
-        app.logger.warning(error)
-        return jsonify({"success": False, "error": error}), 400
-
-    if printer_name not in canonical:
-        error = f"Unknown printer_name received: {printer_name!r}"
-        app.logger.warning(error)
+    norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
+    if not norm.valid_printer:
+        app.logger.warning(norm.reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
-        return jsonify({"success": False, "error": error}), 400
-    
-    result = live.cancel_job(printer_name, reason)
-    
-    if result is None:
-        return jsonify({"success": False, "error": "Job not found"}), 404
-    
-    job = live.get_job(printer_name)
-    return jsonify({"success": True, "job": job})
+        return jsonify({"success": False, "error": norm.reason}), 400
+
+    printer_name = norm.printer_name
+    filename = norm.filename
+
+    if not filename:
+        return jsonify({"success": False, "error": "Missing required field: filename"}), 400
+
+    elapsed_seconds = None
+    if elapsed_raw is not None and str(elapsed_raw).strip() != "":
+        try:
+            elapsed_seconds = float(elapsed_raw)
+        except Exception:
+            return jsonify({"success": False, "error": "elapsed_seconds must be a number"}), 400
+
+    # Mark canceled in live state (this also removes it from active jobs).
+    live_result = live.cancel_job(printer_name, reason)
+    if live_result and (elapsed_seconds is None or elapsed_seconds <= 0):
+        elapsed_seconds = float(live_result.get("elapsed_seconds") or 0.0)
+
+    if elapsed_seconds is None:
+        elapsed_seconds = 0.0
+
+    # Record a canceled job in history so it appears in Print History.
+    ts = time.time()
+    filament_mm = 0.0
+    cost_data = compute_costs(printer_name, float(elapsed_seconds), filament_mm)
+
+    row = {
+        "timestamp": ts,
+        "job_uid": str(uuid.uuid4()),
+        "printer": printer_name,
+        "filename": filename,
+        "duration_seconds": float(elapsed_seconds),
+        "filament_mm": filament_mm,
+    }
+    row.update(cost_data)
+    row["status"] = "canceled"
+    row["failure_reason"] = str(reason or "").strip()
+    append_row(CSV_FILE, HEADERS, row)
+
+    app.logger.info(
+        "job-cancel logged: printer=%s filename=%s elapsed_seconds=%s",
+        printer_name,
+        filename,
+        elapsed_seconds,
+    )
+
+    return jsonify({"success": True, "job": live_result, "history_job_uid": row["job_uid"]})
 
 
 @app.post("/job-end")

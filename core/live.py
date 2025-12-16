@@ -156,13 +156,32 @@ def cancel_job(printer_name, reason=None):
     """
     if printer_name not in _jobs:
         return None
-    
-    job = _jobs[printer_name]
-    job["status"] = "canceled"
-    if reason:
-        job["failure_reason"] = str(reason)
+
+    now = time.time()
+    job = _jobs[printer_name].copy()
+
+    # Compute elapsed seconds (pause-aware; excludes paused duration).
+    start_time = float(job.get("start_time") or now)
+    total_paused = float(job.get("total_paused_duration") or 0.0)
+    status = (job.get("status") or "").lower()
+
+    if status == "paused":
+        pause_time = float(job.get("pause_time") or now)
+        pause_duration = max(0.0, now - pause_time)
+        job["total_paused_duration"] = total_paused + pause_duration
+        elapsed = pause_time - start_time - total_paused
     else:
-        job["failure_reason"] = ""
+        elapsed = now - start_time - total_paused
+
+    job["elapsed_seconds"] = max(0.0, float(elapsed))
+    job["status"] = "canceled"
+    job["failure_reason"] = str(reason or "").strip()
+    job["end_time"] = float(now)
+    if "pause_time" in job:
+        del job["pause_time"]
+
+    # Remove from active jobs so "Now Printing" clears immediately.
+    del _jobs[printer_name]
     _save_state()
     return job
 
