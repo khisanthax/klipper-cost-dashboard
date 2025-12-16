@@ -10,6 +10,8 @@ import uuid
 import math
 import hashlib
 import time
+import re
+from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
@@ -72,26 +74,43 @@ def get_job_thumbnail_url(printer_name: str, filename: str, size_hint: str) -> s
 
 @app.get("/thumb/<printer_name>/<cache_file>", endpoint="thumb_cache")
 def thumb_cache(printer_name: str, cache_file: str):
-    # Prevent path traversal.
+    # Path safety:
+    # - serve only cached files for known printers (slugged)
+    # - serve only files matching our generated cache name pattern
+    # - enforce resolved-path containment using Path.resolve()
     if not printer_name or not cache_file:
         return ("", 404)
-    if os.path.basename(cache_file) != cache_file:
+
+    safe_printer = _safe_thumb_dir(printer_name)
+    if safe_printer != printer_name:
         return ("", 404)
 
-    root = os.path.join(DATA_DIR, "thumb_cache")
-    path = os.path.join(root, _safe_thumb_dir(printer_name), cache_file)
+    # Cache files are generated as: <sha1>_<size>.png
+    if not re.fullmatch(r"[a-f0-9]{40}_(small|card)\.png", cache_file):
+        return ("", 404)
+
+    # Only allow printers that exist in the canonical configured printer list.
     try:
-        real_root = os.path.realpath(root)
-        real_path = os.path.realpath(path)
-        if not real_path.startswith(real_root):
+        allowed_slugs = {_safe_thumb_dir(p) for p in get_canonical_printer_names()}
+    except Exception:
+        allowed_slugs = set()
+    if safe_printer not in allowed_slugs:
+        return ("", 404)
+
+    base_dir = Path(DATA_DIR) / "thumb_cache" / safe_printer
+    file_path = base_dir / cache_file
+    try:
+        base_real = base_dir.resolve(strict=False)
+        file_real = file_path.resolve(strict=False)
+        if not file_real.is_relative_to(base_real):
             return ("", 404)
     except Exception:
         return ("", 404)
 
-    if not os.path.exists(path):
+    if not file_path.exists():
         return ("", 404)
 
-    resp = send_file(path, mimetype="image/png")
+    resp = send_file(str(file_path), mimetype="image/png")
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
