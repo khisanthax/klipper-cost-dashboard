@@ -6,6 +6,7 @@ import csv
 import json
 import secrets
 import hashlib
+import logging
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
     ZoneInfo = None
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_settings_exists(settings_file, default_pricing):
@@ -153,14 +156,12 @@ def append_row(csv_file, headers, data):
 
     file_exists = os.path.exists(csv_file)
     if file_exists:
-        # Migrate legacy CSV headers (no job_uid) before appending with the new schema.
+        # Ensure the on-disk header matches the schema we're about to append.
+        # This prevents schema drift from shifting columns at read time.
         try:
-            with open(csv_file, newline="") as f:
-                reader = csv.reader(f)
-                header_row = next(reader, [])
-            if "job_uid" in headers and "job_uid" not in header_row:
-                load_rows_raw(csv_file)
+            ensure_csv_schema(csv_file, headers)
         except Exception:
+            # Never block appends if schema repair fails; it will be retried on read.
             pass
     with open(csv_file, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
@@ -169,12 +170,188 @@ def append_row(csv_file, headers, data):
         writer.writerow({h: data.get(h, "") for h in headers})
 
 
+def _looks_like_gcode_filename(value: str) -> bool:
+    v = str(value or "").strip().lower()
+    return ".gcode" in v or v.endswith(".gco")
+
+
+def _score_row_mapping(row: dict) -> int:
+    """
+    Heuristic scoring for choosing between possible mappings of a CSV row.
+
+    This is used only during CSV schema migration to handle "mixed schema"
+    files (old headers, but newer rows appended in a different column order).
+    """
+    score = 0
+
+    printer = str(row.get("printer") or "").strip()
+    filename = str(row.get("filename") or "").strip()
+    filament_mode = str(row.get("filament_mode") or "").strip().lower()
+    status = str(row.get("status") or "").strip().lower()
+
+    if printer:
+        score += 2
+    if printer and _looks_like_gcode_filename(printer):
+        score -= 25
+
+    if filename and _looks_like_gcode_filename(filename):
+        score += 8
+    elif filename:
+        score -= 2
+
+    if filament_mode in ("per_meter", "per_gram", "per_kg"):
+        score += 3
+    elif filament_mode:
+        score -= 2
+
+    if status in ("completed", "canceled", "cancelled", "failed", "printing", "paused", "idle"):
+        score += 2
+    elif status:
+        score -= 2
+
+    def _num(val):
+        try:
+            return float(str(val).strip())
+        except Exception:
+            return None
+
+    dur_sec = _num(row.get("duration_seconds"))
+    dur_hr = _num(row.get("duration_hours"))
+    fil_mm = _num(row.get("filament_mm"))
+    fil_m = _num(row.get("filament_meters"))
+    rate_hr = _num(row.get("rate_per_hour"))
+    total_cost = _num(row.get("total_cost"))
+
+    if dur_sec is not None:
+        if 0 <= dur_sec <= 60 * 60 * 24 * 60:
+            score += 1
+        else:
+            score -= 1
+    if dur_hr is not None:
+        if 0 <= dur_hr <= 24 * 60:
+            score += 1
+        else:
+            score -= 1
+    if fil_mm is not None:
+        if 0 <= fil_mm <= 50_000_000:
+            score += 1
+        else:
+            score -= 1
+    if fil_m is not None:
+        if 0 <= fil_m <= 50_000:
+            score += 1
+        else:
+            score -= 1
+    if rate_hr is not None:
+        if 0 <= rate_hr <= 10_000:
+            score += 1
+        else:
+            score -= 1
+    if total_cost is not None:
+        if -1 <= total_cost <= 1_000_000:
+            score += 1
+        else:
+            score -= 1
+
+    return score
+
+
+def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
+    """
+    Ensure the CSV on disk uses expected_headers as its header row.
+
+    If the file header differs (missing/extra columns or different order),
+    we migrate safely:
+      - Create a timestamped backup
+      - Rewrite the CSV with expected_headers
+      - For each row, attempt to map values from either:
+          A) old header mapping, or
+          B) expected header mapping (for mixed-schema appended rows)
+        using a heuristic score
+      - Atomic replace
+    Returns True if a migration occurred, else False.
+    """
+    if not os.path.exists(csv_path):
+        return False
+
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            old_header = next(reader, [])
+    except Exception as e:
+        logger.warning("CSV schema check failed to read header: %s (%s)", csv_path, e)
+        return False
+
+    old_header = [str(h or "").strip() for h in old_header if str(h or "").strip()]
+    if old_header == list(expected_headers):
+        return False
+
+    logger.warning(
+        "CSV schema mismatch detected; migrating %s (old=%d cols, expected=%d cols)",
+        csv_path,
+        len(old_header),
+        len(expected_headers),
+    )
+
+    backup_path = None
+    try:
+        backup_path = _backup_file(csv_path)
+    except Exception as e:
+        logger.warning("Failed to create CSV backup for migration: %s (%s)", csv_path, e)
+
+    tmp_path = f"{csv_path}.tmp"
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as f_in, open(
+            tmp_path, "w", newline="", encoding="utf-8"
+        ) as f_out:
+            reader = csv.reader(f_in)
+            _ = next(reader, None)  # consume header
+
+            writer = csv.DictWriter(f_out, fieldnames=list(expected_headers))
+            writer.writeheader()
+
+            for row_list in reader:
+                if not row_list:
+                    continue
+
+                # Map by the old header (normal for legacy rows).
+                old_map = {old_header[i]: row_list[i] for i in range(min(len(old_header), len(row_list)))}
+                # Map by the expected header (for mixed-schema rows appended with the new order).
+                exp_map = {expected_headers[i]: row_list[i] for i in range(min(len(expected_headers), len(row_list)))}
+
+                chosen = old_map
+                if _score_row_mapping(exp_map) > _score_row_mapping(old_map):
+                    chosen = exp_map
+
+                out_row = {h: chosen.get(h, "") for h in expected_headers}
+                writer.writerow(out_row)
+
+        os.replace(tmp_path, csv_path)
+        logger.warning("CSV schema migration complete: %s (backup=%s)", csv_path, backup_path or "none")
+        return True
+    except Exception as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        logger.error("CSV schema migration failed: %s (%s)", csv_path, e)
+        return False
+
+
 def load_rows_raw(csv_file):
     """Load all rows from CSV file with timestamp parsing."""
     rows = []
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:
+        # Ensure file header/schema matches current HEADERS (prevents shifted columns).
+        try:
+            from core.config import HEADERS
+            ensure_csv_schema(csv_file, HEADERS)
+        except Exception:
+            pass
+
         needs_writeback = False
         file_fieldnames = []
         with open(csv_file, newline="") as f:
