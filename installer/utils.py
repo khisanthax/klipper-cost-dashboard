@@ -14,15 +14,20 @@ import secrets
 import tempfile
 import shutil
 import sys
+import urllib.request
+import urllib.parse
+import urllib.error
 from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
 import installer_macro
 
-from core.config import DATA_DIR
+from core.config import DATA_DIR, SETTINGS_FILE
 from core.storage import (
     load_state as _load_state_key,
     save_state as _save_state_key,
     ensure_api_key,
+    load_settings,
+    save_settings,
 )
 
 STATE_FILE = os.path.join(DATA_DIR, "install_state.json")
@@ -67,6 +72,155 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
         if ans in ("n", "no"):
             return False
         println("Invalid input. Please enter Y or N.")
+
+
+# ----------------------------------------------------------------------
+# Moonraker URL detection (local-only)
+# ----------------------------------------------------------------------
+
+def _normalize_url(url: str) -> str:
+    url = str(url or "").strip()
+    if not url:
+        return ""
+    if "://" not in url:
+        url = "http://" + url
+    return url.rstrip("/")
+
+
+def test_moonraker_url(url: str, timeout_s: float = 4.0) -> Tuple[bool, str]:
+    """
+    Validate Moonraker reachability by calling GET <url>/server/info.
+    Returns (ok, detail).
+    """
+    base = _normalize_url(url)
+    if not base:
+        return False, "Empty URL"
+    test_url = f"{base}/server/info"
+    try:
+        req = urllib.request.Request(test_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            status = getattr(resp, "status", None)
+            body = resp.read()
+        if status != 200:
+            return False, f"HTTP {status}"
+        try:
+            data = json.loads(body.decode("utf-8", errors="replace"))
+        except Exception:
+            return False, "Invalid JSON response"
+        if not isinstance(data, dict):
+            return False, "Unexpected response"
+        # Moonraker typically returns {"result": {...}}.
+        if "result" not in data:
+            return False, "Missing 'result' key (not Moonraker?)"
+        return True, "OK"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTPError: {getattr(e, 'code', '')}"
+    except urllib.error.URLError as e:
+        return False, f"URLError: {e}"
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def _autodetect_moonraker_local() -> List[str]:
+    """
+    Auto-detect Moonraker on the local machine / docker-host only.
+    No LAN scan.
+    """
+    hosts = [
+        "127.0.0.1",
+        "localhost",
+        "host.docker.internal",
+        "172.17.0.1",
+    ]
+    ports = [7125, 7126, 7127]
+    found: List[str] = []
+    for h in hosts:
+        for p in ports:
+            url = f"http://{h}:{p}"
+            ok, _ = test_moonraker_url(url, timeout_s=4.0)
+            if ok:
+                found.append(url)
+    # De-dupe while preserving order
+    seen = set()
+    unique = []
+    for u in found:
+        if u in seen:
+            continue
+        seen.add(u)
+        unique.append(u)
+    return unique
+
+
+def _configure_moonraker_url_local(printer_name: str) -> Optional[str]:
+    """
+    Prompt for Moonraker URL, optionally auto-detecting only local/docker-host candidates.
+    Saves nothing by itself; returns a validated URL string or None if user backs out.
+    """
+    printer_name = str(printer_name or "").strip()
+    settings = load_settings(SETTINGS_FILE)
+    current = ""
+    if isinstance(settings, dict):
+        current = str(settings.get(printer_name, {}).get("moonraker_url") or "").strip()
+
+    if current:
+        ok, detail = test_moonraker_url(current)
+        if ok:
+            println(f"[auto] Moonraker reachable at {current}")
+            return _normalize_url(current)
+        println(f"Saved Moonraker URL failed test: {current} ({detail})")
+
+    while True:
+        println("\nMoonraker URL setup:")
+        println("  1) Enter Moonraker URL manually")
+        println("  2) Auto-detect Moonraker on this machine (recommended)")
+        println("  3) Back")
+        choice = prompt_choice("Select option [1-3]: ", [1, 2, 3])
+        if choice == 3:
+            return None
+
+        if choice == 2:
+            println("[auto] Trying common local Moonraker addresses (no LAN scan)...")
+            matches = _autodetect_moonraker_local()
+            if not matches:
+                println("Auto-detect failed. Moonraker may be on another machine; enter printer IP:port.")
+                continue
+            if len(matches) == 1:
+                picked = matches[0]
+                println(f"[auto] Found Moonraker: {picked}")
+                ok, detail = test_moonraker_url(picked)
+                if ok:
+                    println(f"Moonraker reachable at {picked}")
+                    return _normalize_url(picked)
+                println(f"Auto-detected URL failed test: {detail}")
+                continue
+
+            println("Multiple Moonraker instances found:")
+            for i, u in enumerate(matches, 1):
+                println(f"  {i}) {u}")
+            sel = prompt_choice(f"Select [1-{len(matches)}] (or 0 to cancel): ", range(0, len(matches) + 1))
+            if sel is None or sel == 0:
+                continue
+            picked = matches[sel - 1]
+            ok, detail = test_moonraker_url(picked)
+            if ok:
+                println(f"Moonraker reachable at {picked}")
+                return _normalize_url(picked)
+            println(f"Selected URL failed test: {detail}")
+            continue
+
+        # Manual entry
+        raw = _safe_input("Moonraker URL (e.g. http://192.168.2.55:7125): ").strip()
+        if not raw:
+            println("Moonraker URL is required.")
+            continue
+        url = _normalize_url(raw)
+        ok, detail = test_moonraker_url(url)
+        if ok:
+            println(f"Moonraker reachable at {url}")
+            return url
+        println(f"Failed to reach Moonraker at {url}: {detail}")
+        if prompt_yes_no("Save anyway?", default=False):
+            return url
 
 
 def prompt_choice(prompt: str, valid, allow_empty: bool = False, cancel_inputs: Optional[list[str]] = None) -> Optional[int]:
@@ -649,6 +803,11 @@ def install_client_local() -> None:
         println(f"[auto] Using printer: {printer_name}")
         println(f"[auto] Using config dir: {printer_dir}")
 
+    moonraker_url = _configure_moonraker_url_local(printer_name)
+    if not moonraker_url:
+        println("Moonraker URL setup cancelled; aborting local client install.")
+        return
+
     ok, cfg_path = make_print_cost_cfg(printer_dir, printer_name)
     if not ok:
         println("Failed to create print_cost.cfg; aborting.")
@@ -694,11 +853,26 @@ def install_client_local() -> None:
     save_state("script_path", end_script_path)
     save_state("printer_name", printer_name)
 
+    # Persist per-printer Moonraker URL for thumbnail fetching (critical for Docker installs).
+    try:
+        s = load_settings(SETTINGS_FILE)
+        if not isinstance(s, dict):
+            s = {}
+        if printer_name not in s or not isinstance(s.get(printer_name), dict):
+            s[printer_name] = {}
+        s[printer_name]["moonraker_url"] = moonraker_url
+        save_settings(SETTINGS_FILE, DATA_DIR, s)
+        if auto_mode:
+            println(f"[auto] Saved Moonraker URL for {printer_name}: {moonraker_url}")
+    except Exception as e:
+        println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
+
     register_client({
         "type": "local",
         "printer_name": printer_name,
         "cfg_dir": printer_dir,
         "script_path": end_script_path,
+        "moonraker_url": moonraker_url,
     })
 
     println("\nLocal client installation complete.")

@@ -37,49 +37,38 @@ def _safe_dir(name: str) -> str:
     s = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(name or "").strip())
     return s or "unknown"
 
-def _read_install_state() -> Dict[str, Any]:
-    path = os.path.join(DATA_DIR, "install_state.json")
-    if not os.path.exists(path):
-        return {}
+def _is_running_in_docker() -> bool:
+    # Best-effort: this code runs both on bare-metal and inside containers.
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        return state if isinstance(state, dict) else {}
+        if os.path.exists("/.dockerenv"):
+            return True
     except Exception:
-        return {}
+        pass
+    try:
+        with open("/proc/1/cgroup", "r", encoding="utf-8", errors="ignore") as f:
+            cg = f.read()
+        if "docker" in cg or "containerd" in cg or "kubepods" in cg:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _read_install_state_clients() -> List[Dict[str, Any]]:
-    state = _read_install_state()
-    clients = state.get("clients", []) if isinstance(state, dict) else []
-    if not isinstance(clients, list):
+    path = os.path.join(DATA_DIR, "install_state.json")
+    if not os.path.exists(path):
         return []
-    return [c for c in clients if isinstance(c, dict)]
-
-
-def _infer_local_moonraker_host_from_state() -> Optional[str]:
-    """
-    When KCD runs in Docker, "localhost:7125" points at the container, not the host.
-    For local clients, prefer inferring the host from the saved master settings.
-    """
-    state = _read_install_state()
-    if not isinstance(state, dict):
-        return None
-
-    host = str(state.get("master_host") or "").strip()
-    if not host:
-        master_url = str(state.get("master_url") or "").strip()
-        if master_url:
-            try:
-                parsed = urllib.parse.urlparse(master_url)
-                host = (parsed.hostname or "").strip()
-            except Exception:
-                host = ""
-
-    host_l = host.lower()
-    if not host or host_l in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
-        return None
-    return host
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if not isinstance(state, dict):
+            return []
+        clients = state.get("clients", [])
+        if not isinstance(clients, list):
+            return []
+        return [c for c in clients if isinstance(c, dict)]
+    except Exception:
+        return []
 
 
 def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
@@ -89,8 +78,11 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     Priority:
     1) settings.json per printer: moonraker_url (if present)
     2) installer registry:
+       - moonraker_url (if present)
        - remote client: host -> http://<hostname>:7125
-       - local client:  http://localhost:7125
+    3) fallback:
+       - if NOT running in Docker: http://localhost:7125
+       - if running in Docker: None (requires explicit moonraker_url)
     """
     printer_name = str(printer_name or "").strip()
     if not printer_name:
@@ -107,6 +99,9 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
         if str(entry.get("printer_name") or "").strip() != printer_name:
             continue
         ctype = str(entry.get("type") or "").strip().lower()
+        explicit = str(entry.get("moonraker_url") or "").strip()
+        if explicit:
+            return explicit.rstrip("/")
         if ctype == "remote":
             host = str(entry.get("host") or "").strip()
             if not host:
@@ -117,13 +112,11 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
                 hostname = hostname.split(":")[0]
             if hostname:
                 return f"http://{hostname}:7125"
-        if ctype == "local":
-            inferred = _infer_local_moonraker_host_from_state()
-            if inferred:
-                return f"http://{inferred}:7125"
-            return "http://localhost:7125"
 
-    return None
+    if _is_running_in_docker():
+        _log.debug("[thumb] no moonraker_url for printer=%s (running in Docker)", printer_name)
+        return None
+    return "http://localhost:7125"
 
 
 def _http_get_json_with_status(url: str) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
