@@ -10,6 +10,8 @@ import uuid
 import math
 import hashlib
 import time
+import re
+from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
@@ -39,6 +41,7 @@ from core import rates
 from core import pricing
 from core import live
 from core import projects
+from core import thumbnails as thumbs
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
     get_canonical_printer_names,
@@ -52,6 +55,64 @@ app = Flask(__name__)
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
 
+
+def _safe_thumb_dir(name: str) -> str:
+    s = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(name or "").strip())
+    return s or "unknown"
+
+
+def get_job_thumbnail_url(printer_name: str, filename: str, size_hint: str) -> str | None:
+    cache_path = thumbs.get_cached_thumbnail_path(printer_name, filename, size_hint=size_hint)
+    if not cache_path:
+        return None
+    return url_for(
+        "thumb_cache",
+        printer_name=_safe_thumb_dir(printer_name),
+        cache_file=os.path.basename(cache_path),
+    )
+
+
+@app.get("/thumb/<printer_name>/<cache_file>", endpoint="thumb_cache")
+def thumb_cache(printer_name: str, cache_file: str):
+    # Path safety:
+    # - serve only cached files for known printers (slugged)
+    # - serve only files matching our generated cache name pattern
+    # - enforce resolved-path containment using Path.resolve()
+    if not printer_name or not cache_file:
+        return ("", 404)
+
+    safe_printer = _safe_thumb_dir(printer_name)
+    if safe_printer != printer_name:
+        return ("", 404)
+
+    # Cache files are generated as: <sha1>_<size>.png
+    if not re.fullmatch(r"[a-f0-9]{40}_(small|card)\.png", cache_file):
+        return ("", 404)
+
+    # Only allow printers that exist in the canonical configured printer list.
+    try:
+        allowed_slugs = {_safe_thumb_dir(p) for p in get_canonical_printer_names()}
+    except Exception:
+        allowed_slugs = set()
+    if safe_printer not in allowed_slugs:
+        return ("", 404)
+
+    base_dir = Path(DATA_DIR) / "thumb_cache" / safe_printer
+    file_path = base_dir / cache_file
+    try:
+        base_real = base_dir.resolve(strict=False)
+        file_real = file_path.resolve(strict=False)
+        if not file_real.is_relative_to(base_real):
+            return ("", 404)
+    except Exception:
+        return ("", 404)
+
+    if not file_path.exists():
+        return ("", 404)
+
+    resp = send_file(str(file_path), mimetype="image/png")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
 
 def _parse_per_page(raw, default=25):
     try:
@@ -697,6 +758,7 @@ def index():
         chart_hours_per_printer["values"] = [summary["per_printer"][p]["hours"] for p in sorted_printers]
 
     active_jobs = live.list_active_jobs()
+    active_by_printer = {j.get("printer_name"): j for j in active_jobs if j.get("printer_name")}
     
     # Compute printer summaries for status cards
     from core.reports import compute_printer_summaries
@@ -712,6 +774,47 @@ def index():
         ps["active_filament_name"] = all_profiles.get(pid, {}).get("name") if pid else None
         rate_id = settings.get(pname, {}).get("active_rate_profile_id")
         ps["active_rate_name"] = rate_profiles.get(rate_id, {}).get("name") if rate_id else None
+
+        # Card thumbnails (per-printer settings: thumbnails_enabled && thumbnails_on_cards).
+        printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
+        thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
+        thumbs_on_cards = printer_cfg.get("thumbnails_on_cards", True) is not False
+        ps["_thumb_cards_enabled"] = bool(thumbs_enabled and thumbs_on_cards)
+        if thumbs_enabled and thumbs_on_cards:
+            job_for_card = active_by_printer.get(pname, {})
+            card_filename = str(job_for_card.get("filename") or ps.get("last_job_name") or "").strip()
+            ps["_thumb_card"] = get_job_thumbnail_url(pname, card_filename, size_hint="card") if card_filename else None
+        else:
+            ps["_thumb_card"] = None
+
+    # Now Printing thumbnails (same rule as cards).
+    for job in active_jobs:
+        pname = str(job.get("printer_name") or "").strip()
+        if not pname:
+            continue
+        printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
+        thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
+        thumbs_on_cards = printer_cfg.get("thumbnails_on_cards", True) is not False
+        job["_thumb_cards_enabled"] = bool(thumbs_enabled and thumbs_on_cards)
+        if thumbs_enabled and thumbs_on_cards:
+            fname = str(job.get("filename") or "").strip()
+            job["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if fname else None
+        else:
+            job["_thumb_small"] = None
+
+    # Print History thumbnails (independent toggle: visible column; respects thumbnails_enabled only).
+    if "thumbnail" in (visible_cols or []):
+        for row in history_rows_page:
+            pname = str(row.get("printer") or "").strip()
+            fname = str(row.get("filename") or "").strip()
+            if not pname or not fname:
+                row["_thumbs_enabled"] = False
+                row["_thumb_small"] = None
+                continue
+            printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
+            thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
+            row["_thumbs_enabled"] = bool(thumbs_enabled)
+            row["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
 
     return render_template(
         "index.html",
@@ -1793,6 +1896,33 @@ def projects_page():
         pager_meta=unassigned_pager,
     )
 
+    # Project thumbnails (respects thumbnails_enabled only).
+    settings = load_settings(SETTINGS_FILE)
+    for j in unassigned_jobs_page:
+        pname = str(j.get("printer") or "").strip()
+        fname = str(j.get("filename") or "").strip()
+        if not pname or not fname:
+            j["_thumbs_enabled"] = False
+            j["_thumb_small"] = None
+            continue
+        printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
+        thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
+        j["_thumbs_enabled"] = bool(thumbs_enabled)
+        j["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
+
+    for p in project_rows:
+        for j in p.get("jobs", []) or []:
+            pname = str(j.get("printer") or "").strip()
+            fname = str(j.get("filename") or "").strip()
+            if not pname or not fname:
+                j["_thumbs_enabled"] = False
+                j["_thumb_small"] = None
+                continue
+            printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
+            thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
+            j["_thumbs_enabled"] = bool(thumbs_enabled)
+            j["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
+
     return render_template(
         "projects.html",
         error=error,
@@ -1892,6 +2022,12 @@ def _settings_view(tab: str):
                     settings[printer]["grams_per_meter"] = float(request.form.get("grams_per_meter", 3.0))
                 except (TypeError, ValueError):
                     pass
+
+                # Per-printer thumbnail display settings (unchecked checkboxes are absent => False).
+                enabled = bool(request.form.get(f"thumbnails_enabled_{printer}"))
+                on_cards = bool(request.form.get(f"thumbnails_on_cards_{printer}"))
+                settings[printer]["thumbnails_enabled"] = bool(enabled)
+                settings[printer]["thumbnails_on_cards"] = bool(on_cards and enabled)
 
                 save_settings(SETTINGS_FILE, DATA_DIR, settings)
 
@@ -2088,6 +2224,7 @@ def _settings_view(tab: str):
         printers=printers,
         discovered_printers=discovered_printers,
         configs=printer_configs,
+        printer_settings=settings,
         headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,
