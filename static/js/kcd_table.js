@@ -23,6 +23,11 @@
     return key ? `kcd_sort::${key}` : "";
   }
 
+  function storageKeyForHiddenCols(table) {
+    const key = tableKey(table);
+    return key ? `kcd_hidden_cols::${key}` : "";
+  }
+
   function loadJson(key, fallback) {
     if (!key) return fallback;
     try {
@@ -64,6 +69,128 @@
 
   function getColKey(th, index) {
     return th.getAttribute("data-col") || th.textContent.trim() || `col_${index}`;
+  }
+
+  function isFixedColKey(colKey) {
+    return colKey === "__select__" || colKey === "expand" || colKey === "actions";
+  }
+
+  function getHeaderCols(table) {
+    const headerRow = table.querySelector("thead tr");
+    if (!headerRow) return [];
+    const ths = Array.from(headerRow.querySelectorAll("th"));
+    return ths.map((th, i) => {
+      const key = getColKey(th, i);
+      const label = (th.getAttribute("data-col-label") || th.textContent || "").trim() || key;
+      return { th, index: i, key, label, fixed: isFixedColKey(key) || th.getAttribute("data-colvis") === "fixed" };
+    });
+  }
+
+  function setColHidden(table, colKey, hidden) {
+    table.querySelectorAll(`th[data-col="${colKey}"], td[data-col="${colKey}"]`).forEach((el) => {
+      el.classList.toggle("kcd-col-hidden", !!hidden);
+    });
+
+    const cols = getHeaderCols(table);
+    if (!cols.length) return;
+    const idx = cols.findIndex(c => c.key === colKey);
+    if (idx < 0) return;
+
+    const colEls = ensureColgroup(table, cols.length);
+    if (colEls[idx]) {
+      colEls[idx].style.display = hidden ? "none" : "";
+    }
+  }
+
+  function initColumnVisibility(table) {
+    if (!table || table.dataset.kcdColvisInit === "1") return;
+    if (table.getAttribute("data-kcd-colvis") !== "true") return;
+    if (!tableKey(table)) return;
+
+    table.dataset.kcdColvisInit = "1";
+
+    const cols = getHeaderCols(table);
+    if (!cols.length) return;
+
+    const skey = storageKeyForHiddenCols(table);
+    const hiddenRaw = loadJson(skey, []);
+    const hidden = new Set(Array.isArray(hiddenRaw) ? hiddenRaw.filter(v => typeof v === "string") : []);
+
+    // Fixed columns are always visible.
+    cols.forEach((c) => {
+      if (c.fixed) hidden.delete(c.key);
+    });
+
+    cols.forEach((c) => setColHidden(table, c.key, hidden.has(c.key)));
+
+    // Build the "Columns" dropdown UI
+    const key = tableKey(table);
+    let container = null;
+    try {
+      container = document.querySelector(`[data-kcd-colvis-for="${CSS.escape(key)}"]`);
+    } catch (e) {
+      container = document.querySelector(`[data-kcd-colvis-for="${key}"]`);
+    }
+    if (!container) {
+      container = document.createElement("div");
+      container.className = "d-flex justify-content-end mb-2";
+      table.parentElement?.insertBefore(container, table);
+    }
+    container.innerHTML = "";
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "dropdown";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-sm btn-outline-secondary dropdown-toggle";
+    btn.setAttribute("data-bs-toggle", "dropdown");
+    btn.setAttribute("data-bs-auto-close", "outside");
+    btn.setAttribute("aria-expanded", "false");
+    btn.textContent = "Columns";
+    dropdown.appendChild(btn);
+
+    const menu = document.createElement("div");
+    menu.className = "dropdown-menu dropdown-menu-end p-2";
+    menu.style.minWidth = "220px";
+
+    cols.forEach((c) => {
+      const row = document.createElement("div");
+      row.className = "form-check";
+
+      const input = document.createElement("input");
+      input.className = "form-check-input";
+      input.type = "checkbox";
+      input.id = `kcd-colvis-${key}-${c.index}`;
+      input.checked = !hidden.has(c.key);
+      input.disabled = !!c.fixed;
+
+      const label = document.createElement("label");
+      label.className = "form-check-label";
+      label.htmlFor = input.id;
+      label.textContent = c.label;
+
+      input.addEventListener("change", () => {
+        if (c.fixed) {
+          input.checked = true;
+          return;
+        }
+        if (input.checked) {
+          hidden.delete(c.key);
+        } else {
+          hidden.add(c.key);
+        }
+        saveJson(skey, Array.from(hidden));
+        setColHidden(table, c.key, hidden.has(c.key));
+      });
+
+      row.appendChild(input);
+      row.appendChild(label);
+      menu.appendChild(row);
+    });
+
+    dropdown.appendChild(menu);
+    container.appendChild(dropdown);
   }
 
   function initResizableTable(table) {
@@ -311,6 +438,7 @@
   }
 
   function initTable(table) {
+    initColumnVisibility(table);
     initResizableTable(table);
     initSortableTable(table);
     initPrinterFilter(table);
