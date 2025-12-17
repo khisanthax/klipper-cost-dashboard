@@ -39,7 +39,19 @@ def get_date_range_from_params(args):
         now = ts_to_local_dt(datetime.now().timestamp())
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        if quick_range == "last7":
+        if quick_range == "today":
+            start_dt = today
+            end_dt = now
+            range_label = "Today"
+        elif quick_range == "yesterday":
+            start_dt = today - timedelta(days=1)
+            end_dt = today
+            range_label = "Yesterday"
+        elif quick_range == "this_week":
+            start_dt = today - timedelta(days=today.weekday())
+            end_dt = now
+            range_label = "This week"
+        elif quick_range == "last7":
             start_dt = today - timedelta(days=7)
             end_dt = now
             range_label = "Last 7 days"

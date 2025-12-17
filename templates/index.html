@@ -19,40 +19,6 @@
 </style>
 
 <script>
-    // Simple client-side table sorter
-    let sortState = {};
-
-    function sortTable(colIndex, isNumeric) {
-        const table = document.getElementById("history-table");
-        if (!table) return;
-        const tbody = table.tBodies[0];
-        const rows = Array.from(tbody.rows);
-
-        const key = colIndex;
-        const currentDir = sortState[key] || "asc";
-        const newDir = currentDir === "asc" ? "desc" : "asc";
-        sortState[key] = newDir;
-
-        rows.sort(function (a, b) {
-            const aText = a.cells[colIndex].innerText.trim();
-            const bText = b.cells[colIndex].innerText.trim();
-
-            let aVal = aText;
-            let bVal = bText;
-
-            if (isNumeric) {
-                aVal = parseFloat(aText) || 0;
-                bVal = parseFloat(bText) || 0;
-            }
-
-            if (aVal < bVal) return newDir === "asc" ? -1 : 1;
-            if (aVal > bVal) return newDir === "asc" ? 1 : -1;
-            return 0;
-        });
-
-        rows.forEach(row => tbody.appendChild(row));
-    }
-
     function toggleSelectAll(source) {
         const checkboxes = document.querySelectorAll('input[name="delete_rows"]');
         checkboxes.forEach(cb => cb.checked = source.checked);
@@ -551,21 +517,19 @@
 
         <form method="post" id="historyPostForm">
             <div class="table-responsive">
-                <table id="history-table" class="table table-striped table-hover table-sm mb-0"
-                       data-kcd-resizable="true" data-kcd-table-id="history_table">
+                <table id="history-table" class="table table-striped table-hover table-sm mb-0 kcd-table"
+                       data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="history_table">
                     {% set visible = visible_cols if visible_cols and (visible_cols|length > 0) else headers %}
                     <thead class="table-light">
                         <tr>
                             <th style="width: 40px;" data-col="__select__"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
-                            {% set col_index = 1 %}
                             {% for h in headers %}
                             {% if h in visible %}
-                            <th class="col-{{ h|replace(' ', '-')|lower }}" style="cursor: pointer;"
+                            <th class="col-{{ h|replace(' ', '-')|lower }}"
                                 data-col="{{ h }}"
-                                onclick="sortTable({{ col_index }}, {{ 'true' if h in ['duration_seconds','duration_hours','filament_mm','filament_meters','total_cost','time_cost','material_cost'] else 'false' }})">
+                                {% if h == 'timestamp' %}data-sort-type="date"{% elif h in ['duration_seconds','duration_hours','filament_mm','filament_meters','total_cost','time_cost','material_cost','rate_per_hour','filament_rate','grams_per_meter'] %}data-sort-type="number"{% else %}data-sort-type="text"{% endif %}>
                                 {{ friendly_headers.get(h, h) }}
                             </th>
-                            {% set col_index = col_index + 1 %}
                             {% endif %}
                             {% endfor %}
                         </tr>
@@ -660,5 +624,4 @@
     </div>
 </div>
 
-{% include "_col_resize.html" %}
 {% endblock %}

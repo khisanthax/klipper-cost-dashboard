@@ -192,25 +192,35 @@
                                     <div class="text-muted">No jobs assigned yet.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0"
-                                            data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-table"
+                                            data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th data-col="date">Date</th>
-                                                    <th style="width: 72px;" data-col="thumbnail">Thumb</th>
-                                                    <th data-col="printer">Printer</th>
-                                                    <th data-col="filename">Filename</th>
-                                                    <th data-col="status">Status</th>
-                                                    <th class="text-end" data-col="hours">Hours</th>
-                                                    <th class="text-end" data-col="filament">Filament</th>
-                                                    <th class="text-end" data-col="cost">Cost</th>
-                                                    <th style="width: 1%;" data-col="actions"></th>
+                                                    <th data-col="date" data-sort-type="date">Date</th>
+                                                    <th style="width: 72px;" data-col="thumbnail" data-sortable="false">Thumb</th>
+                                                    <th data-col="printer" data-sort-type="text">Printer</th>
+                                                    <th data-col="filename" data-sort-type="text">Filename</th>
+                                                    <th data-col="status" data-sort-type="text">Status</th>
+                                                    <th class="text-end" data-col="hours" data-sort-type="number">Hours</th>
+                                                    <th class="text-end" data-col="filament" data-sort-type="number">Filament</th>
+                                                    <th class="text-end" data-col="cost" data-sort-type="number">Cost</th>
+                                                    <th style="width: 1%;" data-col="actions" data-sortable="false"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {% for j in p.jobs %}
                                                 <tr>
-                              <td class="text-nowrap" data-sort="{{ j.timestamp_raw or 0 }}" data-sort-key="date">{{ j.timestamp }}</td>
+                              <td class="col-timestamp" data-sort="{{ j.timestamp_raw or 0 }}" data-sort-key="date">
+                                  {% if j.timestamp and ' ' in j.timestamp %}
+                                      {% set parts = j.timestamp.split(' ', 1) %}
+                                      <div class="kcd-dt">
+                                          <div class="kcd-date">{{ parts[0] }}</div>
+                                          <div class="kcd-time">{{ parts[1] }}</div>
+                                      </div>
+                                  {% else %}
+                                      <div class="kcd-dt">{{ j.timestamp }}</div>
+                                  {% endif %}
+                              </td>
                               <td>
                                   {% if j._thumbs_enabled %}
                                       {% set thumb_url = j._thumb_small %}
@@ -563,19 +573,20 @@
             </div>
 
             <div class="table-responsive">
-                <table class="table table-striped table-hover align-middle" id="kcdUnassignedJobsTable"
-                    data-kcd-resizable="true" data-kcd-table-id="projects_unassigned_jobs_table">
+                <table class="table table-striped table-hover align-middle kcd-table" id="kcdUnassignedJobsTable"
+                    data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="projects_unassigned_jobs_table"
+                    data-kcd-printer-filter="kcdUnassignedPrinterFilter">
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 1%;" data-col="__select__"></th>
-                            <th style="width: 72px;" data-col="thumbnail">Thumb</th>
-                            <th data-col="date" data-sort-key="date" role="button" class="kcd-sortable">Date <span class="text-muted small kcd-sort-indicator"></span></th>
-                            <th data-col="printer" data-sort-key="printer" role="button" class="kcd-sortable">Printer <span class="text-muted small kcd-sort-indicator"></span></th>
-                            <th data-col="filename" data-sort-key="filename" role="button" class="kcd-sortable">Filename <span class="text-muted small kcd-sort-indicator"></span></th>
-                            <th data-col="status" data-sort-key="status" role="button" class="kcd-sortable">Status <span class="text-muted small kcd-sort-indicator"></span></th>
-                            <th class="text-end" data-col="hours" data-sort-key="hours" role="button" class="kcd-sortable">Hours <span class="text-muted small kcd-sort-indicator"></span></th>
-                            <th class="text-end" data-col="filament" data-sort-key="filament" role="button" class="kcd-sortable">Filament <span class="text-muted small kcd-sort-indicator"></span></th>
-                            <th class="text-end" data-col="cost" data-sort-key="cost" role="button" class="kcd-sortable">Cost <span class="text-muted small kcd-sort-indicator"></span></th>
+                            <th style="width: 1%;" data-col="__select__" data-sortable="false"></th>
+                            <th style="width: 72px;" data-col="thumbnail" data-sortable="false">Thumb</th>
+                            <th data-col="date" data-sort-type="date">Date</th>
+                            <th data-col="printer" data-sort-type="text">Printer</th>
+                            <th data-col="filename" data-sort-type="text">Filename</th>
+                            <th data-col="status" data-sort-type="text">Status</th>
+                            <th class="text-end" data-col="hours" data-sort-type="number">Hours</th>
+                            <th class="text-end" data-col="filament" data-sort-type="number">Filament</th>
+                            <th class="text-end" data-col="cost" data-sort-type="number">Cost</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -592,7 +603,17 @@
                                      {% include "partials/_thumbnail.html" %}
                                  {% endif %}
                              </td>
-                             <td class="text-nowrap">{{ j.timestamp }}</td>
+                             <td class="col-timestamp">
+                                 {% if j.timestamp and ' ' in j.timestamp %}
+                                     {% set parts = j.timestamp.split(' ', 1) %}
+                                     <div class="kcd-dt">
+                                         <div class="kcd-date">{{ parts[0] }}</div>
+                                         <div class="kcd-time">{{ parts[1] }}</div>
+                                     </div>
+                                 {% else %}
+                                     <div class="kcd-dt">{{ j.timestamp }}</div>
+                                 {% endif %}
+                             </td>
                              <td class="text-nowrap">{{ j.printer }}</td>
                              <td class="text-break">{{ j.filename }}</td>
                             <td class="text-nowrap">{{ j.status }}</td>
@@ -651,7 +672,7 @@
     </div>
 </div>
 
-<script>
+<script type="text/plain" data-kcd-disabled="true">
     (function () {
         function initUnassignedJobs() {
             const table = document.getElementById("kcdUnassignedJobsTable");
@@ -1031,5 +1052,4 @@
     })();
 </script>
 
-{% include "_col_resize.html" %}
 {% endblock %}
