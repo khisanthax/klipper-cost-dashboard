@@ -584,6 +584,17 @@
                                         {% set alt = row.get('filename', 'Thumbnail') %}
                                         {% include "partials/_thumbnail.html" %}
                                     {% endif %}
+                                {% elif h == 'timestamp' %}
+                                    {% set dt = row.get(h, '') %}
+                                    {% if dt and ' ' in dt %}
+                                        {% set parts = dt.split(' ', 1) %}
+                                        <div class="kcd-dt">
+                                            <div class="kcd-date">{{ parts[0] }}</div>
+                                            <div class="kcd-time">{{ parts[1] }}</div>
+                                        </div>
+                                    {% else %}
+                                        <div class="kcd-dt">{{ dt }}</div>
+                                    {% endif %}
                                 {% elif h == 'printer' %}
                                 <span class="printer-tag"
                                       style="background-color: {{ printer_colors.get(row.get(h, ''), '#eee') }}">

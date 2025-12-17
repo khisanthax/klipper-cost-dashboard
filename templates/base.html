@@ -20,6 +20,11 @@
         .kcd-thumb-card  { width:160px; height:160px; }
         .kcd-thumb-placeholder { display:inline-block; border-radius:6px; width:56px; height:56px; opacity:0.15; background: currentColor; }
         .kcd-thumb-placeholder.kcd-thumb-card { width:160px; height:160px; }
+        /* Print History: keep Date/Time readable and prevent overflow into Thumbnail */
+        #history-table td.col-timestamp { overflow: hidden; }
+        #history-table td.col-timestamp .kcd-dt { line-height: 1.1; }
+        #history-table td.col-timestamp .kcd-date { white-space: nowrap; }
+        #history-table td.col-timestamp .kcd-time { white-space: nowrap; opacity: 0.8; font-size: 0.9em; }
     </style>
 </head>
 
