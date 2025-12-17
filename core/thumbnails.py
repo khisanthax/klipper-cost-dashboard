@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -28,6 +29,8 @@ _HTTP_TIMEOUT_SECONDS = 2.5
 
 # Very small in-memory metadata cache (printer+filename) -> (ts, thumbnails_list)
 _meta_cache: Dict[Tuple[str, str], Tuple[float, List[Dict[str, Any]]]] = {}
+
+_log = logging.getLogger(__name__)
 
 
 def _safe_dir(name: str) -> str:
@@ -93,15 +96,21 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     return None
 
 
-def _http_get_json(url: str) -> Optional[Dict[str, Any]]:
+def _http_get_json_with_status(url: str) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
     try:
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
+            status = getattr(resp, "status", None)
             body = resp.read()
         data = json.loads(body.decode("utf-8", errors="replace"))
-        return data if isinstance(data, dict) else None
+        return status, (data if isinstance(data, dict) else None)
     except Exception:
-        return None
+        return None, None
+
+
+def _http_get_json(url: str) -> Optional[Dict[str, Any]]:
+    _, data = _http_get_json_with_status(url)
+    return data
 
 
 def _http_get_bytes(url: str) -> Optional[bytes]:
@@ -113,6 +122,20 @@ def _http_get_bytes(url: str) -> Optional[bytes]:
         return None
 
 
+def _normalize_moonraker_filename(filename: str) -> str:
+    """
+    Normalize a filename for Moonraker APIs:
+    - remove leading "/"
+    - remove leading "gcodes/" (case-insensitive)
+    - preserve any subfolders (e.g. "test/cube.gcode")
+    """
+    s = str(filename or "").strip().replace("\\", "/")
+    s = s.lstrip("/")
+    if s.lower().startswith("gcodes/"):
+        s = s[len("gcodes/") :]
+    return s.lstrip("/")
+
+
 def _extract_thumbnails(metadata_json: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Moonraker commonly returns {"result": {...}}.
     result = metadata_json.get("result") if isinstance(metadata_json, dict) else None
@@ -120,6 +143,8 @@ def _extract_thumbnails(metadata_json: Dict[str, Any]) -> List[Dict[str, Any]]:
         thumbs = result.get("thumbnails")
         if isinstance(thumbs, list):
             return [t for t in thumbs if isinstance(t, dict)]
+    if isinstance(result, list):
+        return [t for t in result if isinstance(t, dict)]
     # Fallback: some variants may return {"thumbnails": [...]}
     thumbs = metadata_json.get("thumbnails") if isinstance(metadata_json, dict) else None
     if isinstance(thumbs, list):
@@ -148,8 +173,12 @@ def _pick_thumbnail(thumbnails: List[Dict[str, Any]], size_hint: str) -> Optiona
         return candidates[0] if candidates else None
 
 
-def _metadata_thumbnails(printer_name: str, filename: str) -> List[Dict[str, Any]]:
-    key = (str(printer_name or "").strip(), str(filename or "").strip())
+def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "") -> List[Dict[str, Any]]:
+    printer_key = str(printer_name or "").strip()
+    raw_filename = str(filename or "").strip()
+    filename_norm = _normalize_moonraker_filename(raw_filename)
+    key = (printer_key, filename_norm)
+
     if not key[0] or not key[1]:
         return []
     now = time.time()
@@ -159,15 +188,33 @@ def _metadata_thumbnails(printer_name: str, filename: str) -> List[Dict[str, Any
         if now - ts < _TTL_SECONDS:
             return thumbs
 
-    base = resolve_moonraker_base_url(key[0])
+    base = resolve_moonraker_base_url(printer_key)
     if not base:
         _meta_cache[key] = (now, [])
         return []
 
-    qs = urllib.parse.urlencode({"filename": key[1]})
+    hint = (str(size_hint or "").strip().lower() or "small")
+    _log.debug(
+        "[thumb] printer=%s base=%s raw_filename=%s normalized=%s hint=%s",
+        printer_key,
+        base,
+        raw_filename,
+        filename_norm,
+        hint,
+    )
+
+    qs = urllib.parse.urlencode({"filename": filename_norm}, safe="/")
     url = f"{base}/server/files/metadata?{qs}"
-    data = _http_get_json(url)
+    status, data = _http_get_json_with_status(url)
     thumbs = _extract_thumbnails(data or {})
+    _log.debug("[thumb] metadata status=%s thumbs=%s", status, len(thumbs))
+
+    if not thumbs:
+        url2 = f"{base}/server/files/thumbnails?{qs}"
+        status2, data2 = _http_get_json_with_status(url2)
+        thumbs = _extract_thumbnails(data2 or {})
+        _log.debug("[thumb] thumbnails status=%s thumbs=%s", status2, len(thumbs))
+
     _meta_cache[key] = (now, thumbs)
     return thumbs
 
@@ -187,7 +234,8 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     if not base:
         return None
 
-    cache_key = hashlib.sha1(f"{base}|{printer_name}|{filename}|{size_hint}".encode("utf-8")).hexdigest()
+    filename_norm = _normalize_moonraker_filename(filename)
+    cache_key = hashlib.sha1(f"{base}|{printer_name}|{filename_norm}|{size_hint}".encode("utf-8")).hexdigest()
     printer_dir = os.path.join(_CACHE_ROOT, _safe_dir(printer_name))
     os.makedirs(printer_dir, exist_ok=True)
     cache_path = os.path.join(printer_dir, f"{cache_key}_{size_hint}.png")
@@ -200,7 +248,7 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     except Exception:
         pass
 
-    thumbs = _metadata_thumbnails(printer_name, filename)
+    thumbs = _metadata_thumbnails(printer_name, filename, size_hint=size_hint)
     picked = _pick_thumbnail(thumbs, size_hint=size_hint)
     if not picked:
         return None
@@ -208,6 +256,18 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     rel = str(picked.get("relative_path") or picked.get("path") or "").strip()
     if not rel:
         return None
+
+    # Some Moonraker responses may include a leading slash or "gcodes/" prefix.
+    rel = rel.lstrip("/")
+    if rel.lower().startswith("gcodes/"):
+        rel = rel[len("gcodes/") :]
+
+    try:
+        w = picked.get("width") or picked.get("w") or ""
+        h = picked.get("height") or picked.get("h") or ""
+        _log.debug("[thumb] selected size=%sx%s relative_path=%s", w, h, rel)
+    except Exception:
+        pass
 
     rel_q = urllib.parse.quote(rel.lstrip("/"))
     thumb_url = f"{base}/server/files/gcodes/{rel_q}"
@@ -229,4 +289,3 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
         except Exception:
             pass
         return None
-
