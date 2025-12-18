@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% set show_cost_totals = display_settings.get("projects_show_cost_totals", True) if display_settings is defined else True %}
 <style>
     .kcd-toggle {
         display: inline-flex;
@@ -25,7 +26,21 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h2 class="mb-0">Projects</h2>
-    <a class="btn btn-outline-secondary" href="/">Back to Dashboard</a>
+    <div class="d-flex align-items-center gap-3">
+        <form method="post" class="mb-0">
+            <input type="hidden" name="action" value="update_projects_display">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input"
+                       type="checkbox"
+                       name="projects_show_cost_totals"
+                       id="projects_show_cost_totals"
+                       {% if show_cost_totals %}checked{% endif %}
+                       onchange="this.form.submit()">
+                <label class="form-check-label" for="projects_show_cost_totals">Show cost totals</label>
+            </div>
+        </form>
+        <a class="btn btn-outline-secondary" href="/">Back to Dashboard</a>
+    </div>
 </div>
 
 {% if error %}
@@ -127,7 +142,13 @@
                             <div class="text-muted small">{{ "%.1f"|format(p.totals.filament_g) }} g</div>
                             {% endif %}
                         </td>
-                        <td class="text-end">${{ "%.2f"|format(p.totals.cost) }}</td>
+                        <td class="text-end">
+                            {% if show_cost_totals %}
+                                ${{ "%.2f"|format(p.totals.cost) }}
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
                         <td class="text-muted">{{ p.notes }}</td>
                     </tr>
                     <tr class="kcd-subrow">
@@ -243,7 +264,13 @@
                                                         —
                                                         {% endif %}
                                                     </td>
-                              <td class="text-end" data-sort="{{ j.total_cost or 0 }}" data-sort-key="cost" data-col="cost">${{ "%.2f"|format(j.total_cost|float) }}</td>
+                              <td class="text-end" data-sort="{{ j.total_cost or 0 }}" data-sort-key="cost" data-col="cost">
+                                  {% if show_cost_totals %}
+                                      ${{ "%.2f"|format(j.total_cost|float) }}
+                                  {% else %}
+                                      <span class="text-muted">—</span>
+                                  {% endif %}
+                              </td>
                                                      <td class="text-nowrap" data-col="actions">
                                                          <form method="post" class="m-0">
                                                              <input type="hidden" name="action" value="unassign_job">
@@ -308,9 +335,13 @@
                                                         {% endif %}
                                                     </td>
                                                     <td class="text-end text-nowrap">
-                                                        ${{ "%.2f"|format(mj.computed_cost|float) }}
-                                                        {% if mj.cost_override is not none %}
-                                                        <div class="text-muted small">Override</div>
+                                                        {% if show_cost_totals %}
+                                                            ${{ "%.2f"|format(mj.computed_cost|float) }}
+                                                            {% if mj.cost_override is not none %}
+                                                            <div class="text-muted small">Override</div>
+                                                            {% endif %}
+                                                        {% else %}
+                                                            <span class="text-muted">—</span>
                                                         {% endif %}
                                                     </td>
                                                     <td class="text-nowrap">{{ mj.created_at }}</td>
@@ -394,6 +425,7 @@
                                                     </div>
                                                 </div>
                                                 <div class="col-md-5">
+                                                    {% if show_cost_totals %}
                                                     <div class="border rounded p-3 bg-light">
                                                         <div class="d-flex justify-content-between">
                                                             <div class="text-muted small">Projected total (active)</div>
@@ -411,6 +443,11 @@
                                                             Tracked: ${{ "%.2f"|format(p.actual_tracked_cost) }} · Manual: ${{ "%.2f"|format(p.actual_manual_cost) }}
                                                         </div>
                                                     </div>
+                                                    {% else %}
+                                                    <div class="border rounded p-3 bg-light text-muted small">
+                                                        Cost totals are hidden. Enable “Show cost totals” to view projected and actual costs.
+                                                    </div>
+                                                    {% endif %}
                                                 </div>
                                             </div>
                                         </div>
@@ -453,9 +490,13 @@
                                                         {% endif %}
                                                     </td>
                                                     <td class="text-end text-nowrap">
-                                                        ${{ "%.2f"|format(pl.est_cost) }}
-                                                        {% if pl.est_cost_is_override %}
-                                                        <div class="text-muted small">Override</div>
+                                                        {% if show_cost_totals %}
+                                                            ${{ "%.2f"|format(pl.est_cost) }}
+                                                            {% if pl.est_cost_is_override %}
+                                                            <div class="text-muted small">Override</div>
+                                                            {% endif %}
+                                                        {% else %}
+                                                            <span class="text-muted">—</span>
                                                         {% endif %}
                                                     </td>
                                                     <td class="text-nowrap">
@@ -631,7 +672,13 @@
                                 —
                                 {% endif %}
                             </td>
-                             <td class="text-end" data-col="cost">${{ "%.2f"|format(j.total_cost|float) }}</td>
+                              <td class="text-end" data-col="cost">
+                                  {% if show_cost_totals %}
+                                      ${{ "%.2f"|format(j.total_cost|float) }}
+                                  {% else %}
+                                      <span class="text-muted">—</span>
+                                  {% endif %}
+                              </td>
                          </tr>
                          {% endfor %}
                     </tbody>

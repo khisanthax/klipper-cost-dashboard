@@ -103,7 +103,32 @@ def _get_effective_filament_pricing(printer_name: str) -> dict:
     }
 
 
-def compute_costs(printer_name: str, duration_seconds: float, filament_mm: float) -> dict:
+def _exclude_paused_time_for_printer(printer_name: str) -> bool:
+    """
+    Resolve whether a printer should exclude paused time from hourly billing.
+
+    Precedence:
+    1) Per-printer override (settings.json) when enabled.
+    2) Global default (display.json).
+    """
+    try:
+        settings = load_settings(SETTINGS_FILE)
+        printer_settings = settings.get(printer_name, {}) if isinstance(settings, dict) else {}
+        if printer_settings.get("pause_exclude_paused_time_override_enabled", False):
+            return bool(printer_settings.get("pause_exclude_paused_time_override_value", False))
+    except Exception:
+        pass
+
+    try:
+        display = load_display_settings(DISPLAY_FILE, HEADERS)
+        return bool(display.get("pause_exclude_paused_time_default", False))
+    except Exception:
+        return False
+
+
+def compute_costs(
+    printer_name: str, duration_seconds: float, filament_mm: float, paused_seconds_total: float = 0.0
+) -> dict:
     """
     Compute costs for a print job.
     
@@ -136,14 +161,21 @@ def compute_costs(printer_name: str, duration_seconds: float, filament_mm: float
     else:
         profile_id = ""
 
-    # Actual usage metrics
+    # Actual usage metrics (for reporting)
     duration_hours = duration_seconds / 3600.0
     filament_meters = filament_mm / 1000.0
     grams = filament_meters * grams_per_meter
 
-    # --- Billing rule: minimum 1 hour for any non-zero job ---
-    if duration_seconds > 0:
-        billable_hours = max(1.0, duration_hours)
+    # --- Billing rule: minimum 1 hour for any non-zero billable time ---
+    billable_seconds = float(duration_seconds)
+    if _exclude_paused_time_for_printer(printer_name):
+        try:
+            billable_seconds = max(0.0, float(duration_seconds) - float(paused_seconds_total))
+        except Exception:
+            billable_seconds = max(0.0, float(duration_seconds))
+
+    if billable_seconds > 0:
+        billable_hours = max(1.0, billable_seconds / 3600.0)
     else:
         billable_hours = 0.0
 
@@ -180,6 +212,7 @@ def compute_costs_with_overrides(
     printer_name: str,
     duration_seconds: float,
     filament_mm: float,
+    paused_seconds_total: float = 0.0,
     *,
     filament_profile_id: str | None = None,
     rate_profile_id: str | None = None,
@@ -258,14 +291,21 @@ def compute_costs_with_overrides(
     filament_rate = float(filament_rate)
     grams_per_meter = float(grams_per_meter)
 
-    # Actual usage metrics
+    # Actual usage metrics (for reporting)
     duration_hours = duration_seconds / 3600.0
     filament_meters = filament_mm / 1000.0
     grams = filament_meters * grams_per_meter
 
-    # Billing rule: minimum 1 hour for any non-zero job
-    if duration_seconds > 0:
-        billable_hours = max(1.0, duration_hours)
+    # Billing rule: minimum 1 hour for any non-zero billable time
+    billable_seconds = float(duration_seconds)
+    if _exclude_paused_time_for_printer(printer_name):
+        try:
+            billable_seconds = max(0.0, float(duration_seconds) - float(paused_seconds_total))
+        except Exception:
+            billable_seconds = max(0.0, float(duration_seconds))
+
+    if billable_seconds > 0:
+        billable_hours = max(1.0, billable_seconds / 3600.0)
     else:
         billable_hours = 0.0
 

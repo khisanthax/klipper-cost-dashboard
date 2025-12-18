@@ -1,0 +1,101 @@
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Pause Accounting</h5>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Control whether time spent paused should be billed as machine time. This affects hourly time cost only.
+        </p>
+
+        <form method="post" class="mb-0">
+            <input type="hidden" name="action" value="update_pause_settings">
+
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="pause_exclude_default"
+                           name="pause_exclude_paused_time_default"
+                           {% if display_settings.get("pause_exclude_paused_time_default", False) %}checked{% endif %}>
+                    <label class="form-check-label" for="pause_exclude_default">
+                        Exclude paused time from hourly cost calculations (global default)
+                    </label>
+                </div>
+                <div class="text-muted small mt-1">
+                    When enabled, hourly billing uses <code>duration_seconds - paused_seconds_total</code>.
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Printer</th>
+                            <th style="width: 220px;">Override</th>
+                            <th>Exclude paused time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for p in printers %}
+                        {% set ps = printer_settings.get(p, {}) if printer_settings else {} %}
+                        {% set override_enabled = ps.get("pause_exclude_paused_time_override_enabled", False) %}
+                        {% set override_value = ps.get("pause_exclude_paused_time_override_value", False) %}
+                        <tr>
+                            <td><span class="fw-semibold">{{ p }}</span></td>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           id="pause_use_global_{{ p }}"
+                                           name="pause_use_global_{{ p }}"
+                                           {% if not override_enabled %}checked{% endif %}>
+                                    <label class="form-check-label" for="pause_use_global_{{ p }}">
+                                        Use global default
+                                    </label>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           id="pause_exclude_{{ p }}"
+                                           name="pause_exclude_paused_time_{{ p }}"
+                                           {% if override_value %}checked{% endif %}
+                                           {% if not override_enabled %}disabled{% endif %}>
+                                    <label class="form-check-label" for="pause_exclude_{{ p }}">
+                                        Exclude
+                                    </label>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="d-flex justify-content-end mt-3">
+                <button type="submit" class="btn btn-primary">Save pause settings</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function () {
+  function syncRow(printerName) {
+    const useGlobal = document.getElementById(`pause_use_global_${printerName}`);
+    const exclude = document.getElementById(`pause_exclude_${printerName}`);
+    if (!useGlobal || !exclude) return;
+    exclude.disabled = useGlobal.checked;
+  }
+
+  const printers = {{ printers|tojson }};
+  for (const p of printers) {
+    syncRow(p);
+    const useGlobal = document.getElementById(`pause_use_global_${p}`);
+    if (useGlobal) {
+      useGlobal.addEventListener("change", function () { syncRow(p); });
+    }
+  }
+})();
+</script>
