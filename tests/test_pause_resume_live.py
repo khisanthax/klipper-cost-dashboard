@@ -62,3 +62,13 @@ class LivePauseResumeTests(unittest.TestCase):
         self.assertEqual(job2.get("status"), "paused")
         self.assertAlmostEqual(float(job2.get("pause_time")), 1100.0, places=3)
         self.assertEqual(job2.get("pause_reason"), "filament_runout")
+
+    def test_pause_increments_pause_count_and_runout_count(self):
+        self.live.start_job("SV08", "test.gcode", start_time=1000.0)
+
+        with patch.object(self.live.time, "time", return_value=1100.0):
+            job = self.live.pause_job("SV08", reason="filament_runout")
+
+        self.assertEqual(job.get("status"), "paused")
+        self.assertEqual(int(job.get("pause_count") or 0), 1)
+        self.assertEqual(int(job.get("runout_count") or 0), 1)
