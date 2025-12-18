@@ -2061,9 +2061,9 @@ def _settings_view(tab: str):
 
         if action == "update_pause_settings":
             # Global default is stored in display.json (display settings).
-            global_exclude = bool(request.form.get("pause_exclude_paused_time_default"))
+            global_include = bool(request.form.get("pause_include_paused_time_default"))
             display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-            display_settings["pause_exclude_paused_time_default"] = bool(global_exclude)
+            display_settings["pause_include_paused_time_default"] = bool(global_include)
             save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
 
             # Per-printer overrides are stored alongside printer settings in settings.json.
@@ -2077,13 +2077,19 @@ def _settings_view(tab: str):
                     settings[p] = {}
                 use_global = bool(request.form.get(f"pause_use_global_{p}"))
                 if use_global:
+                    settings[p].pop("pause_include_paused_time_override_enabled", None)
+                    settings[p].pop("pause_include_paused_time_override_value", None)
+                    # Backwards compat cleanup
                     settings[p].pop("pause_exclude_paused_time_override_enabled", None)
                     settings[p].pop("pause_exclude_paused_time_override_value", None)
                 else:
-                    settings[p]["pause_exclude_paused_time_override_enabled"] = True
-                    settings[p]["pause_exclude_paused_time_override_value"] = bool(
-                        request.form.get(f"pause_exclude_paused_time_{p}")
+                    settings[p]["pause_include_paused_time_override_enabled"] = True
+                    settings[p]["pause_include_paused_time_override_value"] = bool(
+                        request.form.get(f"pause_include_paused_time_{p}")
                     )
+                    # Backwards compat cleanup
+                    settings[p].pop("pause_exclude_paused_time_override_enabled", None)
+                    settings[p].pop("pause_exclude_paused_time_override_value", None)
 
             save_settings(SETTINGS_FILE, DATA_DIR, settings)
             return redirect(url_for(_settings_endpoint_for_action(action), msg="Pause accounting settings saved."))
