@@ -52,6 +52,8 @@ def start_job(printer_name, filename, start_time=None, estimated_duration=None,
         "status": "printing",
         "start_time": float(start_time),
         "total_paused_duration": 0.0,
+        "pause_count": 0,
+        "runout_count": 0,
     }
     
     # Add optional fields if provided
@@ -114,8 +116,11 @@ def pause_job(printer_name, reason=None):
     if job.get("status") == "printing":
         job["status"] = "paused"
         job["pause_time"] = time.time()
+        job["pause_count"] = int(job.get("pause_count") or 0) + 1
         if incoming_reason:
             job["pause_reason"] = incoming_reason
+            if incoming_reason == "filament_runout":
+                job["runout_count"] = int(job.get("runout_count") or 0) + 1
         _save_state()
     elif job.get("status") == "paused":
         # Idempotent: don't reset pause_time, but allow reason to be updated.
@@ -343,6 +348,8 @@ def get_job_metadata_for_logging(printer_name):
         "profile_id": job.get("profile_id"),
         "filename": job.get("filename"),
         "pause_reason": job.get("pause_reason"),
+        "pause_count": int(job.get("pause_count") or 0),
+        "runout_count": int(job.get("runout_count") or 0),
     }
 
 
