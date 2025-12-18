@@ -55,7 +55,12 @@ def ensure_display_exists(display_file, headers):
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
         visible = [h for h in headers if h not in ("job_uid", "thumbnail")]
-        data = {"visible_columns": visible, "hidden_printers": []}
+        data = {
+            "visible_columns": visible,
+            "hidden_printers": [],
+            "pause_exclude_paused_time_default": False,
+            "projects_show_cost_totals": True,
+        }
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -67,7 +72,12 @@ def load_display_settings(display_file, headers):
         with open(display_file) as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")], "hidden_printers": []}
+                return {
+                    "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")],
+                    "hidden_printers": [],
+                    "pause_exclude_paused_time_default": False,
+                    "projects_show_cost_totals": True,
+                }
             cols = data.get("visible_columns", headers)
             cols = [c for c in cols if c in headers]
             cols = [c for c in cols if c != "job_uid"]
@@ -77,28 +87,71 @@ def load_display_settings(display_file, headers):
             if not isinstance(hidden, list):
                 hidden = []
             hidden = [str(p) for p in hidden if str(p).strip()]
-            return {"visible_columns": cols, "hidden_printers": hidden}
+            pause_default = bool(data.get("pause_exclude_paused_time_default", False))
+            show_cost_totals = data.get("projects_show_cost_totals", True)
+            show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
+            return {
+                "visible_columns": cols,
+                "hidden_printers": hidden,
+                "pause_exclude_paused_time_default": pause_default,
+                "projects_show_cost_totals": show_cost_totals,
+            }
     except Exception:
-        return {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")], "hidden_printers": []}
+        return {
+            "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")],
+            "hidden_printers": [],
+            "pause_exclude_paused_time_default": False,
+            "projects_show_cost_totals": True,
+        }
 
 
-def save_display_settings(display_file, headers, visible_columns):
-    """Save display settings to JSON file."""
-    visible = [c for c in visible_columns if c in headers and c != "job_uid"]
-    if not visible:
-        visible = [h for h in headers if h != "job_uid"]
-    # Preserve any additional display settings (e.g. hidden_printers).
-    hidden = []
+def save_display_settings(display_file, data_dir, display_settings):
+    """
+    Save display settings to JSON file.
+
+    This function expects a full display settings dict, and will:
+    - sanitize visible_columns against the current HEADERS
+    - preserve unknown keys already present in the JSON file
+    """
+    from core.config import HEADERS
+
+    os.makedirs(data_dir, exist_ok=True)
+
+    existing = {}
     try:
-        with open(display_file) as f:
-            existing = json.load(f)
-            if isinstance(existing, dict) and isinstance(existing.get("hidden_printers"), list):
-                hidden = [str(p) for p in existing.get("hidden_printers", []) if str(p).strip()]
+        if os.path.exists(display_file):
+            with open(display_file) as f:
+                existing = json.load(f)
+        if not isinstance(existing, dict):
+            existing = {}
     except Exception:
-        pass
+        existing = {}
+
+    visible_columns = []
+    try:
+        visible_columns = list(display_settings.get("visible_columns") or [])
+    except Exception:
+        visible_columns = []
+
+    visible = [c for c in visible_columns if c in HEADERS and c != "job_uid"]
+    if not visible:
+        visible = [h for h in HEADERS if h not in ("job_uid", "thumbnail")]
+
+    hidden = display_settings.get("hidden_printers", existing.get("hidden_printers", []))
+    if not isinstance(hidden, list):
+        hidden = []
+    hidden = [str(p) for p in hidden if str(p).strip()]
+
+    existing["visible_columns"] = visible
+    existing["hidden_printers"] = hidden
+    existing["pause_exclude_paused_time_default"] = bool(
+        display_settings.get("pause_exclude_paused_time_default", existing.get("pause_exclude_paused_time_default", False))
+    )
+    show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
+    existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
 
     with open(display_file, "w") as f:
-        json.dump({"visible_columns": visible, "hidden_printers": hidden}, f, indent=2)
+        json.dump(existing, f, indent=2)
 
 
 def save_hidden_printers(display_file, headers, hidden_printers):
@@ -108,7 +161,16 @@ def save_hidden_printers(display_file, headers, hidden_printers):
     hidden = hidden_printers if isinstance(hidden_printers, list) else []
     hidden = [str(p) for p in hidden if str(p).strip()]
     with open(display_file, "w") as f:
-        json.dump({"visible_columns": visible_cols, "hidden_printers": hidden}, f, indent=2)
+        json.dump(
+            {
+                "visible_columns": visible_cols,
+                "hidden_printers": hidden,
+                "pause_exclude_paused_time_default": bool(settings.get("pause_exclude_paused_time_default", False)),
+                "projects_show_cost_totals": bool(settings.get("projects_show_cost_totals", True)),
+            },
+            f,
+            indent=2,
+        )
 
 
 def ensure_api_key(secret_file=None, data_dir=None):
@@ -366,6 +428,8 @@ def load_rows_raw(csv_file):
                     r["filament_profile_id"] = ""
                 if "filament_material" not in r:
                     r["filament_material"] = ""
+                if "paused_seconds_total" not in r:
+                    r["paused_seconds_total"] = ""
                 if "status" not in r:
                     r["status"] = "completed"
                 if "failure_reason" not in r:
@@ -600,9 +664,13 @@ def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_
             filament_mm = float(row.get("filament_mm") or 0.0)
         except (TypeError, ValueError):
             filament_mm = 0.0
+        try:
+            paused_seconds_total = float(row.get("paused_seconds_total") or 0.0)
+        except (TypeError, ValueError):
+            paused_seconds_total = 0.0
 
         try:
-            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm))
+            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total))
             updated += 1
         except Exception:
             continue
