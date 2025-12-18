@@ -417,10 +417,17 @@ def make_print_cost_cfg(printer_dir: str, printer_name: str) -> (bool, str):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 existing = f.read()
-            has_cancel = ("[gcode_shell_command kcd_job_cancel]" in existing) and ("[gcode_macro KCD_JOB_CANCEL]" in existing)
+            has_expected = (
+                ("[gcode_shell_command kcd_job_cancel]" in existing)
+                and ("[gcode_macro KCD_JOB_CANCEL]" in existing)
+                and ("[gcode_shell_command kcd_job_pause]" in existing)
+                and ("[gcode_macro KCD_JOB_PAUSE]" in existing)
+                and ("[gcode_shell_command kcd_job_resume]" in existing)
+                and ("[gcode_macro KCD_JOB_RESUME]" in existing)
+            )
         except Exception:
-            has_cancel = False
-        if has_cancel and _try_update_kcd_vars_printer_name(path, printer_name):
+            has_expected = False
+        if has_expected and _try_update_kcd_vars_printer_name(path, printer_name):
             return True, path
     template = """
 # ----------------------------------------------------------------------
@@ -437,6 +444,16 @@ verbose: True
 
 [gcode_shell_command kcd_job_cancel]
 command: __PRINTER_DIR__/kcd_job_cancel.sh
+timeout: 10.0
+verbose: True
+
+[gcode_shell_command kcd_job_pause]
+command: __PRINTER_DIR__/kcd_job_pause.sh
+timeout: 10.0
+verbose: True
+
+[gcode_shell_command kcd_job_resume]
+command: __PRINTER_DIR__/kcd_job_resume.sh
 timeout: 10.0
 verbose: True
 
@@ -466,6 +483,26 @@ gcode:
     {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
     {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
     RUN_SHELL_COMMAND CMD=kcd_job_cancel PARAMS="{params}"
+
+[gcode_macro KCD_JOB_PAUSE]
+description: Notify dashboard that a print was paused
+gcode:
+    # KCD: log pause to dashboard
+    {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}
+    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
+    {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    RUN_SHELL_COMMAND CMD=kcd_job_pause PARAMS="{params}"
+
+[gcode_macro KCD_JOB_RESUME]
+description: Notify dashboard that a print was resumed
+gcode:
+    # KCD: log resume to dashboard
+    {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}
+    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
+    {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    RUN_SHELL_COMMAND CMD=kcd_job_resume PARAMS="{params}"
 
 [gcode_macro PRINT_COST_TEST]
 description: Test sending dummy cost data to dashboard
@@ -574,6 +611,94 @@ PY
 )
 
 curl -s -X POST "$MASTER_URL/job-cancel" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $API_KEY" \\
+  -d "$JSON"
+"""
+
+
+def generate_job_pause_script(master_url: str, api_key: str) -> str:
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+MASTER_URL="{master_url}"
+API_KEY="{api_key}"
+
+PARAMS="${{*:-}}"
+IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS <<< "$PARAMS"
+PRINTER_NAME="${{PRINTER_NAME:-}}"
+FILENAME="${{FILENAME:-}}"
+ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
+
+echo "KCD_JOB_PAUSE DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS'"
+
+export PRINTER_NAME FILENAME ELAPSED_SECONDS
+
+PYBIN="$(command -v python3 || command -v python || true)"
+if [ -z "$PYBIN" ]; then
+  echo "ERROR: python3/python not found; install python3 or update script to not require python."
+  exit 1
+fi
+
+JSON=$("$PYBIN" - <<'PY'
+import json, os
+def to_float(v):
+    try: return float(v)
+    except: return 0.0
+data = {{
+    "printer_name": os.environ.get("PRINTER_NAME", ""),
+    "filename": os.environ.get("FILENAME", ""),
+    "elapsed_seconds": to_float(os.environ.get("ELAPSED_SECONDS", "0")),
+}}
+print(json.dumps(data))
+PY
+)
+
+curl -s -X POST "$MASTER_URL/job-pause" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: $API_KEY" \\
+  -d "$JSON"
+"""
+
+
+def generate_job_resume_script(master_url: str, api_key: str) -> str:
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+
+MASTER_URL="{master_url}"
+API_KEY="{api_key}"
+
+PARAMS="${{*:-}}"
+IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS <<< "$PARAMS"
+PRINTER_NAME="${{PRINTER_NAME:-}}"
+FILENAME="${{FILENAME:-}}"
+ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
+
+echo "KCD_JOB_RESUME DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS'"
+
+export PRINTER_NAME FILENAME ELAPSED_SECONDS
+
+PYBIN="$(command -v python3 || command -v python || true)"
+if [ -z "$PYBIN" ]; then
+  echo "ERROR: python3/python not found; install python3 or update script to not require python."
+  exit 1
+fi
+
+JSON=$("$PYBIN" - <<'PY'
+import json, os
+def to_float(v):
+    try: return float(v)
+    except: return 0.0
+data = {{
+    "printer_name": os.environ.get("PRINTER_NAME", ""),
+    "filename": os.environ.get("FILENAME", ""),
+    "elapsed_seconds": to_float(os.environ.get("ELAPSED_SECONDS", "0")),
+}}
+print(json.dumps(data))
+PY
+)
+
+curl -s -X POST "$MASTER_URL/job-resume" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: $API_KEY" \\
   -d "$JSON"
@@ -817,10 +942,14 @@ def install_client_local() -> None:
 
     job_start_script = generate_job_start_script(master_url, api_key)
     job_cancel_script = generate_job_cancel_script(master_url, api_key)
+    job_pause_script = generate_job_pause_script(master_url, api_key)
+    job_resume_script = generate_job_resume_script(master_url, api_key)
     end_script = generate_job_end_script(master_url, api_key)
 
     job_start_path = os.path.join(printer_dir, "kcd_job_start.sh")
     job_cancel_path = os.path.join(printer_dir, "kcd_job_cancel.sh")
+    job_pause_path = os.path.join(printer_dir, "kcd_job_pause.sh")
+    job_resume_path = os.path.join(printer_dir, "kcd_job_resume.sh")
     end_script_path = os.path.join(printer_dir, "send_print_cost.sh")
 
     if not write_script(job_start_path, job_start_script):
@@ -829,12 +958,20 @@ def install_client_local() -> None:
     if not write_script(job_cancel_path, job_cancel_script):
         println("Failed to write kcd_job_cancel.sh; aborting.")
         return
+    if not write_script(job_pause_path, job_pause_script):
+        println("Failed to write kcd_job_pause.sh; aborting.")
+        return
+    if not write_script(job_resume_path, job_resume_script):
+        println("Failed to write kcd_job_resume.sh; aborting.")
+        return
     if not write_script(end_script_path, end_script):
         println("Failed to write send_print_cost.sh; aborting.")
         return
     if auto_mode:
         println(f"[auto] Wrote kcd_job_start.sh to {job_start_path}")
         println(f"[auto] Wrote kcd_job_cancel.sh to {job_cancel_path}")
+        println(f"[auto] Wrote kcd_job_pause.sh to {job_pause_path}")
+        println(f"[auto] Wrote kcd_job_resume.sh to {job_resume_path}")
         println(f"[auto] Wrote send_print_cost.sh to {end_script_path}")
 
     _ensure_include_in_printer_cfg(printer_dir, "print_cost.cfg")
@@ -881,6 +1018,8 @@ def install_client_local() -> None:
     println(f"  print_cost.cfg: {cfg_path}")
     println(f"  Job-start script: {job_start_path}")
     println(f"  Job-cancel script: {job_cancel_path}")
+    println(f"  Job-pause script: {job_pause_path}")
+    println(f"  Job-resume script: {job_resume_path}")
     println(f"  Cost script: {end_script_path}")
 
 
@@ -991,26 +1130,34 @@ def install_client_remote() -> None:
     remote_cfg_path = os.path.join(printer_dir, "print_cost.cfg")
     remote_job_start = os.path.join(printer_dir, "kcd_job_start.sh")
     remote_job_cancel = os.path.join(printer_dir, "kcd_job_cancel.sh")
+    remote_job_pause = os.path.join(printer_dir, "kcd_job_pause.sh")
+    remote_job_resume = os.path.join(printer_dir, "kcd_job_resume.sh")
     remote_end_script = os.path.join(printer_dir, "send_print_cost.sh")
     remote_printer_cfg = os.path.join(printer_dir, "printer.cfg")
 
     cfg_text = _render_print_cost_cfg(printer_dir, printer_name)
     job_start_script = generate_job_start_script(master_url, api_key)
     job_cancel_script = generate_job_cancel_script(master_url, api_key)
+    job_pause_script = generate_job_pause_script(master_url, api_key)
+    job_resume_script = generate_job_resume_script(master_url, api_key)
     end_script = generate_job_end_script(master_url, api_key)
 
     ok1 = r.remote_write_file(remote, remote_cfg_path, cfg_text, mode=0o644)
     ok2 = r.remote_write_file(remote, remote_job_start, job_start_script, mode=0o755)
     ok3 = r.remote_write_file(remote, remote_job_cancel, job_cancel_script, mode=0o755)
-    ok4 = r.remote_write_file(remote, remote_end_script, end_script, mode=0o755)
+    ok4 = r.remote_write_file(remote, remote_job_pause, job_pause_script, mode=0o755)
+    ok5 = r.remote_write_file(remote, remote_job_resume, job_resume_script, mode=0o755)
+    ok6 = r.remote_write_file(remote, remote_end_script, end_script, mode=0o755)
 
-    if not (ok1 and ok2 and ok3 and ok4):
+    if not (ok1 and ok2 and ok3 and ok4 and ok5 and ok6):
         println("ERROR: Failed to write one or more files on the remote host; aborting.")
         return
     if auto_mode:
         println(f"[auto] Deployed print_cost.cfg to {remote_cfg_path}")
         println(f"[auto] Deployed kcd_job_start.sh to {remote_job_start}")
         println(f"[auto] Deployed kcd_job_cancel.sh to {remote_job_cancel}")
+        println(f"[auto] Deployed kcd_job_pause.sh to {remote_job_pause}")
+        println(f"[auto] Deployed kcd_job_resume.sh to {remote_job_resume}")
         println(f"[auto] Deployed send_print_cost.sh to {remote_end_script}")
 
     include_line = "[include print_cost.cfg]"
@@ -1041,6 +1188,8 @@ def install_client_remote() -> None:
     println(f"  print_cost.cfg: {remote_cfg_path}")
     println(f"  Job-start script: {remote_job_start}")
     println(f"  Job-cancel script: {remote_job_cancel}")
+    println(f"  Job-pause script: {remote_job_pause}")
+    println(f"  Job-resume script: {remote_job_resume}")
     println(f"  Cost script: {remote_end_script}")
 
 
@@ -1060,6 +1209,16 @@ verbose: True
 
 [gcode_shell_command kcd_job_cancel]
 command: __PRINTER_DIR__/kcd_job_cancel.sh
+timeout: 10.0
+verbose: True
+
+[gcode_shell_command kcd_job_pause]
+command: __PRINTER_DIR__/kcd_job_pause.sh
+timeout: 10.0
+verbose: True
+
+[gcode_shell_command kcd_job_resume]
+command: __PRINTER_DIR__/kcd_job_resume.sh
 timeout: 10.0
 verbose: True
 
@@ -1089,6 +1248,26 @@ gcode:
     {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
     {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
     RUN_SHELL_COMMAND CMD=kcd_job_cancel PARAMS="{params}"
+
+[gcode_macro KCD_JOB_PAUSE]
+description: Notify dashboard that a print was paused
+gcode:
+    # KCD: log pause to dashboard
+    {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}
+    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
+    {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    RUN_SHELL_COMMAND CMD=kcd_job_pause PARAMS="{params}"
+
+[gcode_macro KCD_JOB_RESUME]
+description: Notify dashboard that a print was resumed
+gcode:
+    # KCD: log resume to dashboard
+    {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}
+    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
+    {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    RUN_SHELL_COMMAND CMD=kcd_job_resume PARAMS="{params}"
 
 [gcode_macro PRINT_COST_TEST]
 description: Test sending dummy cost data to dashboard
@@ -1245,7 +1424,14 @@ def uninstall_client_local(printer_name: str) -> None:
     if not cfg_dir or not os.path.isdir(cfg_dir):
         println(f"Config directory not found for '{printer_name}': {cfg_dir}")
     else:
-        for fname in ("print_cost.cfg", "kcd_job_start.sh", "kcd_job_cancel.sh", "send_print_cost.sh"):
+        for fname in (
+            "print_cost.cfg",
+            "kcd_job_start.sh",
+            "kcd_job_cancel.sh",
+            "kcd_job_pause.sh",
+            "kcd_job_resume.sh",
+            "send_print_cost.sh",
+        ):
             path = os.path.join(cfg_dir, fname)
             if os.path.exists(path):
                 try:
@@ -1279,6 +1465,8 @@ def uninstall_client_remote(printer_name: str) -> None:
             os.path.join(config_dir, "print_cost.cfg"),
             os.path.join(config_dir, "kcd_job_start.sh"),
             os.path.join(config_dir, "kcd_job_cancel.sh"),
+            os.path.join(config_dir, "kcd_job_pause.sh"),
+            os.path.join(config_dir, "kcd_job_resume.sh"),
             os.path.join(config_dir, "send_print_cost.sh"),
         ]
         for path in remote_files:
@@ -1328,9 +1516,13 @@ def update_client_local(printer_name: str) -> None:
 
     job_start_script = generate_job_start_script(master_url, api_key)
     job_cancel_script = generate_job_cancel_script(master_url, api_key)
+    job_pause_script = generate_job_pause_script(master_url, api_key)
+    job_resume_script = generate_job_resume_script(master_url, api_key)
     end_script = generate_job_end_script(master_url, api_key)
     job_start_path = os.path.join(cfg_dir, "kcd_job_start.sh")
     job_cancel_path = os.path.join(cfg_dir, "kcd_job_cancel.sh")
+    job_pause_path = os.path.join(cfg_dir, "kcd_job_pause.sh")
+    job_resume_path = os.path.join(cfg_dir, "kcd_job_resume.sh")
     end_script_path = os.path.join(cfg_dir, "send_print_cost.sh")
 
     if not write_script(job_start_path, job_start_script):
@@ -1338,6 +1530,12 @@ def update_client_local(printer_name: str) -> None:
         return
     if not write_script(job_cancel_path, job_cancel_script):
         println("Failed to write kcd_job_cancel.sh; aborting update.")
+        return
+    if not write_script(job_pause_path, job_pause_script):
+        println("Failed to write kcd_job_pause.sh; aborting update.")
+        return
+    if not write_script(job_resume_path, job_resume_script):
+        println("Failed to write kcd_job_resume.sh; aborting update.")
         return
     if not write_script(end_script_path, end_script):
         println("Failed to write send_print_cost.sh; aborting update.")
@@ -1388,6 +1586,8 @@ def update_client_remote(printer_name: str) -> None:
     cfg_text = _render_print_cost_cfg(config_dir, printer_name)
     job_start_script = generate_job_start_script(master_url, api_key)
     job_cancel_script = generate_job_cancel_script(master_url, api_key)
+    job_pause_script = generate_job_pause_script(master_url, api_key)
+    job_resume_script = generate_job_resume_script(master_url, api_key)
     end_script = generate_job_end_script(master_url, api_key)
 
 
@@ -1395,14 +1595,18 @@ def update_client_remote(printer_name: str) -> None:
     remote_cfg_path = os.path.join(config_dir, "print_cost.cfg")
     remote_job_start = os.path.join(config_dir, "kcd_job_start.sh")
     remote_job_cancel = os.path.join(config_dir, "kcd_job_cancel.sh")
+    remote_job_pause = os.path.join(config_dir, "kcd_job_pause.sh")
+    remote_job_resume = os.path.join(config_dir, "kcd_job_resume.sh")
     remote_end_script = os.path.join(config_dir, "send_print_cost.sh")
 
     ok1 = r.remote_write_file(host, remote_cfg_path, cfg_text, mode=0o644)
     ok2 = r.remote_write_file(host, remote_job_start, job_start_script, mode=0o755)
     ok3 = r.remote_write_file(host, remote_job_cancel, job_cancel_script, mode=0o755)
-    ok4 = r.remote_write_file(host, remote_end_script, end_script, mode=0o755)
+    ok4 = r.remote_write_file(host, remote_job_pause, job_pause_script, mode=0o755)
+    ok5 = r.remote_write_file(host, remote_job_resume, job_resume_script, mode=0o755)
+    ok6 = r.remote_write_file(host, remote_end_script, end_script, mode=0o755)
 
-    if not (ok1 and ok2 and ok3 and ok4):
+    if not (ok1 and ok2 and ok3 and ok4 and ok5 and ok6):
         println("Failed to update one or more remote files; aborting.")
         return
 
