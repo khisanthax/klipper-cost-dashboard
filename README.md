@@ -105,15 +105,23 @@ Once a job runs, it will automatically appear in the dashboard.
 
 ### Dashboard (live printers + active job cost)
 ![Dashboard overview](docs/images/dashboard-overview.png)
+![Dashboard overview (alt)](docs/images/dashboard-overview-2.png)
 
-### Print History (sortable + exportable)
-![Print History](docs/images/print-history.png)
+### Reports (filters + rollups)
+![Reports](docs/images/reports.png)
 
 ### Projects (group jobs into builds/orders)
 ![Projects](docs/images/projects.png)
+![Projects (alt)](docs/images/projects-2.png)
 
 ### Recalculate Center (bulk recompute after pricing changes)
 ![Recalculate Center](docs/images/recalculate-center.png)
+
+### Settings (Printers / Profiles / Other / Pause Accounting)
+![Printer settings](docs/images/settings-printers.png)
+![Profile settings](docs/images/settings-profiles.png)
+![Other settings](docs/images/settings-other.png)
+![Pause accounting settings](docs/images/settings-pause.png)
 
 ---
 
