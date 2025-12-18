@@ -95,12 +95,13 @@ def update_job(printer_name, **kwargs):
     return job
 
 
-def pause_job(printer_name):
+def pause_job(printer_name, reason=None):
     """
     Pause an active job.
     
     Args:
         printer_name: Name of the printer
+        reason: Optional pause reason (e.g. user_pause, filament_runout, filament_change)
     
     Returns:
         dict: Updated job state or None if job doesn't exist
@@ -109,10 +110,18 @@ def pause_job(printer_name):
         return None
     
     job = _jobs[printer_name]
+    incoming_reason = str(reason or "").strip()
     if job.get("status") == "printing":
         job["status"] = "paused"
         job["pause_time"] = time.time()
+        if incoming_reason:
+            job["pause_reason"] = incoming_reason
         _save_state()
+    elif job.get("status") == "paused":
+        # Idempotent: don't reset pause_time, but allow reason to be updated.
+        if incoming_reason and incoming_reason != str(job.get("pause_reason") or "").strip():
+            job["pause_reason"] = incoming_reason
+            _save_state()
     
     return job
 
@@ -138,6 +147,8 @@ def resume_job(printer_name):
         job["status"] = "printing"
         if "pause_time" in job:
             del job["pause_time"]
+        if "pause_reason" in job:
+            del job["pause_reason"]
         _save_state()
     
     return job

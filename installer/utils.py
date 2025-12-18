@@ -424,6 +424,7 @@ def make_print_cost_cfg(printer_dir: str, printer_name: str) -> (bool, str):
                 and ("[gcode_macro KCD_JOB_PAUSE]" in existing)
                 and ("[gcode_shell_command kcd_job_resume]" in existing)
                 and ("[gcode_macro KCD_JOB_RESUME]" in existing)
+                and ("params.REASON" in existing)
             )
         except Exception:
             has_expected = False
@@ -491,7 +492,8 @@ gcode:
     {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}
     {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
     {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
-    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    {% set reason = params.REASON|default("", true)|string %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed ~ "|" ~ reason %}
     RUN_SHELL_COMMAND CMD=kcd_job_pause PARAMS="{params}"
 
 [gcode_macro KCD_JOB_RESUME]
@@ -625,14 +627,15 @@ MASTER_URL="{master_url}"
 API_KEY="{api_key}"
 
 PARAMS="${{*:-}}"
-IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS <<< "$PARAMS"
+IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS REASON <<< "$PARAMS"
 PRINTER_NAME="${{PRINTER_NAME:-}}"
 FILENAME="${{FILENAME:-}}"
 ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
+REASON="${{REASON:-}}"
 
-echo "KCD_JOB_PAUSE DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS'"
+echo "KCD_JOB_PAUSE DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS' REASON='$REASON'"
 
-export PRINTER_NAME FILENAME ELAPSED_SECONDS
+export PRINTER_NAME FILENAME ELAPSED_SECONDS REASON
 
 PYBIN="$(command -v python3 || command -v python || true)"
 if [ -z "$PYBIN" ]; then
@@ -649,6 +652,7 @@ data = {{
     "printer_name": os.environ.get("PRINTER_NAME", ""),
     "filename": os.environ.get("FILENAME", ""),
     "elapsed_seconds": to_float(os.environ.get("ELAPSED_SECONDS", "0")),
+    "reason": os.environ.get("REASON", ""),
 }}
 print(json.dumps(data))
 PY
@@ -1256,7 +1260,8 @@ gcode:
     {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}
     {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
     {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
-    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    {% set reason = params.REASON|default("", true)|string %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed ~ "|" ~ reason %}
     RUN_SHELL_COMMAND CMD=kcd_job_pause PARAMS="{params}"
 
 [gcode_macro KCD_JOB_RESUME]
