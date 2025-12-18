@@ -37,6 +37,58 @@
     </div>
 </div>
 
+<!-- Pause & Runout -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Pause & Runout</h5>
+    </div>
+    <div class="card-body">
+        {% set paused_s = pause_analytics.total_paused_seconds if pause_analytics is defined else 0 %}
+        {% set avg_paused_s = pause_analytics.average_paused_seconds if pause_analytics is defined else 0 %}
+        <div class="row text-center">
+            <div class="col-6 col-md-4 mb-3 mb-md-0">
+                <span class="text-muted small">Total Paused</span><br>
+                <span class="fw-semibold">{{ "%.1f"|format((paused_s / 60.0) if paused_s else 0.0) }} min</span>
+            </div>
+            <div class="col-6 col-md-4 mb-3 mb-md-0">
+                <span class="text-muted small">Avg Paused / Print</span><br>
+                <span class="fw-semibold">{{ "%.1f"|format((avg_paused_s / 60.0) if avg_paused_s else 0.0) }} min</span>
+            </div>
+            <div class="col-12 col-md-4">
+                <span class="text-muted small">Runouts (by printer)</span><br>
+                {% if pause_analytics is defined and pause_analytics.runouts_by_printer and pause_analytics.runouts_by_printer|length > 0 %}
+                    <span class="fw-semibold">
+                        {{ pause_analytics.runouts_by_printer|length }} printer{{ 's' if pause_analytics.runouts_by_printer|length != 1 else '' }}
+                    </span>
+                {% else %}
+                    <span class="text-muted">—</span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if pause_analytics is defined and pause_analytics.runouts_by_printer and pause_analytics.runouts_by_printer|length > 0 %}
+        <div class="table-responsive mt-3">
+            <table class="table table-striped table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Printer</th>
+                        <th class="text-end">Runouts</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for printer, count in pause_analytics.runouts_by_printer.items() %}
+                    <tr>
+                        <td>{{ printer }}</td>
+                        <td class="text-end fw-semibold">{{ count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
 <!-- Filters -->
 <div class="card mb-4">
     <div class="card-header">

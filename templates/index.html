@@ -499,7 +499,7 @@
 
                 <form method="get" class="d-flex flex-wrap gap-2 align-items-center mb-0">
                     {% for k, v in history_pager.base_query.items() %}
-                        {% if k not in ['printer', 'range', 'history_page'] %}
+                        {% if k not in ['printer', 'range', 'paused_min', 'has_runout', 'history_page'] %}
                         <input type="hidden" name="{{ k }}" value="{{ v }}">
                         {% endif %}
                     {% endfor %}
@@ -520,6 +520,25 @@
                         <option value="week" {% if selected_range=='week' %}selected{% endif %}>This week</option>
                         <option value="month" {% if selected_range=='month' %}selected{% endif %}>This month</option>
                     </select>
+
+                    <select name="paused_min" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+                        <option value="" {% if not paused_min %}selected{% endif %}>Any paused time</option>
+                        <option value="5" {% if paused_min=='5' %}selected{% endif %}>Paused ≥ 5 min</option>
+                        <option value="10" {% if paused_min=='10' %}selected{% endif %}>Paused ≥ 10 min</option>
+                        <option value="30" {% if paused_min=='30' %}selected{% endif %}>Paused ≥ 30 min</option>
+                        <option value="60" {% if paused_min=='60' %}selected{% endif %}>Paused ≥ 60 min</option>
+                    </select>
+
+                    <div class="form-check form-check-inline mb-0">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               id="hasRunout"
+                               name="has_runout"
+                               value="1"
+                               {% if has_runout %}checked{% endif %}
+                               onchange="this.form.submit()">
+                        <label class="form-check-label small" for="hasRunout">Has runout</label>
+                    </div>
                 </form>
             </div>
         </div>
