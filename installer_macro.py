@@ -36,6 +36,9 @@ KCD_END_PAUSE_MARKER = "### KCD END (PAUSE)"
 KCD_START_RESUME_MARKER = "### KCD START (RESUME)"
 KCD_END_RESUME_MARKER = "### KCD END (RESUME)"
 
+KCD_START_FILAMENT_CHANGE_MARKER = "### KCD START (FILAMENT_CHANGE)"
+KCD_END_FILAMENT_CHANGE_MARKER = "### KCD END (FILAMENT_CHANGE)"
+
 
 def _clean_marked_block(block_lines, start_marker, end_marker):
     """
@@ -570,6 +573,160 @@ def find_resume_macros_in_dir(config_dir):
             print(f"Error reading {filename}: {e}")
     return macros
 
+
+def find_filament_change_macros_in_dir(config_dir):
+    """
+    Scans all .cfg files in the directory for macros that look like filament-change macros.
+
+    We keep this conservative because macro semantics vary widely.
+    Returns a list of (filename, macro_name, line_number) tuples.
+    """
+    if not os.path.exists(config_dir):
+        return []
+
+    macros = []
+    target_names = {"M600", "FILAMENT_CHANGE"}
+    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+
+    for path in cfg_files:
+        filename = os.path.basename(path)
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+            for i, line in enumerate(lines):
+                line_stripped = line.strip()
+                if line_stripped.startswith("[gcode_macro"):
+                    match = re.search(r"\[gcode_macro\s+([^\]]+)\]", line_stripped, re.IGNORECASE)
+                    if match:
+                        name = match.group(1).strip()
+                        if name.upper() in target_names:
+                            macros.append((filename, name, i + 1))
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    return macros
+
+
+def insert_filament_change_macro_call(macro_name, path, call_line):
+    """
+    Insert a KCD pause call with a specific reason into a filament-change macro.
+
+    This is intentionally separate from PAUSE macro insertion so we can keep
+    marker semantics clear and avoid duplicates on re-run.
+    """
+    if not os.path.exists(path):
+        return False, "File not found"
+
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return False, f"Read error: {e}"
+
+    start_index, end_index = _find_macro_block(lines, macro_name)
+    if start_index == -1:
+        return False, f"Macro '{macro_name}' not found"
+
+    macro_block = lines[start_index:end_index]
+
+    if any(KCD_START_FILAMENT_CHANGE_MARKER in ln for ln in macro_block) and any(
+        KCD_END_FILAMENT_CHANGE_MARKER in ln for ln in macro_block
+    ):
+        return True, "Call already present"
+
+    macro_block = _clean_marked_block(
+        macro_block, KCD_START_FILAMENT_CHANGE_MARKER, KCD_END_FILAMENT_CHANGE_MARKER
+    )
+    lines[start_index:end_index] = macro_block
+    end_index = start_index + len(macro_block)
+
+    for i in range(start_index, end_index):
+        if call_line in lines[i]:
+            return True, "Call already present"
+
+    macro_block = lines[start_index:end_index]
+    indent = _detect_indent(macro_block)
+
+    kcd_block = [
+        f"{indent}{KCD_START_FILAMENT_CHANGE_MARKER} - DO NOT MODIFY OR DELETE THIS BLOCK ###\n",
+        f"{indent}# KCD: annotate pause reason (filament change)\n",
+        f"{indent}{call_line}\n",
+        f"{indent}{KCD_END_FILAMENT_CHANGE_MARKER} ###\n",
+        "\n",
+    ]
+
+    # Insert after gcode: if present; else create a gcode: section.
+    gcode_start = -1
+    for i in range(start_index, end_index):
+        if lines[i].strip().startswith("gcode:"):
+            gcode_start = i
+            break
+    if gcode_start == -1:
+        gcode_line_index = start_index + 1
+        lines.insert(gcode_line_index, "gcode:\n")
+        lines[gcode_line_index + 1:gcode_line_index + 1] = kcd_block
+    else:
+        lines[gcode_start + 1:gcode_start + 1] = kcd_block
+
+    try:
+        with open(path, "w") as f:
+            f.writelines(lines)
+        return True, "Success"
+    except Exception as e:
+        return False, f"Write error: {e}"
+
+
+def prompt_filament_change_macro_insertion(printer_name, config_dir):
+    """
+    Optional wizard: patch M600/FILAMENT_CHANGE macros to send a pause reason.
+
+    This may result in a second pause signal if the macro also triggers PAUSE;
+    the server-side pause handler is idempotent and will treat this safely.
+    """
+    print("\n=== Optional Filament-Change Pause Reason Integration ===")
+    print("This will add: KCD_JOB_PAUSE REASON=filament_change")
+    choice = input("Patch filament-change macros (M600/FILAMENT_CHANGE)? [y/N]: ").strip().lower()
+    if choice not in ("y", "yes"):
+        print("Skipping filament-change macro integration.")
+        return None, None
+
+    macros = find_filament_change_macros_in_dir(config_dir)
+    if not macros:
+        print("No obvious filament-change macros found.")
+        return None, None
+
+    print(f"Found {len(macros)} potential filament-change macro(s):")
+    for i, (fname, name, line) in enumerate(macros):
+        print(f"  {i+1}) {name} in {fname} (line {line})")
+    print("  0) Skip")
+    resp = input("Select macro to patch [1]: ").strip()
+    if resp == "" :
+        resp = "1"
+    if resp.lower() == "s" or resp == "0":
+        print("Skipping filament-change macro integration.")
+        return None, None
+    if not resp.isdigit():
+        print("Invalid choice; skipping.")
+        return None, None
+    idx = int(resp)
+    if idx < 1 or idx > len(macros):
+        print("Invalid selection; skipping.")
+        return None, None
+
+    target_file, target_macro, _line = macros[idx - 1]
+    full_path = os.path.join(config_dir, target_file)
+    call_line = "KCD_JOB_PAUSE REASON=filament_change"
+    print(f"Attempting to patch filament-change macro '{target_macro}' in {target_file}...")
+    success, msg = insert_filament_change_macro_call(target_macro, full_path, call_line)
+    if success:
+        if msg == "Call already present":
+            print(f"  - {msg}, skipping.")
+        else:
+            print("  - Success! Added filament_change pause reason block.")
+        return target_macro, target_file
+    print(f"  - Failed: {msg}")
+    print("  - Please add the following line manually:")
+    print(f"    {call_line}")
+    return None, None
 
 def insert_pause_macro_call(macro_name, path, macro_to_call):
     """
@@ -1271,3 +1428,4 @@ def run_macro_integration(printer_name: str, config_dir: str) -> None:
     prompt_cancel_macro_insertion(printer_name, config_dir)
     prompt_pause_macro_insertion(printer_name, config_dir)
     prompt_resume_macro_insertion(printer_name, config_dir)
+    prompt_filament_change_macro_insertion(printer_name, config_dir)
