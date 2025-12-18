@@ -262,13 +262,18 @@ def _enrich_job_with_costs(job):
     
     start_time = job.get("start_time", time.time())
     total_paused = job.get("total_paused_duration", 0)
-    
+
     # Calculate elapsed time (excluding pauses)
     if job.get("status") == "paused":
         pause_time = job.get("pause_time", time.time())
+        pause_duration = max(0.0, time.time() - pause_time)
         elapsed = pause_time - start_time - total_paused
     else:
+        pause_duration = 0.0
         elapsed = time.time() - start_time - total_paused
+
+    # Live paused duration: persisted pauses + current pause segment (if any).
+    job["paused_seconds"] = max(0.0, float(total_paused) + float(pause_duration))
     
     job["elapsed_seconds"] = max(0, elapsed)
     
