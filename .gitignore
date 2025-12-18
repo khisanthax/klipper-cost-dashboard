@@ -1,7 +1,11 @@
 .venv/
 
-__pycache__/
+# Editor / IDE
+.vscode/
 
-*.pyc
+# Python artifacts
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Agent / tool state
+codex_memory/
