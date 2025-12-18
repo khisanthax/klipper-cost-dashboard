@@ -60,7 +60,7 @@ class JobCancelTests(unittest.TestCase):
         # Create a live job so cancel can compute elapsed_seconds.
         self.live_module.start_job("SV08", "Cube_PETG_0.2_11m55s.gcode", start_time=1000.0)
 
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, paused_seconds_total=0.0):
             return {"total_cost": 1.23}
 
         with patch.object(self.app_module, "compute_costs", fake_compute_costs), patch.object(
@@ -91,7 +91,7 @@ class JobCancelTests(unittest.TestCase):
     def test_job_cancel_twice_is_idempotent(self):
         self.live_module.start_job("SV08", "Cube_PETG_0.2_11m55s.gcode", start_time=1000.0)
 
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, paused_seconds_total=0.0):
             return {"total_cost": 1.23}
 
         with patch.object(self.app_module, "compute_costs", fake_compute_costs), patch.object(
@@ -115,7 +115,7 @@ class JobCancelTests(unittest.TestCase):
     def test_job_cancel_with_blank_filename_uses_active_job_filename(self):
         self.live_module.start_job("SV08", "Cube_PETG_0.2_11m55s.gcode", start_time=1000.0)
 
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, paused_seconds_total=0.0):
             return {"total_cost": 1.23}
 
         with patch.object(self.app_module, "compute_costs", fake_compute_costs), patch.object(
