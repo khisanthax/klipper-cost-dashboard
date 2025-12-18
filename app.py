@@ -419,6 +419,7 @@ def job_pause():
     
     data = request.get_json() or request.form.to_dict()
     printer_name = data.get("printer_name")
+    reason = data.get("reason") or data.get("pause_reason")
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
@@ -435,7 +436,13 @@ def job_pause():
         app.logger.warning("Allowed printers: %s", sorted(canonical))
         return jsonify({"success": False, "error": reason}), 400
     
-    result = live.pause_job(printer_name)
+    pause_reason = str(reason or "").strip().lower()
+    if pause_reason and pause_reason not in ("user_pause", "filament_runout", "filament_change"):
+        # Be permissive: accept unknown reasons but normalize to a safe value.
+        app.logger.warning("Unknown pause reason received for %s: %r", printer_name, pause_reason)
+        pause_reason = ""
+
+    result = live.pause_job(printer_name, reason=pause_reason)
     
     if result is None:
         return jsonify({"success": False, "error": "Job not found"}), 404

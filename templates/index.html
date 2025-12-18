@@ -320,6 +320,9 @@
                                 class="badge {% if job.status == 'printing' %}bg-success{% elif job.status == 'paused' %}bg-warning text-dark{% elif job.status == 'failed' or job.status == 'canceled' %}bg-danger{% else %}bg-secondary{% endif %}">
                                 {{ job.status|upper }}
                             </span>
+                            {% if job.status == 'paused' and job.pause_reason %}
+                                <div class="text-muted small">{{ job.pause_reason|replace('_', ' ') }}</div>
+                            {% endif %}
                         </td>
                         <td>
                             {% set hours = (job.elapsed_seconds // 3600)|int %}
