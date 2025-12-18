@@ -34,6 +34,7 @@ from core.pricing import (
 from core.reports import (
     get_date_range_from_params, compute_monthly_breakdown,
     compute_top_printers, compute_summary,
+    compute_pause_analytics,
     aggregate_by_material, aggregate_by_profile
 )
 from core import profiles
@@ -249,6 +250,8 @@ def log_print():
     # If live job exists and matches filename, optionally capture failure/cancel reason.
     # Only allow cancel/failed to override completed; never write "printing"/"paused" to history.
     paused_seconds_total = 0.0
+    pause_count = 0
+    runout_count = 0
     if live_metadata and live_metadata.get("filename") == filename:
         live_job = live.get_job(printer_name)
         if live_job:
@@ -262,6 +265,14 @@ def log_print():
             paused_seconds_total = float(live_metadata.get("total_paused_duration") or 0.0)
         except Exception:
             paused_seconds_total = 0.0
+        try:
+            pause_count = int(live_metadata.get("pause_count") or 0)
+        except Exception:
+            pause_count = 0
+        try:
+            runout_count = int(live_metadata.get("runout_count") or 0)
+        except Exception:
+            runout_count = 0
         # Persist wall-clock duration (elapsed excluding pauses + paused total) so that pause accounting
         # can reliably exclude paused time later.
         try:
@@ -279,6 +290,8 @@ def log_print():
         "filename": filename,
         "duration_seconds": duration_seconds,
         "paused_seconds_total": paused_seconds_total,
+        "pause_count": pause_count,
+        "runout_count": runout_count,
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
@@ -578,6 +591,14 @@ def job_cancel():
         paused_seconds_total = float(live_result.get("total_paused_duration") or 0.0)
     except Exception:
         paused_seconds_total = 0.0
+    try:
+        pause_count = int(live_result.get("pause_count") or 0)
+    except Exception:
+        pause_count = 0
+    try:
+        runout_count = int(live_result.get("runout_count") or 0)
+    except Exception:
+        runout_count = 0.0
 
     # Store duration_seconds as total wall time, with paused time tracked separately.
     # This keeps cost calculation consistent when excluding paused time is enabled.
@@ -597,6 +618,8 @@ def job_cancel():
         "filename": filename,
         "duration_seconds": float(duration_seconds_total),
         "paused_seconds_total": paused_seconds_total,
+        "pause_count": pause_count,
+        "runout_count": runout_count,
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
@@ -705,6 +728,8 @@ def index():
     # Apply date filtering (printer + range + legacy date range inputs)
     selected_printer = (request.args.get("printer") or "All").strip()
     selected_range = (request.args.get("range") or "all").strip().lower()
+    paused_min_raw = (request.args.get("paused_min") or "").strip()
+    has_runout = (request.args.get("has_runout") or "").strip() in {"1", "true", "yes", "on"}
 
     start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
     if selected_range in {"today", "yesterday", "week", "month"}:
@@ -755,6 +780,37 @@ def index():
             rows = [r for r in rows if (r.get("printer") or "") == selected_printer]
         else:
             selected_printer = "All"
+
+    paused_min = 0
+    if paused_min_raw:
+        try:
+            paused_min = int(float(paused_min_raw))
+        except Exception:
+            paused_min = 0
+    paused_min = max(0, min(24 * 60, paused_min))
+
+    if paused_min > 0:
+        threshold = float(paused_min) * 60.0
+        filtered = []
+        for r in rows:
+            try:
+                paused_s = float(r.get("paused_seconds_total") or 0.0)
+            except (TypeError, ValueError):
+                paused_s = 0.0
+            if paused_s >= threshold:
+                filtered.append(r)
+        rows = filtered
+
+    if has_runout:
+        filtered = []
+        for r in rows:
+            try:
+                rc = int(float(r.get("runout_count") or 0))
+            except Exception:
+                rc = 0
+            if rc > 0:
+                filtered.append(r)
+        rows = filtered
 
     history_per_page = _parse_per_page(request.args.get("history_per_page"), default=25)
     history_rows_page, history_pager = _paginate(rows, request.args.get("history_page", 1), history_per_page)
@@ -870,6 +926,8 @@ def index():
         printers=canonical_printers,
         selected_printer=selected_printer,
         selected_range=selected_range,
+        paused_min=str(paused_min) if paused_min else "",
+        has_runout=has_runout,
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
         csv_file=CSV_FILE,
@@ -912,6 +970,8 @@ def reports_page():
     summary.setdefault("total_cost", 0.0)
     summary.setdefault("per_day", {})
     summary.setdefault("per_printer", {})
+
+    pause_analytics = compute_pause_analytics(rows)
     
     # Aggregate by material and profile
     material_summary = aggregate_by_material(rows)
@@ -925,6 +985,7 @@ def reports_page():
         monthly_breakdown=monthly,
         top_printers=top_printers,
         summary=summary,
+        pause_analytics=pause_analytics,
         material_summary=material_summary,
         profile_summary=profile_summary,
         range_label=range_label,
