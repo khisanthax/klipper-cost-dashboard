@@ -325,7 +325,13 @@
                             {% set hours = (job.elapsed_seconds // 3600)|int %}
                             {% set mins = ((job.elapsed_seconds % 3600) // 60)|int %}
                             {% set secs = (job.elapsed_seconds % 60)|int %}
-                            {{ "%d:%02d:%02d"|format(hours, mins, secs) }}
+                            <div>{{ "%d:%02d:%02d"|format(hours, mins, secs) }}</div>
+                            {% if job.status == 'paused' %}
+                                {% set ph = (job.paused_seconds // 3600)|int %}
+                                {% set pm = ((job.paused_seconds % 3600) // 60)|int %}
+                                {% set ps = (job.paused_seconds % 60)|int %}
+                                <div class="text-muted small">Paused: {{ "%d:%02d:%02d"|format(ph, pm, ps) }}</div>
+                            {% endif %}
                         </td>
                         <td class="text-end">
                             <span class="fw-semibold">${{ "%.2f"|format(job.current_time_cost) }}</span>

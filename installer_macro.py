@@ -4,6 +4,7 @@
 #  - Finds and patches END_PRINT-style macros to send cost data (KCD block).
 #  - Finds and patches START_PRINT-style macros to call KCD_JOB_START.
 #  - Finds and patches CANCEL_PRINT-style macros to call KCD_JOB_CANCEL.
+#  - Finds and patches PAUSE/RESUME macros to call KCD_JOB_PAUSE / KCD_JOB_RESUME.
 #  - STRICT mode for end macros: insert KCD block before heater/fan/stepper shutdown.
 #  - CLEAN mode: remove only KCD marker blocks we previously inserted.
 #  - Optional user hook: "### KCD_INSERT_CODE ###" inside a macro to control insertion.
@@ -28,6 +29,12 @@ KCD_END_START_MARKER = "### KCD END (START_PRINT)"
 
 KCD_START_CANCEL_MARKER = "### KCD START (CANCEL_PRINT)"
 KCD_END_CANCEL_MARKER = "### KCD END (CANCEL_PRINT)"
+
+KCD_START_PAUSE_MARKER = "### KCD START (PAUSE)"
+KCD_END_PAUSE_MARKER = "### KCD END (PAUSE)"
+
+KCD_START_RESUME_MARKER = "### KCD START (RESUME)"
+KCD_END_RESUME_MARKER = "### KCD END (RESUME)"
 
 
 def _clean_marked_block(block_lines, start_marker, end_marker):
@@ -504,6 +511,227 @@ def find_cancel_macros_in_dir(config_dir):
     return macros
 
 
+def find_pause_macros_in_dir(config_dir):
+    """
+    Scans all .cfg files in the directory for macros that look like pause macros.
+    Returns a list of (filename, macro_name, line_number) tuples.
+    """
+    if not os.path.exists(config_dir):
+        return []
+
+    macros = []
+    target_names = {"PAUSE", "PAUSE_PRINT", "PRINT_PAUSE"}
+    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+
+    for path in cfg_files:
+        filename = os.path.basename(path)
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+            for i, line in enumerate(lines):
+                line_stripped = line.strip()
+                if line_stripped.startswith("[gcode_macro"):
+                    match = re.search(r"\[gcode_macro\s+([^\]]+)\]", line_stripped, re.IGNORECASE)
+                    if match:
+                        name = match.group(1).strip()
+                        if name.upper() in target_names:
+                            macros.append((filename, name, i + 1))
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    return macros
+
+
+def find_resume_macros_in_dir(config_dir):
+    """
+    Scans all .cfg files in the directory for macros that look like resume macros.
+    Returns a list of (filename, macro_name, line_number) tuples.
+    """
+    if not os.path.exists(config_dir):
+        return []
+
+    macros = []
+    target_names = {"RESUME", "RESUME_PRINT", "PRINT_RESUME"}
+    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+
+    for path in cfg_files:
+        filename = os.path.basename(path)
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+            for i, line in enumerate(lines):
+                line_stripped = line.strip()
+                if line_stripped.startswith("[gcode_macro"):
+                    match = re.search(r"\[gcode_macro\s+([^\]]+)\]", line_stripped, re.IGNORECASE)
+                    if match:
+                        name = match.group(1).strip()
+                        if name.upper() in target_names:
+                            macros.append((filename, name, i + 1))
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+    return macros
+
+
+def insert_pause_macro_call(macro_name, path, macro_to_call):
+    """
+    Insert KCD_JOB_PAUSE into a PAUSE macro without breaking existing behavior.
+
+    - CLEAN: remove previously inserted PAUSE block between PAUSE markers.
+    - HOOK: replace '### KCD_INSERT_CODE ###' with KCD block when present.
+    - AUTO: otherwise, insert before PAUSE_BASE if present; else insert at top of gcode.
+    """
+    if not os.path.exists(path):
+        return False, "File not found"
+
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return False, f"Read error: {e}"
+
+    start_index, end_index = _find_macro_block(lines, macro_name)
+    if start_index == -1:
+        return False, f"Macro '{macro_name}' not found"
+
+    macro_block = lines[start_index:end_index]
+
+    if any(KCD_START_PAUSE_MARKER in ln for ln in macro_block) and any(KCD_END_PAUSE_MARKER in ln for ln in macro_block):
+        return True, "Call already present"
+
+    macro_block = _clean_marked_block(macro_block, KCD_START_PAUSE_MARKER, KCD_END_PAUSE_MARKER)
+    lines[start_index:end_index] = macro_block
+    end_index = start_index + len(macro_block)
+
+    for i in range(start_index, end_index):
+        if macro_to_call in lines[i]:
+            return True, "Call already present"
+
+    insertion_index, end_index, used_hook = _apply_insert_hook_or_auto(
+        lines, start_index, end_index, patterns_for_auto=["PAUSE_BASE"]
+    )
+
+    macro_block = lines[start_index:end_index]
+    indent = _detect_indent(macro_block)
+
+    kcd_block = [
+        f"{indent}{KCD_START_PAUSE_MARKER} - DO NOT MODIFY OR DELETE THIS BLOCK ###\n",
+        f"{indent}# KCD: log pause\n",
+        f"{indent}{macro_to_call}\n",
+        f"{indent}{KCD_END_PAUSE_MARKER} ###\n",
+        "\n",
+    ]
+
+    if insertion_index is not None:
+        lines[insertion_index:insertion_index] = kcd_block
+    else:
+        # AUTO: insert before PAUSE_BASE if present, else after gcode:
+        insert_at = None
+        for i in range(start_index, end_index):
+            if "PAUSE_BASE" in lines[i]:
+                insert_at = i
+                break
+        if insert_at is not None:
+            lines[insert_at:insert_at] = kcd_block
+        else:
+            gcode_start = -1
+            for i in range(start_index, end_index):
+                if lines[i].strip().startswith("gcode:"):
+                    gcode_start = i
+                    break
+            if gcode_start == -1:
+                gcode_line_index = start_index + 1
+                lines.insert(gcode_line_index, "gcode:\n")
+                lines[gcode_line_index + 1:gcode_line_index + 1] = kcd_block
+            else:
+                lines[gcode_start + 1:gcode_start + 1] = kcd_block
+
+    try:
+        with open(path, "w") as f:
+            f.writelines(lines)
+        return True, "Success"
+    except Exception as e:
+        return False, f"Write error: {e}"
+
+
+def insert_resume_macro_call(macro_name, path, macro_to_call):
+    """
+    Insert KCD_JOB_RESUME into a RESUME macro without breaking existing behavior.
+
+    - CLEAN: remove previously inserted RESUME block between RESUME markers.
+    - HOOK: replace '### KCD_INSERT_CODE ###' with KCD block when present.
+    - AUTO: otherwise, insert before RESUME_BASE if present; else insert at top of gcode.
+    """
+    if not os.path.exists(path):
+        return False, "File not found"
+
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+    except Exception as e:
+        return False, f"Read error: {e}"
+
+    start_index, end_index = _find_macro_block(lines, macro_name)
+    if start_index == -1:
+        return False, f"Macro '{macro_name}' not found"
+
+    macro_block = lines[start_index:end_index]
+
+    if any(KCD_START_RESUME_MARKER in ln for ln in macro_block) and any(KCD_END_RESUME_MARKER in ln for ln in macro_block):
+        return True, "Call already present"
+
+    macro_block = _clean_marked_block(macro_block, KCD_START_RESUME_MARKER, KCD_END_RESUME_MARKER)
+    lines[start_index:end_index] = macro_block
+    end_index = start_index + len(macro_block)
+
+    for i in range(start_index, end_index):
+        if macro_to_call in lines[i]:
+            return True, "Call already present"
+
+    insertion_index, end_index, used_hook = _apply_insert_hook_or_auto(
+        lines, start_index, end_index, patterns_for_auto=["RESUME_BASE"]
+    )
+
+    macro_block = lines[start_index:end_index]
+    indent = _detect_indent(macro_block)
+
+    kcd_block = [
+        f"{indent}{KCD_START_RESUME_MARKER} - DO NOT MODIFY OR DELETE THIS BLOCK ###\n",
+        f"{indent}# KCD: log resume\n",
+        f"{indent}{macro_to_call}\n",
+        f"{indent}{KCD_END_RESUME_MARKER} ###\n",
+        "\n",
+    ]
+
+    if insertion_index is not None:
+        lines[insertion_index:insertion_index] = kcd_block
+    else:
+        insert_at = None
+        for i in range(start_index, end_index):
+            if "RESUME_BASE" in lines[i]:
+                insert_at = i
+                break
+        if insert_at is not None:
+            lines[insert_at:insert_at] = kcd_block
+        else:
+            gcode_start = -1
+            for i in range(start_index, end_index):
+                if lines[i].strip().startswith("gcode:"):
+                    gcode_start = i
+                    break
+            if gcode_start == -1:
+                gcode_line_index = start_index + 1
+                lines.insert(gcode_line_index, "gcode:\n")
+                lines[gcode_line_index + 1:gcode_line_index + 1] = kcd_block
+            else:
+                lines[gcode_start + 1:gcode_start + 1] = kcd_block
+
+    try:
+        with open(path, "w") as f:
+            f.writelines(lines)
+        return True, "Success"
+    except Exception as e:
+        return False, f"Write error: {e}"
+
+
 def insert_cancel_macro_call(macro_name, path, macro_to_call):
     """
     Inserts a macro call line (e.g., 'KCD_JOB_CANCEL') into an existing cancel macro's gcode block.
@@ -913,6 +1141,125 @@ def prompt_start_macro_insertion(printer_name, config_dir, default_macro=None, d
 
     return target_macro, target_file
 
+def prompt_pause_macro_insertion(printer_name, config_dir, default_macro=None, default_file=None):
+    """
+    Interactive wizard to find and patch a pause macro to call KCD_JOB_PAUSE.
+    Returns (macro_name, target_file) if patched or already present, else (None, None).
+    """
+    print("\n=== Automatic Pause Macro Integration ===")
+    print("Scanning for PAUSE macros in all .cfg files...")
+
+    if default_macro and default_file:
+        full_path = os.path.join(config_dir, default_file)
+        success, msg = insert_pause_macro_call(default_macro, full_path, "KCD_JOB_PAUSE")
+        if success:
+            if msg == "Call already present":
+                print("  - Call already present; skipping.")
+            else:
+                print(f"  - Patched {default_macro} in {default_file}.")
+            return default_macro, default_file
+        else:
+            print(f"  - Default pause macro patch failed ({msg}), falling back to manual selection.")
+
+    macros = find_pause_macros_in_dir(config_dir)
+    if not macros:
+        print("No obvious PAUSE macros found. Skipping pause integration.")
+        return None, None
+
+    print(f"Found {len(macros)} potential pause macro(s):")
+    for i, (fname, name, line) in enumerate(macros):
+        print(f"  {i+1}) {name} in {fname} (line {line})")
+    print("  0) Skip")
+    choice = input("Select pause macro to patch [1] (or 's' to skip): ").strip()
+    if choice.lower() == "s" or choice == "0":
+        print("Skipping pause macro integration.")
+        return None, None
+    if choice == "":
+        choice = "1"
+    if not choice.isdigit():
+        print("Invalid choice; skipping pause macro integration.")
+        return None, None
+    idx = int(choice)
+    if idx < 1 or idx > len(macros):
+        print("Invalid selection; skipping pause macro integration.")
+        return None, None
+
+    target_file, target_macro, _line = macros[idx - 1]
+    full_path = os.path.join(config_dir, target_file)
+
+    print(f"Attempting to patch pause macro '{target_macro}' in {target_file}...")
+    success, msg = insert_pause_macro_call(target_macro, full_path, "KCD_JOB_PAUSE")
+    if success:
+        if msg == "Call already present":
+            print(f"  - {msg}, skipping.")
+        else:
+            print("  - Success! Added KCD_JOB_PAUSE via KCD block.")
+        return target_macro, target_file
+    print(f"  - Failed: {msg}")
+    print("  - Please add the following line to your pause macro manually:")
+    print("    KCD_JOB_PAUSE")
+    return None, None
+
+
+def prompt_resume_macro_insertion(printer_name, config_dir, default_macro=None, default_file=None):
+    """
+    Interactive wizard to find and patch a resume macro to call KCD_JOB_RESUME.
+    Returns (macro_name, target_file) if patched or already present, else (None, None).
+    """
+    print("\n=== Automatic Resume Macro Integration ===")
+    print("Scanning for RESUME macros in all .cfg files...")
+
+    if default_macro and default_file:
+        full_path = os.path.join(config_dir, default_file)
+        success, msg = insert_resume_macro_call(default_macro, full_path, "KCD_JOB_RESUME")
+        if success:
+            if msg == "Call already present":
+                print("  - Call already present; skipping.")
+            else:
+                print(f"  - Patched {default_macro} in {default_file}.")
+            return default_macro, default_file
+        else:
+            print(f"  - Default resume macro patch failed ({msg}), falling back to manual selection.")
+
+    macros = find_resume_macros_in_dir(config_dir)
+    if not macros:
+        print("No obvious RESUME macros found. Skipping resume integration.")
+        return None, None
+
+    print(f"Found {len(macros)} potential resume macro(s):")
+    for i, (fname, name, line) in enumerate(macros):
+        print(f"  {i+1}) {name} in {fname} (line {line})")
+    print("  0) Skip")
+    choice = input("Select resume macro to patch [1] (or 's' to skip): ").strip()
+    if choice.lower() == "s" or choice == "0":
+        print("Skipping resume macro integration.")
+        return None, None
+    if choice == "":
+        choice = "1"
+    if not choice.isdigit():
+        print("Invalid choice; skipping resume macro integration.")
+        return None, None
+    idx = int(choice)
+    if idx < 1 or idx > len(macros):
+        print("Invalid selection; skipping resume macro integration.")
+        return None, None
+
+    target_file, target_macro, _line = macros[idx - 1]
+    full_path = os.path.join(config_dir, target_file)
+
+    print(f"Attempting to patch resume macro '{target_macro}' in {target_file}...")
+    success, msg = insert_resume_macro_call(target_macro, full_path, "KCD_JOB_RESUME")
+    if success:
+        if msg == "Call already present":
+            print(f"  - {msg}, skipping.")
+        else:
+            print("  - Success! Added KCD_JOB_RESUME via KCD block.")
+        return target_macro, target_file
+    print(f"  - Failed: {msg}")
+    print("  - Please add the following line to your resume macro manually:")
+    print("    KCD_JOB_RESUME")
+    return None, None
+
 def run_macro_integration(printer_name: str, config_dir: str) -> None:
     """
     Run both END and START macro integration for a given config directory.
@@ -922,3 +1269,5 @@ def run_macro_integration(printer_name: str, config_dir: str) -> None:
     prompt_macro_insertion(printer_name, config_dir)
     prompt_start_macro_insertion(printer_name, config_dir)
     prompt_cancel_macro_insertion(printer_name, config_dir)
+    prompt_pause_macro_insertion(printer_name, config_dir)
+    prompt_resume_macro_insertion(printer_name, config_dir)
