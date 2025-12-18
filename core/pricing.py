@@ -103,9 +103,9 @@ def _get_effective_filament_pricing(printer_name: str) -> dict:
     }
 
 
-def _exclude_paused_time_for_printer(printer_name: str) -> bool:
+def _include_paused_time_for_printer(printer_name: str) -> bool:
     """
-    Resolve whether a printer should exclude paused time from hourly billing.
+    Resolve whether a printer should include paused time in hourly billing.
 
     Precedence:
     1) Per-printer override (settings.json) when enabled.
@@ -114,14 +114,21 @@ def _exclude_paused_time_for_printer(printer_name: str) -> bool:
     try:
         settings = load_settings(SETTINGS_FILE)
         printer_settings = settings.get(printer_name, {}) if isinstance(settings, dict) else {}
+        if printer_settings.get("pause_include_paused_time_override_enabled", False):
+            return bool(printer_settings.get("pause_include_paused_time_override_value", False))
+        # Backwards compatibility: old "exclude paused" semantics.
         if printer_settings.get("pause_exclude_paused_time_override_enabled", False):
-            return bool(printer_settings.get("pause_exclude_paused_time_override_value", False))
+            return not bool(printer_settings.get("pause_exclude_paused_time_override_value", False))
     except Exception:
         pass
 
     try:
         display = load_display_settings(DISPLAY_FILE, HEADERS)
-        return bool(display.get("pause_exclude_paused_time_default", False))
+        if "pause_include_paused_time_default" in display:
+            return bool(display.get("pause_include_paused_time_default", False))
+        if "pause_exclude_paused_time_default" in display:
+            return not bool(display.get("pause_exclude_paused_time_default", False))
+        return False
     except Exception:
         return False
 
@@ -168,7 +175,8 @@ def compute_costs(
 
     # --- Billing rule: minimum 1 hour for any non-zero billable time ---
     billable_seconds = float(duration_seconds)
-    if _exclude_paused_time_for_printer(printer_name):
+    # Default behavior: EXCLUDE paused time from hourly billing unless explicitly enabled.
+    if not _include_paused_time_for_printer(printer_name):
         try:
             billable_seconds = max(0.0, float(duration_seconds) - float(paused_seconds_total))
         except Exception:
@@ -298,7 +306,8 @@ def compute_costs_with_overrides(
 
     # Billing rule: minimum 1 hour for any non-zero billable time
     billable_seconds = float(duration_seconds)
-    if _exclude_paused_time_for_printer(printer_name):
+    # Default behavior: EXCLUDE paused time from hourly billing unless explicitly enabled.
+    if not _include_paused_time_for_printer(printer_name):
         try:
             billable_seconds = max(0.0, float(duration_seconds) - float(paused_seconds_total))
         except Exception:

@@ -59,7 +59,8 @@ def ensure_display_exists(display_file, headers):
         data = {
             "visible_columns": visible,
             "hidden_printers": [],
-            "pause_exclude_paused_time_default": False,
+            # When false, hourly cost excludes paused time by default.
+            "pause_include_paused_time_default": False,
             "projects_show_cost_totals": True,
         }
         with open(display_file, "w") as f:
@@ -76,7 +77,7 @@ def load_display_settings(display_file, headers):
                 return {
                     "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")],
                     "hidden_printers": [],
-                    "pause_exclude_paused_time_default": False,
+                    "pause_include_paused_time_default": False,
                     "projects_show_cost_totals": True,
                 }
             cols = data.get("visible_columns", headers)
@@ -88,20 +89,30 @@ def load_display_settings(display_file, headers):
             if not isinstance(hidden, list):
                 hidden = []
             hidden = [str(p) for p in hidden if str(p).strip()]
-            pause_default = bool(data.get("pause_exclude_paused_time_default", False))
+
+            # Pause accounting semantics:
+            # - pause_include_paused_time_default == True  => bill wall-clock duration_seconds
+            # - pause_include_paused_time_default == False => bill max(0, duration_seconds - paused_seconds_total)
+            if "pause_include_paused_time_default" in data:
+                pause_include = bool(data.get("pause_include_paused_time_default", False))
+            elif "pause_exclude_paused_time_default" in data:
+                pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
+            else:
+                pause_include = False
+
             show_cost_totals = data.get("projects_show_cost_totals", True)
             show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
             return {
                 "visible_columns": cols,
                 "hidden_printers": hidden,
-                "pause_exclude_paused_time_default": pause_default,
+                "pause_include_paused_time_default": pause_include,
                 "projects_show_cost_totals": show_cost_totals,
             }
     except Exception:
         return {
             "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")],
             "hidden_printers": [],
-            "pause_exclude_paused_time_default": False,
+            "pause_include_paused_time_default": False,
             "projects_show_cost_totals": True,
         }
 
@@ -145,9 +156,23 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     existing["visible_columns"] = visible
     existing["hidden_printers"] = hidden
-    existing["pause_exclude_paused_time_default"] = bool(
-        display_settings.get("pause_exclude_paused_time_default", existing.get("pause_exclude_paused_time_default", False))
-    )
+    # Persist pause accounting global default with "include paused time" semantics.
+    if "pause_include_paused_time_default" in display_settings:
+        pause_include = bool(display_settings.get("pause_include_paused_time_default"))
+    elif "pause_exclude_paused_time_default" in display_settings:
+        pause_include = not bool(display_settings.get("pause_exclude_paused_time_default"))
+    else:
+        if "pause_include_paused_time_default" in existing:
+            pause_include = bool(existing.get("pause_include_paused_time_default", False))
+        elif "pause_exclude_paused_time_default" in existing:
+            pause_include = not bool(existing.get("pause_exclude_paused_time_default", False))
+        else:
+            pause_include = False
+
+    existing["pause_include_paused_time_default"] = bool(pause_include)
+    if "pause_exclude_paused_time_default" in existing:
+        existing.pop("pause_exclude_paused_time_default", None)
+
     show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
     existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
 
@@ -166,7 +191,7 @@ def save_hidden_printers(display_file, headers, hidden_printers):
             {
                 "visible_columns": visible_cols,
                 "hidden_printers": hidden,
-                "pause_exclude_paused_time_default": bool(settings.get("pause_exclude_paused_time_default", False)),
+                "pause_include_paused_time_default": bool(settings.get("pause_include_paused_time_default", False)),
                 "projects_show_cost_totals": bool(settings.get("projects_show_cost_totals", True)),
             },
             f,
@@ -430,11 +455,17 @@ def load_rows_raw(csv_file):
                 if "filament_material" not in r:
                     r["filament_material"] = ""
                 if "paused_seconds_total" not in r:
-                    r["paused_seconds_total"] = ""
+                    r["paused_seconds_total"] = "0"
+                elif not str(r.get("paused_seconds_total") or "").strip():
+                    r["paused_seconds_total"] = "0"
                 if "pause_count" not in r:
-                    r["pause_count"] = ""
+                    r["pause_count"] = "0"
+                elif not str(r.get("pause_count") or "").strip():
+                    r["pause_count"] = "0"
                 if "runout_count" not in r:
-                    r["runout_count"] = ""
+                    r["runout_count"] = "0"
+                elif not str(r.get("runout_count") or "").strip():
+                    r["runout_count"] = "0"
                 if "status" not in r:
                     r["status"] = "completed"
                 if "failure_reason" not in r:
@@ -675,6 +706,8 @@ def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_
             paused_seconds_total = 0.0
 
         try:
+            # Normalize persisted pause column shape during recalc.
+            row["paused_seconds_total"] = str(paused_seconds_total)
             row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total))
             updated += 1
         except Exception:

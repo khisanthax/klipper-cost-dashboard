@@ -14,15 +14,15 @@
                 <div class="form-check form-switch">
                     <input class="form-check-input"
                            type="checkbox"
-                           id="pause_exclude_default"
-                           name="pause_exclude_paused_time_default"
-                           {% if display_settings.get("pause_exclude_paused_time_default", False) %}checked{% endif %}>
-                    <label class="form-check-label" for="pause_exclude_default">
-                        Exclude paused time from hourly cost calculations (global default)
+                           id="pause_include_default"
+                           name="pause_include_paused_time_default"
+                           {% if display_settings.get("pause_include_paused_time_default", False) %}checked{% endif %}>
+                    <label class="form-check-label" for="pause_include_default">
+                        Include paused time in hourly cost calculations (global default)
                     </label>
                 </div>
                 <div class="text-muted small mt-1">
-                    When enabled, hourly billing uses <code>duration_seconds - paused_seconds_total</code>.
+                    When disabled, hourly billing uses <code>max(0, duration_seconds - paused_seconds_total)</code>.
                 </div>
             </div>
 
@@ -32,14 +32,22 @@
                         <tr>
                             <th>Printer</th>
                             <th style="width: 220px;">Override</th>
-                            <th>Exclude paused time</th>
+                            <th>Include paused time</th>
                         </tr>
                     </thead>
                     <tbody>
                     {% for p in printers %}
                         {% set ps = printer_settings.get(p, {}) if printer_settings else {} %}
-                        {% set override_enabled = ps.get("pause_exclude_paused_time_override_enabled", False) %}
-                        {% set override_value = ps.get("pause_exclude_paused_time_override_value", False) %}
+                        {% set old_enabled = ps.get("pause_exclude_paused_time_override_enabled", False) %}
+                        {% set old_exclude = ps.get("pause_exclude_paused_time_override_value", False) %}
+                        {% set override_enabled = ps.get("pause_include_paused_time_override_enabled", old_enabled) %}
+                        {% if "pause_include_paused_time_override_value" in ps %}
+                            {% set override_value = ps.get("pause_include_paused_time_override_value", False) %}
+                        {% elif old_enabled %}
+                            {% set override_value = (not old_exclude) %}
+                        {% else %}
+                            {% set override_value = False %}
+                        {% endif %}
                         <tr>
                             <td><span class="fw-semibold">{{ p }}</span></td>
                             <td>
@@ -58,12 +66,12 @@
                                 <div class="form-check form-switch">
                                     <input class="form-check-input"
                                            type="checkbox"
-                                           id="pause_exclude_{{ p }}"
-                                           name="pause_exclude_paused_time_{{ p }}"
+                                           id="pause_include_{{ p }}"
+                                           name="pause_include_paused_time_{{ p }}"
                                            {% if override_value %}checked{% endif %}
                                            {% if not override_enabled %}disabled{% endif %}>
-                                    <label class="form-check-label" for="pause_exclude_{{ p }}">
-                                        Exclude
+                                    <label class="form-check-label" for="pause_include_{{ p }}">
+                                        Include
                                     </label>
                                 </div>
                             </td>
@@ -84,9 +92,9 @@
 (function () {
   function syncRow(printerName) {
     const useGlobal = document.getElementById(`pause_use_global_${printerName}`);
-    const exclude = document.getElementById(`pause_exclude_${printerName}`);
-    if (!useGlobal || !exclude) return;
-    exclude.disabled = useGlobal.checked;
+    const include = document.getElementById(`pause_include_${printerName}`);
+    if (!useGlobal || !include) return;
+    include.disabled = useGlobal.checked;
   }
 
   const printers = {{ printers|tojson }};
