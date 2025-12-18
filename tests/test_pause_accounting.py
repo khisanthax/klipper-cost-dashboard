@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 
 class PauseAccountingTests(unittest.TestCase):
-    def test_compute_costs_excludes_paused_time_when_enabled(self):
+    def test_compute_costs_excludes_paused_time_when_include_disabled(self):
         from core import pricing as pricing_module
 
         def fake_get_effective_rate_per_hour(_printer_name):
@@ -17,7 +17,7 @@ class PauseAccountingTests(unittest.TestCase):
         ), patch.object(
             pricing_module,
             "load_display_settings",
-            lambda *_args, **_kwargs: {"pause_exclude_paused_time_default": True},
+            lambda *_args, **_kwargs: {"pause_include_paused_time_default": False},
         ), patch.object(
             pricing_module,
             "load_settings",
@@ -27,7 +27,7 @@ class PauseAccountingTests(unittest.TestCase):
             out = pricing_module.compute_costs("SV08", 7200.0, 0.0, paused_seconds_total=3600.0)
             self.assertAlmostEqual(float(out.get("time_cost") or 0.0), 10.0, places=6)
 
-    def test_compute_costs_override_disables_exclude(self):
+    def test_compute_costs_override_enables_include(self):
         from core import pricing as pricing_module
 
         def fake_get_effective_rate_per_hour(_printer_name):
@@ -38,8 +38,8 @@ class PauseAccountingTests(unittest.TestCase):
 
         settings = {
             "SV08": {
-                "pause_exclude_paused_time_override_enabled": True,
-                "pause_exclude_paused_time_override_value": False,
+                "pause_include_paused_time_override_enabled": True,
+                "pause_include_paused_time_override_value": True,
             }
         }
 
@@ -48,17 +48,16 @@ class PauseAccountingTests(unittest.TestCase):
         ), patch.object(
             pricing_module,
             "load_display_settings",
-            lambda *_args, **_kwargs: {"pause_exclude_paused_time_default": True},
+            lambda *_args, **_kwargs: {"pause_include_paused_time_default": False},
         ), patch.object(
             pricing_module,
             "load_settings",
             lambda *_args, **_kwargs: settings,
         ):
-            # Exclude-paused is globally enabled, but override forces it off -> billable_seconds=2h -> time_cost=20.0
+            # Include-paused override is enabled -> billable_seconds=2h -> time_cost=20.0
             out = pricing_module.compute_costs("SV08", 7200.0, 0.0, paused_seconds_total=3600.0)
             self.assertAlmostEqual(float(out.get("time_cost") or 0.0), 20.0, places=6)
 
 
 if __name__ == "__main__":
     unittest.main()
-
