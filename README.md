@@ -67,6 +67,7 @@ This makes KCD easy to back up, inspect, and migrate.
 > **TL;DR:** Install the master, install clients, print something.
 
 ### 1. Install the Master
+
 Run the installer on the machine where you want the dashboard to live.
 
 ```bash
