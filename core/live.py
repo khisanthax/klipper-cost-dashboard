@@ -331,12 +331,18 @@ def get_job_metadata_for_logging(printer_name):
         return None
     
     job = _jobs[printer_name]
-    
+
+    total_paused = float(job.get("total_paused_duration") or 0.0)
+    if str(job.get("status") or "").lower() == "paused":
+        pause_time = float(job.get("pause_time") or time.time())
+        total_paused += max(0.0, time.time() - pause_time)
+
     return {
         "actual_start_time": job.get("start_time"),
-        "total_paused_duration": job.get("total_paused_duration", 0),
+        "total_paused_duration": total_paused,
         "profile_id": job.get("profile_id"),
         "filename": job.get("filename"),
+        "pause_reason": job.get("pause_reason"),
     }
 
 

@@ -248,6 +248,7 @@ def log_print():
 
     # If live job exists and matches filename, optionally capture failure/cancel reason.
     # Only allow cancel/failed to override completed; never write "printing"/"paused" to history.
+    paused_seconds_total = 0.0
     if live_metadata and live_metadata.get("filename") == filename:
         live_job = live.get_job(printer_name)
         if live_job:
@@ -257,8 +258,19 @@ def log_print():
             elif live_status == "failed":
                 status = "failed"
             failure_reason = str(live_job.get("failure_reason") or "").strip()
+        try:
+            paused_seconds_total = float(live_metadata.get("total_paused_duration") or 0.0)
+        except Exception:
+            paused_seconds_total = 0.0
+        # Persist wall-clock duration (elapsed excluding pauses + paused total) so that pause accounting
+        # can reliably exclude paused time later.
+        try:
+            elapsed_excluding_pauses = float(live_metadata.get("elapsed_seconds") or 0.0)
+            duration_seconds = max(0.0, elapsed_excluding_pauses + float(paused_seconds_total))
+        except Exception:
+            pass
 
-    cost_data = compute_costs(printer_name, duration_seconds, filament_mm)
+    cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
 
     row = {
         "timestamp": ts,
@@ -266,6 +278,7 @@ def log_print():
         "printer": printer_name,
         "filename": filename,
         "duration_seconds": duration_seconds,
+        "paused_seconds_total": paused_seconds_total,
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
@@ -561,14 +574,29 @@ def job_cancel():
     # Record a canceled job in history so it appears in Print History.
     ts = time.time()
     filament_mm = 0.0
-    cost_data = compute_costs(printer_name, float(elapsed_seconds), filament_mm)
+    try:
+        paused_seconds_total = float(live_result.get("total_paused_duration") or 0.0)
+    except Exception:
+        paused_seconds_total = 0.0
+
+    # Store duration_seconds as total wall time, with paused time tracked separately.
+    # This keeps cost calculation consistent when excluding paused time is enabled.
+    duration_seconds_total = float(elapsed_seconds) + float(paused_seconds_total)
+
+    cost_data = compute_costs(
+        printer_name,
+        float(duration_seconds_total),
+        filament_mm,
+        paused_seconds_total=paused_seconds_total,
+    )
 
     row = {
         "timestamp": ts,
         "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
-        "duration_seconds": float(elapsed_seconds),
+        "duration_seconds": float(duration_seconds_total),
+        "paused_seconds_total": paused_seconds_total,
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
@@ -1109,11 +1137,12 @@ def recalculate_run():
         if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
             from core.pricing import compute_costs_with_overrides
 
-            def compute_fn(p, d, f):
+            def compute_fn(p, d, f, paused_seconds_total=0.0):
                 return compute_costs_with_overrides(
                     p,
                     d,
                     f,
+                    paused_seconds_total,
                     filament_profile_id=filament_profile_id if apply_filament_profile else None,
                     rate_profile_id=rate_profile_id if apply_rate_profile else None,
                     rate_per_hour_override=rate_per_hour_override,
@@ -1336,11 +1365,12 @@ def recalculate_preview():
         if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
             from core.pricing import compute_costs_with_overrides
 
-            def compute_fn(p, d, f):
+            def compute_fn(p, d, f, paused_seconds_total=0.0):
                 return compute_costs_with_overrides(
                     p,
                     d,
                     f,
+                    paused_seconds_total,
                     filament_profile_id=filament_profile_id if apply_filament_profile else None,
                     rate_profile_id=rate_profile_id if apply_rate_profile else None,
                     rate_per_hour_override=rate_per_hour_override,
@@ -1524,6 +1554,14 @@ def projects_page():
         action = (request.form.get("action") or "").strip()
         redirect_args = {}
         try:
+            if action == "update_projects_display":
+                display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+                display_settings["projects_show_cost_totals"] = bool(
+                    request.form.get("projects_show_cost_totals")
+                )
+                save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
+                redirect_args = {"msg": "Projects display preferences updated."}
+
             if action == "create_project":
                 name = request.form.get("name", "").strip()
                 notes = request.form.get("notes", "").strip()
@@ -1803,6 +1841,8 @@ def projects_page():
             projects_by_id={},
         )
 
+    display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+
     if orphans_added:
         orphan_msg = (
             f"Cleaned up {orphans_added} orphaned legacy assignment entr"
@@ -1936,6 +1976,7 @@ def projects_page():
         message=message,
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
+        display_settings=display_settings,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
         unassigned_jobs_page=unassigned_jobs_page,
@@ -1955,6 +1996,7 @@ def settings_page():
 
 def _settings_endpoint_for_action(action: str) -> str:
     other_actions = {"update_columns", "backup_now", "update_backup_settings"}
+    pause_actions = {"update_pause_settings"}
     profiles_actions = {
         "add_filament_profile",
         "update_filament_profile",
@@ -1965,6 +2007,8 @@ def _settings_endpoint_for_action(action: str) -> str:
     }
     if action in other_actions:
         return "settings_other_page"
+    if action in pause_actions:
+        return "settings_pause_page"
     if action in profiles_actions:
         return "settings_profiles_page"
     return "settings_printers_page"
@@ -1972,7 +2016,7 @@ def _settings_endpoint_for_action(action: str) -> str:
 
 def _settings_view(tab: str):
     tab = (tab or "printers").strip().lower()
-    if tab not in {"printers", "profiles", "other"}:
+    if tab not in {"printers", "profiles", "other", "pause"}:
         tab = "printers"
 
     if request.method == "POST":
@@ -2014,6 +2058,35 @@ def _settings_view(tab: str):
                 # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
                 pricing.hide_printer(printer)
             return redirect(url_for(_settings_endpoint_for_action(action)))
+
+        if action == "update_pause_settings":
+            # Global default is stored in display.json (display settings).
+            global_exclude = bool(request.form.get("pause_exclude_paused_time_default"))
+            display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+            display_settings["pause_exclude_paused_time_default"] = bool(global_exclude)
+            save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
+
+            # Per-printer overrides are stored alongside printer settings in settings.json.
+            printers = pricing.get_configured_printers()
+            settings = load_settings(SETTINGS_FILE)
+            if not isinstance(settings, dict):
+                settings = {}
+
+            for p in printers:
+                if p not in settings or not isinstance(settings.get(p), dict):
+                    settings[p] = {}
+                use_global = bool(request.form.get(f"pause_use_global_{p}"))
+                if use_global:
+                    settings[p].pop("pause_exclude_paused_time_override_enabled", None)
+                    settings[p].pop("pause_exclude_paused_time_override_value", None)
+                else:
+                    settings[p]["pause_exclude_paused_time_override_enabled"] = True
+                    settings[p]["pause_exclude_paused_time_override_value"] = bool(
+                        request.form.get(f"pause_exclude_paused_time_{p}")
+                    )
+
+            save_settings(SETTINGS_FILE, DATA_DIR, settings)
+            return redirect(url_for(_settings_endpoint_for_action(action), msg="Pause accounting settings saved."))
 
         if action == "save_printer_defaults":
             printer = request.form.get("printer")
@@ -2214,11 +2287,13 @@ def _settings_view(tab: str):
         "printers": "settings/printers.html",
         "profiles": "settings/profiles.html",
         "other": "settings/other.html",
+        "pause": "settings/pause.html",
     }
     subtitle_by_tab = {
         "printers": "Manage printers connected to KCD.",
         "profiles": "Rates and material costs used for calculations.",
         "other": "Display preferences, backups, and exports.",
+        "pause": "Pause accounting preferences for hourly time cost.",
     }
 
     return render_template(
@@ -2235,6 +2310,7 @@ def _settings_view(tab: str):
         headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,
+        display_settings=display_settings,
         profiles=all_profiles,
         printer_mappings=printer_mappings,
         rate_profiles=rate_profiles,
@@ -2255,6 +2331,11 @@ def settings_profiles_page():
 @app.route("/settings/other", methods=["GET", "POST"], endpoint="settings_other_page")
 def settings_other_page():
     return _settings_view(tab="other")
+
+
+@app.route("/settings/pause", methods=["GET", "POST"], endpoint="settings_pause_page")
+def settings_pause_page():
+    return _settings_view(tab="pause")
 
 
 @app.route("/download-csv")
