@@ -101,6 +101,22 @@ Once a job runs, it will automatically appear in the dashboard.
 
 ---
 
+## 🖼️ Screenshots
+
+### Dashboard (live printers + active job cost)
+![Dashboard overview](docs/images/dashboard-overview.png)
+
+### Print History (sortable + exportable)
+![Print History](docs/images/print-history.png)
+
+### Projects (group jobs into builds/orders)
+![Projects](docs/images/projects.png)
+
+### Recalculate Center (bulk recompute after pricing changes)
+![Recalculate Center](docs/images/recalculate-center.png)
+
+---
+
 ## ⚠️ Project Status
 
 KCD is **actively developed** and currently used by the author.
@@ -119,4 +135,3 @@ This is a great time to:
 ## 🤖 AI-Assisted Development
 
 Klipper Cost Dashboard was built using OpenAI’s GPT-5.2 as an active development partner, supporting system design, refactoring, documentation, and feature planning throughout the project.
-
