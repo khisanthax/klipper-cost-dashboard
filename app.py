@@ -2098,21 +2098,18 @@ def _settings_view(tab: str):
                 overwrite_existing=overwrite_existing,
             )
 
-            if summary.get("errors"):
-                err = summary.get("error") or "Import failed."
-                return redirect(url_for(_settings_endpoint_for_action(action), error=err))
-
-            return redirect(
-                url_for(
-                    _settings_endpoint_for_action(action),
-                    msg=(
-                        f"Moonraker import complete for {printer}: "
-                        f"imported={summary.get('imported', 0)}, "
-                        f"skipped={summary.get('skipped', 0)}, "
-                        f"updated={summary.get('updated', 0)}"
-                    ),
-                )
+            counts = (
+                f"imported={summary.get('imported', 0)}, "
+                f"skipped={summary.get('skipped', 0)}, "
+                f"updated={summary.get('updated', 0)}, "
+                f"errors={summary.get('errors', 0)}"
             )
+
+            if summary.get("errors"):
+                err = summary.get("error") or "One or more entries failed to import."
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"Moonraker import finished for {printer}: {counts}. {err}"))
+
+            return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker import complete for {printer}: {counts}"))
 
         if action == "update_columns":
             cols = request.form.getlist("columns")
