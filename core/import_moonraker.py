@@ -81,13 +81,94 @@ def _infer_outcome(job: Dict[str, Any], print_time: float, estimated_time: float
     return "unknown"
 
 
-def _build_row_from_history_job(printer_name: str, job: Dict[str, Any]) -> Dict[str, Any]:
+def infer_cancelled_effective_duration_seconds(
+    *,
+    estimated_seconds: float,
+    elapsed_seconds: float,
+    cancelled_attempt_index: int,
+) -> float:
+    """
+    Infer an "effective" duration for cancelled/failed print attempts.
+
+    Preference order:
+      1) Use elapsed_seconds when available (capped by estimated_seconds if present)
+      2) Otherwise, use a ramping fraction of estimated_seconds by attempt index:
+         1st=0.10, 2nd=0.20, 3rd=0.30 ... cap 0.60
+      3) Fallback fraction when ramping isn't possible: 0.15
+    """
+    estimated_seconds = max(0.0, float(estimated_seconds or 0.0))
+    elapsed_seconds = max(0.0, float(elapsed_seconds or 0.0))
+
+    if elapsed_seconds > 0:
+        if estimated_seconds > 0:
+            return min(elapsed_seconds, estimated_seconds)
+        return elapsed_seconds
+
+    if estimated_seconds <= 0:
+        return 0.0
+
+    try:
+        idx = int(cancelled_attempt_index or 0)
+    except Exception:
+        idx = 0
+
+    if idx <= 0:
+        frac = 0.15
+    else:
+        frac = min(0.60, 0.10 * idx)
+    return estimated_seconds * frac
+
+
+def infer_cancelled_effective_filament_mm(
+    *,
+    filament_mm_raw: float,
+    filament_mm_est: float,
+    duration_seconds_effective: float,
+    duration_seconds_est: float,
+) -> float:
+    """
+    Infer effective filament usage for cancelled/failed print attempts.
+
+    Preference order:
+      1) If filament_mm_raw > 0, use it
+      2) Else if filament_mm_est > 0, scale by progress ratio:
+         duration_effective / max(duration_est, 1), clamped to [0..filament_mm_est]
+      3) Else 0
+    """
+    filament_mm_raw = max(0.0, float(filament_mm_raw or 0.0))
+    filament_mm_est = max(0.0, float(filament_mm_est or 0.0))
+    duration_seconds_effective = max(0.0, float(duration_seconds_effective or 0.0))
+    duration_seconds_est = max(0.0, float(duration_seconds_est or 0.0))
+
+    if filament_mm_raw > 0:
+        return filament_mm_raw
+
+    if filament_mm_est <= 0:
+        return 0.0
+
+    denom = max(duration_seconds_est, 1.0)
+    ratio = min(1.0, max(0.0, duration_seconds_effective / denom))
+    return min(filament_mm_est, filament_mm_est * ratio)
+
+
+def _extract_elapsed_seconds(job: Dict[str, Any], start_ts: float) -> float:
+    end_ts = _as_float(_get_first(job, ("end_time",)))
+    if start_ts > 0 and end_ts > 0 and end_ts >= start_ts:
+        return max(0.0, end_ts - start_ts)
+
+    # Various Moonraker fields observed in the wild.
+    return _as_float(_get_first(job, ("total_duration", "elapsed", "total_time", "duration", "print_duration", "print_time")))
+
+
+def _build_row_from_history_job(printer_name: str, job: Dict[str, Any], *, cancelled_attempt_index: int = 0) -> Dict[str, Any]:
     filename = str(_get_first(job, ("filename", "name", "file")) or "").strip()
     start_ts = _as_float(_get_first(job, ("start_time", "timestamp", "end_time")))
     if start_ts <= 0:
         start_ts = 0.0
 
-    print_time = _as_float(_get_first(job, ("print_time", "print_duration", "total_duration")))
+    # Moonraker's "print_time"/"print_duration" represent actual printed time (completed or partial).
+    # Do NOT fall back to "total_duration" here, as it may be present for cancelled jobs as well.
+    print_time = _as_float(_get_first(job, ("print_time", "print_duration")))
     estimated_time = _as_float(_get_first(job, ("estimated_time", "estimated_duration")))
 
     filament_raw = _as_float(_get_first(job, ("filament_used", "filament", "filament_mm")))
@@ -99,8 +180,18 @@ def _build_row_from_history_job(printer_name: str, job: Dict[str, Any]) -> Dict[
         duration_effective = print_time
         filament_effective = filament_raw
     else:
-        duration_effective = estimated_time * 0.15 if estimated_time > 0 else 0.0
-        filament_effective = 0.0
+        elapsed = _extract_elapsed_seconds(job, start_ts)
+        duration_effective = infer_cancelled_effective_duration_seconds(
+            estimated_seconds=estimated_time,
+            elapsed_seconds=elapsed,
+            cancelled_attempt_index=cancelled_attempt_index,
+        )
+        filament_effective = infer_cancelled_effective_filament_mm(
+            filament_mm_raw=filament_raw,
+            filament_mm_est=filament_est,
+            duration_seconds_effective=duration_effective,
+            duration_seconds_est=estimated_time,
+        )
 
     import_id = compute_import_id(printer_name, job)
     job_uid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{IMPORT_SOURCE_MOONRAKER_HISTORY}:{import_id}"))
@@ -171,6 +262,7 @@ def import_moonraker_history_to_csv(
     skipped = 0
     updated = 0
     errors = 0
+    cancelled_counts: Dict[Tuple[str, str], int] = {}
 
     # Deterministic-ish processing order.
     try:
@@ -180,7 +272,21 @@ def import_moonraker_history_to_csv(
 
     for job in jobs:
         try:
-            row = _build_row_from_history_job(printer_name, job)
+            filename = str(_get_first(job, ("filename", "name", "file")) or "").strip()
+            # Ramping inference requires attempt order per (printer, filename).
+            cancelled_attempt_index = 0
+            try:
+                print_time = _as_float(_get_first(job, ("print_time", "print_duration")))
+                estimated_time = _as_float(_get_first(job, ("estimated_time", "estimated_duration")))
+                outcome = _infer_outcome(job, print_time=print_time, estimated_time=estimated_time)
+                if outcome in ("cancelled", "failed"):
+                    key2 = (printer_name, filename)
+                    cancelled_counts[key2] = cancelled_counts.get(key2, 0) + 1
+                    cancelled_attempt_index = cancelled_counts[key2]
+            except Exception:
+                cancelled_attempt_index = 0
+
+            row = _build_row_from_history_job(printer_name, job, cancelled_attempt_index=cancelled_attempt_index)
             import_id = str(row.get("import_id") or "").strip()
             key = (IMPORT_SOURCE_MOONRAKER_HISTORY, printer_name, import_id)
 
