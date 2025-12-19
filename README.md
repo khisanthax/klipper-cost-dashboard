@@ -77,11 +77,19 @@ mkdir -p data
 docker compose up -d
 ```
 
-- The default `docker-compose.yml` binds to `127.0.0.1:6060` (localhost only). To allow LAN access, change the ports line to `6060:5000` (warning: **no auth**).
+- Security / network access: the default `docker-compose.yml` binds to `127.0.0.1:6060` (localhost only). If you change it to `6060:5000`, you expose KCD to your LAN. There is no login/auth; use a reverse proxy with auth if exposing beyond localhost.
 - Update: `docker compose pull && docker compose up -d`
 - Version pin: change `ghcr.io/khisanthax/klipper-cost-dashboard:latest` to `:vX.Y.Z`
-- Data persistence: all persistent state is stored in `./data` (settings/history/projects/etc.)
+- Data persistence / upgrades: all persistent state is stored in `./data` (mounted to `/app/data`). You can safely upgrade/replace the container image without losing history/settings. Back up the `data/` directory.
 - Dev (build from source): copy `docker-compose.dev.yml.example` to `docker-compose.dev.yml` and run `docker compose -f docker-compose.dev.yml up -d --build`
+
+Quick support / troubleshooting (paste into GitHub issues):
+
+```bash
+docker compose ps
+docker compose logs --tail=200
+docker image ls | grep -E 'klipper-cost-dashboard|kcd'
+```
 
 ### 1. Install the Master
 
