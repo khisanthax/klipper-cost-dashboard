@@ -210,31 +210,31 @@
 
                                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
                                         <h6 class="mb-0">Jobs in this project</h6>
-                                        <div data-kcd-colvis-for="project_{{ p.id }}_jobs_table"></div>
                                     </div>
                                     {% if not p.jobs %}
                                     <div class="text-muted">No jobs assigned yet.</div>
                                     {% else %}
                                     <div class="table-responsive">
+                                        {% set _proj_cols = projects_project_jobs_visible_cols if projects_project_jobs_visible_cols is defined and projects_project_jobs_visible_cols else ["date","thumbnail","printer","filename","status","hours","filament","cost"] %}
                                         <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-table"
-                                            data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-colvis="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
+                                            data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th data-col="date" data-sort-type="date">Date</th>
-                                                    <th style="width: 72px;" data-col="thumbnail" data-sortable="false">Thumb</th>
-                                                    <th data-col="printer" data-sort-type="text">Printer</th>
-                                                    <th data-col="filename" data-sort-type="text">Filename</th>
-                                                    <th data-col="status" data-sort-type="text">Status</th>
-                                                    <th class="text-end" data-col="hours" data-sort-type="number">Hours</th>
-                                                    <th class="text-end" data-col="filament" data-sort-type="number">Filament</th>
-                                                    <th class="text-end" data-col="cost" data-sort-type="number">Cost</th>
+                                                    <th data-col="date" data-sort-type="date" class="{% if 'date' not in _proj_cols %}kcd-col-hidden{% endif %}">Date</th>
+                                                    <th style="width: 72px;" data-col="thumbnail" data-sortable="false" class="{% if 'thumbnail' not in _proj_cols %}kcd-col-hidden{% endif %}">Thumb</th>
+                                                    <th data-col="printer" data-sort-type="text" class="{% if 'printer' not in _proj_cols %}kcd-col-hidden{% endif %}">Printer</th>
+                                                    <th data-col="filename" data-sort-type="text" class="{% if 'filename' not in _proj_cols %}kcd-col-hidden{% endif %}">Filename</th>
+                                                    <th data-col="status" data-sort-type="text" class="{% if 'status' not in _proj_cols %}kcd-col-hidden{% endif %}">Status</th>
+                                                    <th class="text-end{% if 'hours' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="hours" data-sort-type="number">Hours</th>
+                                                    <th class="text-end{% if 'filament' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="filament" data-sort-type="number">Filament</th>
+                                                    <th class="text-end{% if 'cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="cost" data-sort-type="number">Cost</th>
                                                     <th style="width: 1%;" data-col="actions" data-sortable="false"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {% for j in p.jobs %}
                                                 <tr>
-                              <td class="col-timestamp" data-sort="{{ j.timestamp_raw or 0 }}" data-sort-key="date" data-col="date">
+                              <td class="col-timestamp{% if 'date' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.timestamp_raw or 0 }}" data-sort-key="date" data-col="date">
                                   {% if j.timestamp and ' ' in j.timestamp %}
                                       {% set parts = j.timestamp.split(' ', 1) %}
                                       <div class="kcd-dt">
@@ -245,7 +245,7 @@
                                       <div class="kcd-dt">{{ j.timestamp }}</div>
                                   {% endif %}
                               </td>
-                              <td data-col="thumbnail">
+                              <td data-col="thumbnail" class="{% if 'thumbnail' not in _proj_cols %}kcd-col-hidden{% endif %}">
                                   {% if j._thumbs_enabled %}
                                       {% set thumb_url = j._thumb_small %}
                                       {% set size = "small" %}
@@ -253,18 +253,18 @@
                                       {% include "partials/_thumbnail.html" %}
                                   {% endif %}
                               </td>
-                              <td class="text-nowrap" data-sort="{{ j.printer|lower }}" data-sort-key="printer" data-col="printer">{{ j.printer }}</td>
-                              <td class="text-break" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename">{{ j.filename }}</td>
-                             <td class="text-nowrap" data-sort="{{ j.status|lower }}" data-sort-key="status" data-col="status">{{ j.status }}</td>
-                             <td class="text-end" data-sort="{{ j.duration_hours or 0 }}" data-sort-key="hours" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
-                             <td class="text-end text-nowrap" data-sort="{{ j.filament_meters or 0 }}" data-sort-key="filament" data-col="filament">
+                              <td class="text-nowrap{% if 'printer' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.printer|lower }}" data-sort-key="printer" data-col="printer">{{ j.printer }}</td>
+                              <td class="text-break{% if 'filename' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename">{{ j.filename }}</td>
+                             <td class="text-nowrap{% if 'status' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.status|lower }}" data-sort-key="status" data-col="status">{{ j.status }}</td>
+                             <td class="text-end{% if 'hours' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.duration_hours or 0 }}" data-sort-key="hours" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
+                             <td class="text-end text-nowrap{% if 'filament' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filament_meters or 0 }}" data-sort-key="filament" data-col="filament">
                                                         {% if j.filament_meters %}
                                                         {{ "%.2f"|format(j.filament_meters|float) }} m
                                                         {% else %}
                                                         —
                                                         {% endif %}
                                                     </td>
-                              <td class="text-end" data-sort="{{ j.total_cost or 0 }}" data-sort-key="cost" data-col="cost">
+                              <td class="text-end{% if 'cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.total_cost or 0 }}" data-sort-key="cost" data-col="cost">
                                   {% if show_cost_totals %}
                                       ${{ "%.2f"|format(j.total_cost|float) }}
                                   {% else %}
@@ -580,7 +580,6 @@
         <h5 class="mb-0">Unassigned Jobs</h5>
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="text-muted small">Select jobs and assign them to a project</span>
-            <div data-kcd-colvis-for="projects_unassigned_jobs_table"></div>
         </div>
     </div>
     <div class="card-body">
@@ -621,19 +620,20 @@
 
             <div class="table-responsive">
                 <table class="table table-striped table-hover align-middle kcd-table" id="kcdUnassignedJobsTable"
-                    data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-colvis="true" data-kcd-table-id="projects_unassigned_jobs_table"
+                    data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="projects_unassigned_jobs_table"
                     data-kcd-printer-filter="kcdUnassignedPrinterFilter">
                     <thead class="table-light">
+                        {% set _unassigned_cols = projects_unassigned_visible_cols if projects_unassigned_visible_cols is defined and projects_unassigned_visible_cols else ["thumbnail","date","printer","filename","status","hours","filament","cost"] %}
                         <tr>
                             <th style="width: 1%;" data-col="__select__" data-sortable="false"></th>
-                            <th style="width: 72px;" data-col="thumbnail" data-sortable="false">Thumb</th>
-                            <th data-col="date" data-sort-type="date">Date</th>
-                            <th data-col="printer" data-sort-type="text">Printer</th>
-                            <th data-col="filename" data-sort-type="text">Filename</th>
-                            <th data-col="status" data-sort-type="text">Status</th>
-                            <th class="text-end" data-col="hours" data-sort-type="number">Hours</th>
-                            <th class="text-end" data-col="filament" data-sort-type="number">Filament</th>
-                            <th class="text-end" data-col="cost" data-sort-type="number">Cost</th>
+                            <th style="width: 72px;" data-col="thumbnail" data-sortable="false" class="{% if 'thumbnail' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Thumb</th>
+                            <th data-col="date" data-sort-type="date" class="{% if 'date' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Date</th>
+                            <th data-col="printer" data-sort-type="text" class="{% if 'printer' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Printer</th>
+                            <th data-col="filename" data-sort-type="text" class="{% if 'filename' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Filename</th>
+                            <th data-col="status" data-sort-type="text" class="{% if 'status' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Status</th>
+                            <th class="text-end{% if 'hours' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="hours" data-sort-type="number">Hours</th>
+                            <th class="text-end{% if 'filament' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filament" data-sort-type="number">Filament</th>
+                            <th class="text-end{% if 'cost' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="cost" data-sort-type="number">Cost</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -642,7 +642,7 @@
                                <td data-col="__select__">
                                   <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}">
                                </td>
-                              <td data-col="thumbnail">
+                              <td data-col="thumbnail" class="{% if 'thumbnail' not in _unassigned_cols %}kcd-col-hidden{% endif %}">
                                   {% if j._thumbs_enabled %}
                                       {% set thumb_url = j._thumb_small %}
                                       {% set size = "small" %}
@@ -650,7 +650,7 @@
                                       {% include "partials/_thumbnail.html" %}
                                   {% endif %}
                               </td>
-                              <td class="col-timestamp" data-col="date">
+                              <td class="col-timestamp{% if 'date' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="date">
                                  {% if j.timestamp and ' ' in j.timestamp %}
                                      {% set parts = j.timestamp.split(' ', 1) %}
                                      <div class="kcd-dt">
@@ -661,18 +661,18 @@
                                      <div class="kcd-dt">{{ j.timestamp }}</div>
                                  {% endif %}
                              </td>
-                              <td class="text-nowrap" data-col="printer">{{ j.printer }}</td>
-                              <td class="text-break" data-col="filename">{{ j.filename }}</td>
-                             <td class="text-nowrap" data-col="status">{{ j.status }}</td>
-                             <td class="text-end" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
-                             <td class="text-end text-nowrap" data-col="filament">
+                              <td class="text-nowrap{% if 'printer' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="printer">{{ j.printer }}</td>
+                              <td class="text-break{% if 'filename' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filename">{{ j.filename }}</td>
+                             <td class="text-nowrap{% if 'status' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="status">{{ j.status }}</td>
+                             <td class="text-end{% if 'hours' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
+                             <td class="text-end text-nowrap{% if 'filament' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filament">
                                 {% if j.filament_meters %}
                                 {{ "%.2f"|format(j.filament_meters|float) }} m
                                 {% else %}
                                 —
                                 {% endif %}
                             </td>
-                              <td class="text-end" data-col="cost">
+                              <td class="text-end{% if 'cost' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="cost">
                                   {% if show_cost_totals %}
                                       ${{ "%.2f"|format(j.total_cost|float) }}
                                   {% else %}

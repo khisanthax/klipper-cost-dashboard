@@ -58,6 +58,9 @@ def ensure_display_exists(display_file, headers):
         visible = [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
         data = {
             "visible_columns": visible,
+            "tables": {
+                "history": {"visible_columns": visible},
+            },
             "hidden_printers": [],
             # When false, hourly cost excludes paused time by default.
             "pause_include_paused_time_default": False,
@@ -65,6 +68,23 @@ def ensure_display_exists(display_file, headers):
         }
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
+
+def _coerce_display_tables(value):
+    if not isinstance(value, dict):
+        return {}
+    tables = {}
+    for key, cfg in value.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        cols_raw = cfg.get("visible_columns")
+        if isinstance(cols_raw, list):
+            cols = [str(c).strip() for c in cols_raw if str(c).strip()]
+        else:
+            cols = []
+        tables[key] = {"visible_columns": cols}
+    return tables
 
 
 def load_display_settings(display_file, headers):
@@ -76,15 +96,29 @@ def load_display_settings(display_file, headers):
             if not isinstance(data, dict):
                 return {
                     "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")],
+                    "tables": {"history": {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]}},
                     "hidden_printers": [],
                     "pause_include_paused_time_default": False,
                     "projects_show_cost_totals": True,
                 }
-            cols = data.get("visible_columns", headers)
+
+            tables = _coerce_display_tables(data.get("tables"))
+
+            # Backwards-compatible: top-level visible_columns = history visible columns.
+            history_cols = None
+            if isinstance(tables.get("history"), dict):
+                history_cols = tables.get("history", {}).get("visible_columns")
+            if not isinstance(history_cols, list):
+                history_cols = data.get("visible_columns", headers)
+            cols = history_cols
             cols = [c for c in cols if c in headers]
             cols = [c for c in cols if c != "job_uid"]
             if not cols:
                 cols = [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
+
+            # Ensure the history table always exists in the returned "tables" mapping.
+            tables.setdefault("history", {"visible_columns": cols})
+
             hidden = data.get("hidden_printers", [])
             if not isinstance(hidden, list):
                 hidden = []
@@ -104,6 +138,7 @@ def load_display_settings(display_file, headers):
             show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
             return {
                 "visible_columns": cols,
+                "tables": tables,
                 "hidden_printers": hidden,
                 "pause_include_paused_time_default": pause_include,
                 "projects_show_cost_totals": show_cost_totals,
@@ -111,10 +146,46 @@ def load_display_settings(display_file, headers):
     except Exception:
         return {
             "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")],
+            "tables": {"history": {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]}},
             "hidden_printers": [],
             "pause_include_paused_time_default": False,
             "projects_show_cost_totals": True,
         }
+
+def get_visible_columns_for_table(display_settings, table_id, allowed_columns):
+    """
+    Return visible columns for a given table_id from display settings.
+
+    If no saved settings exist for this table, default to showing all allowed columns.
+    """
+    allowed = [c for c in (allowed_columns or []) if isinstance(c, str) and c.strip()]
+    if not allowed:
+        return []
+
+    try:
+        tables = display_settings.get("tables") if isinstance(display_settings, dict) else {}
+        cfg = tables.get(table_id) if isinstance(tables, dict) else None
+        cols = cfg.get("visible_columns") if isinstance(cfg, dict) else None
+        if isinstance(cols, list):
+            out = [c for c in cols if c in allowed]
+            if out:
+                return out
+    except Exception:
+        pass
+
+    return list(allowed)
+
+
+def set_visible_columns_for_table(display_settings, table_id, visible_columns):
+    if not isinstance(display_settings, dict):
+        display_settings = {}
+    tables = _coerce_display_tables(display_settings.get("tables"))
+    cols = [str(c).strip() for c in (visible_columns or []) if str(c).strip()]
+    tables[str(table_id)] = {"visible_columns": cols}
+    display_settings["tables"] = tables
+    if str(table_id) == "history":
+        display_settings["visible_columns"] = cols
+    return display_settings
 
 
 def save_display_settings(display_file, data_dir, display_settings):
@@ -139,11 +210,19 @@ def save_display_settings(display_file, data_dir, display_settings):
     except Exception:
         existing = {}
 
+    existing_tables = _coerce_display_tables(existing.get("tables"))
+    incoming_tables = _coerce_display_tables(display_settings.get("tables") if isinstance(display_settings, dict) else {})
+
     visible_columns = []
     try:
         visible_columns = list(display_settings.get("visible_columns") or [])
     except Exception:
         visible_columns = []
+
+    # History columns can come from either top-level visible_columns or tables.history.visible_columns.
+    history_raw = incoming_tables.get("history", {}).get("visible_columns")
+    if isinstance(history_raw, list) and history_raw:
+        visible_columns = history_raw
 
     visible = [c for c in visible_columns if c in HEADERS and c != "job_uid"]
     if not visible:
@@ -154,6 +233,15 @@ def save_display_settings(display_file, data_dir, display_settings):
         hidden = []
     hidden = [str(p) for p in hidden if str(p).strip()]
 
+    # Merge any non-history table settings (already validated by callers).
+    for table_id, cfg in incoming_tables.items():
+        if table_id == "history":
+            continue
+        existing_tables[table_id] = {"visible_columns": cfg.get("visible_columns", [])}
+
+    # Always persist history visible columns under tables.history, and keep legacy visible_columns for back-compat.
+    existing_tables["history"] = {"visible_columns": visible}
+    existing["tables"] = existing_tables
     existing["visible_columns"] = visible
     existing["hidden_printers"] = hidden
     # Persist pause accounting global default with "include paused time" semantics.
@@ -182,21 +270,14 @@ def save_display_settings(display_file, data_dir, display_settings):
 
 def save_hidden_printers(display_file, headers, hidden_printers):
     """Persist hidden printer list while preserving visible column settings."""
-    settings = load_display_settings(display_file, headers)
-    visible_cols = settings.get("visible_columns", [h for h in headers if h != "job_uid"])
     hidden = hidden_printers if isinstance(hidden_printers, list) else []
     hidden = [str(p) for p in hidden if str(p).strip()]
-    with open(display_file, "w") as f:
-        json.dump(
-            {
-                "visible_columns": visible_cols,
-                "hidden_printers": hidden,
-                "pause_include_paused_time_default": bool(settings.get("pause_include_paused_time_default", False)),
-                "projects_show_cost_totals": bool(settings.get("projects_show_cost_totals", True)),
-            },
-            f,
-            indent=2,
-        )
+    settings = load_display_settings(display_file, headers)
+    if not isinstance(settings, dict):
+        settings = {}
+    settings["hidden_printers"] = hidden
+    from core.config import DATA_DIR
+    save_display_settings(display_file, DATA_DIR, settings)
 
 
 def ensure_api_key(secret_file=None, data_dir=None):

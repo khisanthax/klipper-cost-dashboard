@@ -25,6 +25,7 @@ from core.storage import (
     rewrite_csv_without_indices, rewrite_csv_mark_completed,
     rewrite_csv_without_job_uids, rewrite_csv_mark_completed_job_uids,
     rewrite_csv_recalculate_costs_job_uids,
+    get_visible_columns_for_table, set_visible_columns_for_table,
     ts_to_local_dt
 )
 from core.pricing import (
@@ -1105,6 +1106,12 @@ def recalculate_page():
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
+    display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+    recalc_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "recalc_jobs",
+        ["printer", "filename", "status", "hours", "total", "job_uid"],
+    )
     return render_template(
         "recalculate.html",
         error=error,
@@ -1132,6 +1139,7 @@ def recalculate_page():
         selected_job_uids=set(),
         select_filtered=False,
         preview=None,
+        recalc_visible_cols=recalc_visible_cols,
         pager={
             "page": page,
             "per_page": per_page,
@@ -1540,6 +1548,12 @@ def recalculate_preview():
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
+    display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+    recalc_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "recalc_jobs",
+        ["printer", "filename", "status", "hours", "total", "job_uid"],
+    )
 
     msg = f"Previewing {len(preview_rows)} job(s)."
     if missing:
@@ -1585,6 +1599,7 @@ def recalculate_preview():
         rows_page=rows_page,
         selected_job_uids=to_preview,
         select_filtered=select_filtered,
+        recalc_visible_cols=recalc_visible_cols,
         preview={
             "rows": preview_rows,
             "totals": {"before": before_total, "after": after_total, "delta": after_total - before_total},
@@ -2031,6 +2046,18 @@ def projects_page():
             j["_thumbs_enabled"] = bool(thumbs_enabled)
             j["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
 
+    # Server-backed per-table column visibility (Settings → Other).
+    projects_unassigned_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "projects_unassigned",
+        ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"],
+    )
+    projects_project_jobs_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "projects_project_jobs",
+        ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"],
+    )
+
     return render_template(
         "projects.html",
         error=error,
@@ -2038,6 +2065,8 @@ def projects_page():
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
         display_settings=display_settings,
+        projects_unassigned_visible_cols=projects_unassigned_visible_cols,
+        projects_project_jobs_visible_cols=projects_project_jobs_visible_cols,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
         unassigned_jobs_page=unassigned_jobs_page,
@@ -2181,9 +2210,27 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "update_columns":
+            table_id = (request.form.get("table") or "history").strip()
             cols = request.form.getlist("columns")
             display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-            display_settings["visible_columns"] = cols
+
+            if table_id == "history":
+                allowed = [h for h in HEADERS if h != "job_uid"]
+            elif table_id == "recalc_jobs":
+                allowed = ["printer", "filename", "status", "hours", "total", "job_uid"]
+            elif table_id == "projects_unassigned":
+                allowed = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
+            elif table_id == "projects_project_jobs":
+                allowed = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
+            else:
+                allowed = [h for h in HEADERS if h != "job_uid"]
+                table_id = "history"
+
+            selected = [c for c in cols if c in allowed]
+            if not selected:
+                selected = list(allowed)
+
+            display_settings = set_visible_columns_for_table(display_settings, table_id, selected)
             save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -2377,6 +2424,12 @@ def _settings_view(tab: str):
         headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,
+        recalc_allowed_cols=recalc_allowed_cols,
+        recalc_selected_columns=recalc_selected_columns,
+        projects_unassigned_allowed_cols=projects_unassigned_allowed_cols,
+        projects_unassigned_selected_columns=projects_unassigned_selected_columns,
+        projects_project_jobs_allowed_cols=projects_project_jobs_allowed_cols,
+        projects_project_jobs_selected_columns=projects_project_jobs_selected_columns,
         display_settings=display_settings,
         profiles=all_profiles,
         printer_mappings=printer_mappings,

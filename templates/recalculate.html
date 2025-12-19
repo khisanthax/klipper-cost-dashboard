@@ -194,7 +194,6 @@
         </div>
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <div class="text-muted small" id="kcd-selected-summary"></div>
-            <div data-kcd-colvis-for="recalc_table"></div>
         </div>
     </div>
     <div class="card-body">
@@ -245,19 +244,20 @@
             </div>
 
             <div class="table-responsive">
+                {% set _recalc_cols = recalc_visible_cols if recalc_visible_cols is defined and recalc_visible_cols else ["printer","filename","status","hours","total","job_uid"] %}
                 <table id="recalc-table" class="table table-striped table-hover table-sm align-middle mb-0 kcd-table"
-                       data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-colvis="true" data-kcd-table-id="recalc_table">
+                       data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="recalc_table">
                     <thead>
                         <tr>
                             <th style="width: 36px;" data-col="__select__" data-sortable="false">
                                 <input type="checkbox" class="form-check-input" id="kcd-toggle-all">
                             </th>
-                            <th data-col="printer" data-sort-type="text">Printer</th>
-                            <th data-col="filename" data-sort-type="text">Filename</th>
-                            <th data-col="status" data-sort-type="text">Status</th>
-                            <th class="text-end" data-col="hours" data-sort-type="number">Hours</th>
-                            <th class="text-end" data-col="total" data-sort-type="number">Total ($)</th>
-                            <th class="text-muted" data-col="job_uid" data-sort-type="text">Job UID</th>
+                            <th data-col="printer" data-sort-type="text" class="{% if 'printer' not in _recalc_cols %}kcd-col-hidden{% endif %}">Printer</th>
+                            <th data-col="filename" data-sort-type="text" class="{% if 'filename' not in _recalc_cols %}kcd-col-hidden{% endif %}">Filename</th>
+                            <th data-col="status" data-sort-type="text" class="{% if 'status' not in _recalc_cols %}kcd-col-hidden{% endif %}">Status</th>
+                            <th class="text-end{% if 'hours' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="hours" data-sort-type="number">Hours</th>
+                            <th class="text-end{% if 'total' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="total" data-sort-type="number">Total ($)</th>
+                            <th class="text-muted{% if 'job_uid' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="job_uid" data-sort-type="text">Job UID</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -270,12 +270,12 @@
                                        value="{{ r.job_uid }}"
                                        {% if selected_job_uids and (r.job_uid in selected_job_uids) %}checked{% endif %}>
                             </td>
-                            <td class="text-nowrap" data-col="printer">{{ r.printer }}</td>
-                            <td class="text-truncate" style="max-width: 420px;" title="{{ r.filename }}" data-col="filename">{{ r.filename }}</td>
-                            <td class="text-nowrap" data-col="status">{{ r.status }}</td>
-                            <td class="text-end" data-col="hours">{{ "%.2f"|format(r.duration_hours|float) }}</td>
-                            <td class="text-end" data-col="total">{{ "%.2f"|format(r.total_cost|float) }}</td>
-                            <td class="text-muted small text-truncate" style="max-width: 240px;" title="{{ r.job_uid }}" data-col="job_uid">{{ r.job_uid }}</td>
+                            <td class="text-nowrap{% if 'printer' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="printer">{{ r.printer }}</td>
+                            <td class="text-truncate{% if 'filename' not in _recalc_cols %} kcd-col-hidden{% endif %}" style="max-width: 420px;" title="{{ r.filename }}" data-col="filename">{{ r.filename }}</td>
+                            <td class="text-nowrap{% if 'status' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="status">{{ r.status }}</td>
+                            <td class="text-end{% if 'hours' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="hours">{{ "%.2f"|format(r.duration_hours|float) }}</td>
+                            <td class="text-end{% if 'total' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="total">{{ "%.2f"|format(r.total_cost|float) }}</td>
+                            <td class="text-muted small text-truncate{% if 'job_uid' not in _recalc_cols %} kcd-col-hidden{% endif %}" style="max-width: 240px;" title="{{ r.job_uid }}" data-col="job_uid">{{ r.job_uid }}</td>
                         </tr>
                         {% endfor %}
                         {% if not rows_page %}
