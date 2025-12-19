@@ -3,7 +3,7 @@ version: "3.8"
 services:
   kcd:
     build: .
-    container_name: kcd
+    container_name: print-cost-dashboard
     restart: unless-stopped
     ports:
       - "6060:5000"
