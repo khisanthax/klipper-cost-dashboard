@@ -2,11 +2,11 @@ version: "3.8"
 
 services:
   kcd:
-    image: ghcr.io/khisanthax/klipper-cost-dashboard:latest
+    build: .
     container_name: kcd
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6060:5000"
+      - "6060:5000"
     volumes:
       - ./data:/app/data
     environment:

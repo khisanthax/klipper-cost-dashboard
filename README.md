@@ -66,6 +66,22 @@ This makes KCD easy to back up, inspect, and migrate.
 
 > **TL;DR:** Install the master, install clients, print something.
 
+## Docker (recommended)
+
+Quickstart:
+
+```bash
+mkdir -p kcd && cd kcd
+curl -fsSL https://raw.githubusercontent.com/khisanthax/klipper-cost-dashboard/main/docker-compose.yml -o docker-compose.yml
+mkdir -p data
+docker compose up -d
+```
+
+- The default `docker-compose.yml` binds to `127.0.0.1:6060` (localhost only). To allow LAN access, change the ports line to `6060:5000` (warning: **no auth**).
+- Update: `docker compose pull && docker compose up -d`
+- Version pin: change `ghcr.io/khisanthax/klipper-cost-dashboard:latest` to `:vX.Y.Z`
+- Data persistence: all persistent state is stored in `./data` (settings/history/projects/etc.)
+
 ### 1. Install the Master
 
 Run the installer on the machine where you want the dashboard to live.
