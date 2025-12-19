@@ -2391,6 +2391,20 @@ def _settings_view(tab: str):
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     selected_columns = display_settings.get("visible_columns") or HEADERS
 
+    # Settings → Other: per-table column visibility (server-backed display.json).
+    # Defaults: show all allowed columns if no saved selection exists.
+    recalc_allowed_cols = ["printer", "filename", "status", "hours", "total", "job_uid"]
+    projects_unassigned_allowed_cols = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
+    projects_project_jobs_allowed_cols = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
+
+    recalc_selected_columns = get_visible_columns_for_table(display_settings, "recalc_jobs", recalc_allowed_cols)
+    projects_unassigned_selected_columns = get_visible_columns_for_table(
+        display_settings, "projects_unassigned", projects_unassigned_allowed_cols
+    )
+    projects_project_jobs_selected_columns = get_visible_columns_for_table(
+        display_settings, "projects_project_jobs", projects_project_jobs_allowed_cols
+    )
+
     # Load profile data
     all_profiles = profiles.get_all_profiles()
     printer_mappings = profiles.get_all_printer_mappings()
