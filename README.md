@@ -81,6 +81,7 @@ docker compose up -d
 - Update: `docker compose pull && docker compose up -d`
 - Version pin: change `ghcr.io/khisanthax/klipper-cost-dashboard:latest` to `:vX.Y.Z`
 - Data persistence: all persistent state is stored in `./data` (settings/history/projects/etc.)
+- Dev (build from source): copy `docker-compose.dev.yml.example` to `docker-compose.dev.yml` and run `docker compose -f docker-compose.dev.yml up -d --build`
 
 ### 1. Install the Master
 

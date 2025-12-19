@@ -9,3 +9,6 @@ __pycache__/
 
 # Agent / tool state
 codex_memory/
+
+# Local/dev compose override (keep private)
+docker-compose.dev.yml
