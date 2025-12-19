@@ -42,6 +42,7 @@ from core import pricing
 from core import live
 from core import projects
 from core import thumbnails as thumbs
+from core.moonraker import test_moonraker_url
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
     get_canonical_printer_names,
@@ -2032,6 +2033,28 @@ def _settings_view(tab: str):
                 save_settings(SETTINGS_FILE, DATA_DIR, settings)
 
             return redirect(url_for(_settings_endpoint_for_action(action)))
+
+        if action == "test_moonraker":
+            printer = (request.form.get("printer") or "").strip()
+            if not printer:
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+
+            base_url = thumbs.resolve_moonraker_base_url(printer)
+            if not base_url:
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        error=(
+                            f"No Moonraker URL configured for {printer}. "
+                            "Set settings.json moonraker_url for this printer, then retry."
+                        ),
+                    )
+                )
+
+            ok, detail, _payload = test_moonraker_url(base_url)
+            if ok:
+                return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker OK for {printer}: {base_url}"))
+            return redirect(url_for(_settings_endpoint_for_action(action), error=f"Moonraker test failed for {printer}: {detail} ({base_url})"))
 
         if action == "update_columns":
             cols = request.form.getlist("columns")
