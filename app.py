@@ -43,6 +43,7 @@ from core import live
 from core import projects
 from core import thumbnails as thumbs
 from core.moonraker import test_moonraker_url
+from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
     get_canonical_printer_names,
@@ -2055,6 +2056,63 @@ def _settings_view(tab: str):
             if ok:
                 return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker OK for {printer}: {base_url}"))
             return redirect(url_for(_settings_endpoint_for_action(action), error=f"Moonraker test failed for {printer}: {detail} ({base_url})"))
+
+        if action == "import_moonraker_history":
+            printer = (request.form.get("printer") or "").strip()
+            if not printer:
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+
+            base_url = thumbs.resolve_moonraker_base_url(printer)
+            if not base_url:
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        error=(
+                            f"No Moonraker URL configured for {printer}. "
+                            "Set settings.json moonraker_url for this printer, then retry."
+                        ),
+                    )
+                )
+
+            limit_raw = (request.form.get("import_limit") or "200").strip().lower()
+            limit = None
+            if limit_raw not in ("", "all"):
+                try:
+                    limit = int(limit_raw)
+                except Exception:
+                    limit = 200
+                limit = max(1, min(5000, limit))
+
+            skip_existing = bool(request.form.get("import_skip_existing"))
+            overwrite_existing = bool(request.form.get("import_overwrite_existing"))
+            if overwrite_existing:
+                skip_existing = False
+
+            summary = import_moonraker_history_to_csv(
+                csv_file=CSV_FILE,
+                headers=HEADERS,
+                printer_name=printer,
+                base_url=base_url,
+                limit=limit,
+                skip_existing=skip_existing,
+                overwrite_existing=overwrite_existing,
+            )
+
+            if summary.get("errors"):
+                err = summary.get("error") or "Import failed."
+                return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+
+            return redirect(
+                url_for(
+                    _settings_endpoint_for_action(action),
+                    msg=(
+                        f"Moonraker import complete for {printer}: "
+                        f"imported={summary.get('imported', 0)}, "
+                        f"skipped={summary.get('skipped', 0)}, "
+                        f"updated={summary.get('updated', 0)}"
+                    ),
+                )
+            )
 
         if action == "update_columns":
             cols = request.form.getlist("columns")

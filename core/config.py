@@ -47,6 +47,16 @@ HEADERS = [
     "filament_material",
     "status",
     "failure_reason",
+    # Import metadata (Moonraker history backfill)
+    "import_source",
+    "import_id",
+    "job_outcome",
+    "duration_seconds_raw",
+    "duration_seconds_est",
+    "duration_seconds_effective",
+    "filament_mm_raw",
+    "filament_mm_est",
+    "filament_mm_effective",
 ]
 
 # User-friendly column names
@@ -71,6 +81,15 @@ FRIENDLY_HEADERS = {
     "filament_material": "Material",
     "status": "Status",
     "failure_reason": "Failure Reason",
+    "import_source": "Import Source",
+    "import_id": "Import ID",
+    "job_outcome": "Outcome",
+    "duration_seconds_raw": "Duration Raw (sec)",
+    "duration_seconds_est": "Duration Est (sec)",
+    "duration_seconds_effective": "Duration Effective (sec)",
+    "filament_mm_raw": "Filament Raw (mm)",
+    "filament_mm_est": "Filament Est (mm)",
+    "filament_mm_effective": "Filament Effective (mm)",
 }
 
 # Colors per printer for tags

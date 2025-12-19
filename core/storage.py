@@ -51,7 +51,21 @@ def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
-        visible = [h for h in headers if h not in ("job_uid", "thumbnail")]
+        _hidden_defaults = {
+            "job_uid",
+            "thumbnail",
+            # Import/internal columns are opt-in to keep history readable by default.
+            "import_source",
+            "import_id",
+            "job_outcome",
+            "duration_seconds_raw",
+            "duration_seconds_est",
+            "duration_seconds_effective",
+            "filament_mm_raw",
+            "filament_mm_est",
+            "filament_mm_effective",
+        }
+        visible = [h for h in headers if h not in _hidden_defaults]
         data = {"visible_columns": visible, "hidden_printers": []}
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
@@ -60,23 +74,36 @@ def ensure_display_exists(display_file, headers):
 def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
     ensure_display_exists(display_file, headers)
+    _hidden_defaults = {
+        "job_uid",
+        "thumbnail",
+        "import_source",
+        "import_id",
+        "job_outcome",
+        "duration_seconds_raw",
+        "duration_seconds_est",
+        "duration_seconds_effective",
+        "filament_mm_raw",
+        "filament_mm_est",
+        "filament_mm_effective",
+    }
     try:
         with open(display_file) as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                return {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")], "hidden_printers": []}
+                return {"visible_columns": [h for h in headers if h not in _hidden_defaults], "hidden_printers": []}
             cols = data.get("visible_columns", headers)
             cols = [c for c in cols if c in headers]
             cols = [c for c in cols if c != "job_uid"]
             if not cols:
-                cols = [h for h in headers if h not in ("job_uid", "thumbnail")]
+                cols = [h for h in headers if h not in _hidden_defaults]
             hidden = data.get("hidden_printers", [])
             if not isinstance(hidden, list):
                 hidden = []
             hidden = [str(p) for p in hidden if str(p).strip()]
             return {"visible_columns": cols, "hidden_printers": hidden}
     except Exception:
-        return {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail")], "hidden_printers": []}
+        return {"visible_columns": [h for h in headers if h not in _hidden_defaults], "hidden_printers": []}
 
 
 def save_display_settings(display_file, headers, visible_columns):
@@ -146,6 +173,86 @@ def ensure_api_key(secret_file=None, data_dir=None):
         return None
 
 
+def ensure_csv_schema(csv_file: str, expected_headers: list[str]) -> bool:
+    """
+    Ensure a CSV file's header matches the expected schema exactly.
+
+    This prevents "shifted columns" when new fields are appended to HEADERS but an
+    existing CSV still has an older header row.
+
+    Migration behavior:
+    - Create a timestamped backup: <csv>.bak-YYYYmmdd-HHMMSS
+    - Rewrite the file with expected_headers as the header
+    - Preserve values by header-name matching when possible
+    - Special-case: if the existing header is a strict prefix of expected_headers,
+      map extra positional fields to the newly-added expected columns (common case).
+    """
+    if not os.path.exists(csv_file):
+        return False
+
+    expected_headers = list(expected_headers or [])
+    if not expected_headers:
+        return False
+
+    try:
+        with open(csv_file, newline="") as f:
+            reader = csv.reader(f)
+            header_row = next(reader, [])
+    except Exception:
+        return False
+
+    header_row = [str(h or "").strip() for h in (header_row or [])]
+    if header_row == expected_headers:
+        return False
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = f"{csv_file}.bak-{ts}"
+    try:
+        shutil.copy2(csv_file, backup_path)
+    except Exception:
+        pass
+
+    prefix_mapping = bool(header_row) and expected_headers[: len(header_row)] == header_row
+
+    rows_out: list[dict] = []
+    try:
+        if prefix_mapping:
+            with open(csv_file, newline="") as f:
+                reader = csv.reader(f)
+                _ = next(reader, None)
+                for row in reader:
+                    row = list(row or [])
+                    new_row = {}
+                    for idx, h in enumerate(expected_headers):
+                        new_row[h] = row[idx] if idx < len(row) else ""
+                    rows_out.append(new_row)
+        else:
+            with open(csv_file, newline="") as f:
+                reader = csv.DictReader(f)
+                for r in reader:
+                    r = dict(r or {})
+                    rows_out.append({h: r.get(h, "") for h in expected_headers})
+    except Exception:
+        return False
+
+    tmp_path = f"{csv_file}.tmp"
+    try:
+        with open(tmp_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=expected_headers)
+            writer.writeheader()
+            for r in rows_out:
+                writer.writerow({h: r.get(h, "") for h in expected_headers})
+        os.replace(tmp_path, csv_file)
+        return True
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        return False
+
+
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
     if "job_uid" in headers and not str(data.get("job_uid") or "").strip():
@@ -153,13 +260,9 @@ def append_row(csv_file, headers, data):
 
     file_exists = os.path.exists(csv_file)
     if file_exists:
-        # Migrate legacy CSV headers (no job_uid) before appending with the new schema.
         try:
-            with open(csv_file, newline="") as f:
-                reader = csv.reader(f)
-                header_row = next(reader, [])
-            if "job_uid" in headers and "job_uid" not in header_row:
-                load_rows_raw(csv_file)
+            # Ensure header matches current schema before we append.
+            ensure_csv_schema(csv_file, headers)
         except Exception:
             pass
     with open(csv_file, "a", newline="") as f:
@@ -175,6 +278,15 @@ def load_rows_raw(csv_file):
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:
+        from core.config import HEADERS
+
+        # Prevent "shifted columns" by aligning the on-disk header to HEADERS.
+        # This is best-effort; if it fails we continue and attempt to load anyway.
+        try:
+            ensure_csv_schema(csv_file, HEADERS)
+        except Exception:
+            pass
+
         needs_writeback = False
         file_fieldnames = []
         with open(csv_file, newline="") as f:
@@ -193,6 +305,24 @@ def load_rows_raw(csv_file):
                     r["status"] = "completed"
                 if "failure_reason" not in r:
                     r["failure_reason"] = ""
+
+                # Moonraker import columns (safe defaults)
+                if "import_source" not in r:
+                    r["import_source"] = ""
+                if "import_id" not in r:
+                    r["import_id"] = ""
+                if "job_outcome" not in r:
+                    r["job_outcome"] = ""
+                for k in (
+                    "duration_seconds_raw",
+                    "duration_seconds_est",
+                    "duration_seconds_effective",
+                    "filament_mm_raw",
+                    "filament_mm_est",
+                    "filament_mm_effective",
+                ):
+                    if k not in r or not str(r.get(k) or "").strip():
+                        r[k] = "0"
 
                 # History rows should represent finalized jobs only. If older rows
                 # incorrectly captured transient live states, normalize them for display.
@@ -232,7 +362,6 @@ def load_rows_raw(csv_file):
             needs_writeback = True
 
         if needs_writeback:
-            from core.config import HEADERS
             with open(csv_file, "w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=HEADERS)
                 writer.writeheader()
@@ -241,6 +370,28 @@ def load_rows_raw(csv_file):
         return rows, None
     except Exception as e:
         return [], f"Error reading CSV: {e}"
+
+
+def rewrite_csv_all_rows(csv_file: str, headers: list, rows: list[dict]) -> None:
+    """
+    Rewrite the entire CSV from an in-memory row list (as returned by load_rows_raw).
+
+    Uses _row_to_csv_dict to preserve raw timestamps and other persisted fields.
+    """
+    tmp_path = f"{csv_file}.tmp"
+    try:
+        with open(tmp_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(_row_to_csv_dict(row, headers))
+        os.replace(tmp_path, csv_file)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 def _canon_float(value, *, decimals: int = 6) -> str:
