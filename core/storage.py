@@ -6,6 +6,7 @@ import csv
 import json
 import secrets
 import hashlib
+import logging
 import shutil
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
     ZoneInfo = None
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_settings_exists(settings_file, default_pricing):
@@ -51,10 +54,13 @@ def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
+        # Keep analytics/internal columns opt-in to avoid surprising users.
         _hidden_defaults = {
             "job_uid",
             "thumbnail",
-            # Import/internal columns are opt-in to keep history readable by default.
+            "pause_count",
+            "runout_count",
+            # Moonraker import fields are opt-in (auditing/debug).
             "import_source",
             "import_id",
             "job_outcome",
@@ -66,9 +72,35 @@ def ensure_display_exists(display_file, headers):
             "filament_mm_effective",
         }
         visible = [h for h in headers if h not in _hidden_defaults]
-        data = {"visible_columns": visible, "hidden_printers": []}
+        data = {
+            "visible_columns": visible,
+            "tables": {
+                "history": {"visible_columns": visible},
+            },
+            "hidden_printers": [],
+            # When false, hourly cost excludes paused time by default.
+            "pause_include_paused_time_default": False,
+            "projects_show_cost_totals": True,
+        }
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
+
+def _coerce_display_tables(value):
+    if not isinstance(value, dict):
+        return {}
+    tables = {}
+    for key, cfg in value.items():
+        if not isinstance(key, str) or not key.strip():
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        cols_raw = cfg.get("visible_columns")
+        if isinstance(cols_raw, list):
+            cols = [str(c).strip() for c in cols_raw if str(c).strip()]
+        else:
+            cols = []
+        tables[key] = {"visible_columns": cols}
+    return tables
 
 
 def load_display_settings(display_file, headers):
@@ -77,6 +109,8 @@ def load_display_settings(display_file, headers):
     _hidden_defaults = {
         "job_uid",
         "thumbnail",
+        "pause_count",
+        "runout_count",
         "import_source",
         "import_id",
         "job_outcome",
@@ -87,52 +121,188 @@ def load_display_settings(display_file, headers):
         "filament_mm_est",
         "filament_mm_effective",
     }
+
+    def _default_settings():
+        visible = [h for h in headers if h not in _hidden_defaults]
+        return {
+            "visible_columns": visible,
+            "tables": {"history": {"visible_columns": visible}},
+            "hidden_printers": [],
+            "pause_include_paused_time_default": False,
+            "projects_show_cost_totals": True,
+        }
+
     try:
         with open(display_file) as f:
             data = json.load(f)
-            if not isinstance(data, dict):
-                return {"visible_columns": [h for h in headers if h not in _hidden_defaults], "hidden_printers": []}
-            cols = data.get("visible_columns", headers)
-            cols = [c for c in cols if c in headers]
-            cols = [c for c in cols if c != "job_uid"]
-            if not cols:
-                cols = [h for h in headers if h not in _hidden_defaults]
-            hidden = data.get("hidden_printers", [])
-            if not isinstance(hidden, list):
-                hidden = []
-            hidden = [str(p) for p in hidden if str(p).strip()]
-            return {"visible_columns": cols, "hidden_printers": hidden}
+        if not isinstance(data, dict):
+            return _default_settings()
+
+        tables = _coerce_display_tables(data.get("tables"))
+
+        history_cols = None
+        if isinstance(tables.get("history"), dict):
+            history_cols = tables.get("history", {}).get("visible_columns")
+        if not isinstance(history_cols, list):
+            history_cols = data.get("visible_columns", headers)
+
+        cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
+        if not cols:
+            cols = [h for h in headers if h not in _hidden_defaults]
+
+        tables.setdefault("history", {"visible_columns": cols})
+
+        hidden = data.get("hidden_printers", [])
+        if not isinstance(hidden, list):
+            hidden = []
+        hidden = [str(p) for p in hidden if str(p).strip()]
+
+        if "pause_include_paused_time_default" in data:
+            pause_include = bool(data.get("pause_include_paused_time_default", False))
+        elif "pause_exclude_paused_time_default" in data:
+            pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
+        else:
+            pause_include = False
+
+        show_cost_totals = data.get("projects_show_cost_totals", True)
+        show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
+
+        return {
+            "visible_columns": cols,
+            "tables": tables,
+            "hidden_printers": hidden,
+            "pause_include_paused_time_default": pause_include,
+            "projects_show_cost_totals": show_cost_totals,
+        }
     except Exception:
-        return {"visible_columns": [h for h in headers if h not in _hidden_defaults], "hidden_printers": []}
+        return _default_settings()
 
+def get_visible_columns_for_table(display_settings, table_id, allowed_columns):
+    """
+    Return visible columns for a given table_id from display settings.
 
-def save_display_settings(display_file, headers, visible_columns):
-    """Save display settings to JSON file."""
-    visible = [c for c in visible_columns if c in headers and c != "job_uid"]
-    if not visible:
-        visible = [h for h in headers if h != "job_uid"]
-    # Preserve any additional display settings (e.g. hidden_printers).
-    hidden = []
+    If no saved settings exist for this table, default to showing all allowed columns.
+    """
+    allowed = [c for c in (allowed_columns or []) if isinstance(c, str) and c.strip()]
+    if not allowed:
+        return []
+
     try:
-        with open(display_file) as f:
-            existing = json.load(f)
-            if isinstance(existing, dict) and isinstance(existing.get("hidden_printers"), list):
-                hidden = [str(p) for p in existing.get("hidden_printers", []) if str(p).strip()]
+        tables = display_settings.get("tables") if isinstance(display_settings, dict) else {}
+        cfg = tables.get(table_id) if isinstance(tables, dict) else None
+        cols = cfg.get("visible_columns") if isinstance(cfg, dict) else None
+        if isinstance(cols, list):
+            out = [c for c in cols if c in allowed]
+            if out:
+                return out
     except Exception:
         pass
 
+    return list(allowed)
+
+
+def set_visible_columns_for_table(display_settings, table_id, visible_columns):
+    if not isinstance(display_settings, dict):
+        display_settings = {}
+    tables = _coerce_display_tables(display_settings.get("tables"))
+    cols = [str(c).strip() for c in (visible_columns or []) if str(c).strip()]
+    tables[str(table_id)] = {"visible_columns": cols}
+    display_settings["tables"] = tables
+    if str(table_id) == "history":
+        display_settings["visible_columns"] = cols
+    return display_settings
+
+
+def save_display_settings(display_file, data_dir, display_settings):
+    """
+    Save display settings to JSON file.
+
+    This function expects a full display settings dict, and will:
+    - sanitize visible_columns against the current HEADERS
+    - preserve unknown keys already present in the JSON file
+    """
+    from core.config import HEADERS
+
+    os.makedirs(data_dir, exist_ok=True)
+
+    existing = {}
+    try:
+        if os.path.exists(display_file):
+            with open(display_file) as f:
+                existing = json.load(f)
+        if not isinstance(existing, dict):
+            existing = {}
+    except Exception:
+        existing = {}
+
+    existing_tables = _coerce_display_tables(existing.get("tables"))
+    incoming_tables = _coerce_display_tables(display_settings.get("tables") if isinstance(display_settings, dict) else {})
+
+    visible_columns = []
+    try:
+        visible_columns = list(display_settings.get("visible_columns") or [])
+    except Exception:
+        visible_columns = []
+
+    # History columns can come from either top-level visible_columns or tables.history.visible_columns.
+    history_raw = incoming_tables.get("history", {}).get("visible_columns")
+    if isinstance(history_raw, list) and history_raw:
+        visible_columns = history_raw
+
+    visible = [c for c in visible_columns if c in HEADERS and c != "job_uid"]
+    if not visible:
+        visible = [h for h in HEADERS if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
+
+    hidden = display_settings.get("hidden_printers", existing.get("hidden_printers", []))
+    if not isinstance(hidden, list):
+        hidden = []
+    hidden = [str(p) for p in hidden if str(p).strip()]
+
+    # Merge any non-history table settings (already validated by callers).
+    for table_id, cfg in incoming_tables.items():
+        if table_id == "history":
+            continue
+        existing_tables[table_id] = {"visible_columns": cfg.get("visible_columns", [])}
+
+    # Always persist history visible columns under tables.history, and keep legacy visible_columns for back-compat.
+    existing_tables["history"] = {"visible_columns": visible}
+    existing["tables"] = existing_tables
+    existing["visible_columns"] = visible
+    existing["hidden_printers"] = hidden
+    # Persist pause accounting global default with "include paused time" semantics.
+    if "pause_include_paused_time_default" in display_settings:
+        pause_include = bool(display_settings.get("pause_include_paused_time_default"))
+    elif "pause_exclude_paused_time_default" in display_settings:
+        pause_include = not bool(display_settings.get("pause_exclude_paused_time_default"))
+    else:
+        if "pause_include_paused_time_default" in existing:
+            pause_include = bool(existing.get("pause_include_paused_time_default", False))
+        elif "pause_exclude_paused_time_default" in existing:
+            pause_include = not bool(existing.get("pause_exclude_paused_time_default", False))
+        else:
+            pause_include = False
+
+    existing["pause_include_paused_time_default"] = bool(pause_include)
+    if "pause_exclude_paused_time_default" in existing:
+        existing.pop("pause_exclude_paused_time_default", None)
+
+    show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
+    existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
+
     with open(display_file, "w") as f:
-        json.dump({"visible_columns": visible, "hidden_printers": hidden}, f, indent=2)
+        json.dump(existing, f, indent=2)
 
 
 def save_hidden_printers(display_file, headers, hidden_printers):
     """Persist hidden printer list while preserving visible column settings."""
-    settings = load_display_settings(display_file, headers)
-    visible_cols = settings.get("visible_columns", [h for h in headers if h != "job_uid"])
     hidden = hidden_printers if isinstance(hidden_printers, list) else []
     hidden = [str(p) for p in hidden if str(p).strip()]
-    with open(display_file, "w") as f:
-        json.dump({"visible_columns": visible_cols, "hidden_printers": hidden}, f, indent=2)
+    settings = load_display_settings(display_file, headers)
+    if not isinstance(settings, dict):
+        settings = {}
+    settings["hidden_printers"] = hidden
+    from core.config import DATA_DIR
+    save_display_settings(display_file, DATA_DIR, settings)
 
 
 def ensure_api_key(secret_file=None, data_dir=None):
@@ -173,86 +343,6 @@ def ensure_api_key(secret_file=None, data_dir=None):
         return None
 
 
-def ensure_csv_schema(csv_file: str, expected_headers: list[str]) -> bool:
-    """
-    Ensure a CSV file's header matches the expected schema exactly.
-
-    This prevents "shifted columns" when new fields are appended to HEADERS but an
-    existing CSV still has an older header row.
-
-    Migration behavior:
-    - Create a timestamped backup: <csv>.bak-YYYYmmdd-HHMMSS
-    - Rewrite the file with expected_headers as the header
-    - Preserve values by header-name matching when possible
-    - Special-case: if the existing header is a strict prefix of expected_headers,
-      map extra positional fields to the newly-added expected columns (common case).
-    """
-    if not os.path.exists(csv_file):
-        return False
-
-    expected_headers = list(expected_headers or [])
-    if not expected_headers:
-        return False
-
-    try:
-        with open(csv_file, newline="") as f:
-            reader = csv.reader(f)
-            header_row = next(reader, [])
-    except Exception:
-        return False
-
-    header_row = [str(h or "").strip() for h in (header_row or [])]
-    if header_row == expected_headers:
-        return False
-
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_path = f"{csv_file}.bak-{ts}"
-    try:
-        shutil.copy2(csv_file, backup_path)
-    except Exception:
-        pass
-
-    prefix_mapping = bool(header_row) and expected_headers[: len(header_row)] == header_row
-
-    rows_out: list[dict] = []
-    try:
-        if prefix_mapping:
-            with open(csv_file, newline="") as f:
-                reader = csv.reader(f)
-                _ = next(reader, None)
-                for row in reader:
-                    row = list(row or [])
-                    new_row = {}
-                    for idx, h in enumerate(expected_headers):
-                        new_row[h] = row[idx] if idx < len(row) else ""
-                    rows_out.append(new_row)
-        else:
-            with open(csv_file, newline="") as f:
-                reader = csv.DictReader(f)
-                for r in reader:
-                    r = dict(r or {})
-                    rows_out.append({h: r.get(h, "") for h in expected_headers})
-    except Exception:
-        return False
-
-    tmp_path = f"{csv_file}.tmp"
-    try:
-        with open(tmp_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=expected_headers)
-            writer.writeheader()
-            for r in rows_out:
-                writer.writerow({h: r.get(h, "") for h in expected_headers})
-        os.replace(tmp_path, csv_file)
-        return True
-    except Exception:
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
-        return False
-
-
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
     if "job_uid" in headers and not str(data.get("job_uid") or "").strip():
@@ -260,10 +350,12 @@ def append_row(csv_file, headers, data):
 
     file_exists = os.path.exists(csv_file)
     if file_exists:
+        # Ensure the on-disk header matches the schema we're about to append.
+        # This prevents schema drift from shifting columns at read time.
         try:
-            # Ensure header matches current schema before we append.
             ensure_csv_schema(csv_file, headers)
         except Exception:
+            # Never block appends if schema repair fails; it will be retried on read.
             pass
     with open(csv_file, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
@@ -272,17 +364,189 @@ def append_row(csv_file, headers, data):
         writer.writerow({h: data.get(h, "") for h in headers})
 
 
+def _looks_like_gcode_filename(value: str) -> bool:
+    v = str(value or "").strip().lower()
+    return ".gcode" in v or v.endswith(".gco")
+
+
+def _score_row_mapping(row: dict) -> int:
+    """
+    Heuristic scoring for choosing between possible mappings of a CSV row.
+
+    This is used only during CSV schema migration to handle "mixed schema"
+    files (old headers, but newer rows appended in a different column order).
+    """
+    score = 0
+
+    printer = str(row.get("printer") or "").strip()
+    filename = str(row.get("filename") or "").strip()
+    filament_mode = str(row.get("filament_mode") or "").strip().lower()
+    status = str(row.get("status") or "").strip().lower()
+
+    if printer:
+        score += 2
+    if printer and _looks_like_gcode_filename(printer):
+        score -= 25
+
+    if filename and _looks_like_gcode_filename(filename):
+        score += 8
+    elif filename:
+        score -= 2
+
+    if filament_mode in ("per_meter", "per_gram", "per_kg"):
+        score += 3
+    elif filament_mode:
+        score -= 2
+
+    if status in ("completed", "canceled", "cancelled", "failed", "printing", "paused", "idle"):
+        score += 2
+    elif status:
+        score -= 2
+
+    def _num(val):
+        try:
+            return float(str(val).strip())
+        except Exception:
+            return None
+
+    dur_sec = _num(row.get("duration_seconds"))
+    dur_hr = _num(row.get("duration_hours"))
+    fil_mm = _num(row.get("filament_mm"))
+    fil_m = _num(row.get("filament_meters"))
+    rate_hr = _num(row.get("rate_per_hour"))
+    total_cost = _num(row.get("total_cost"))
+
+    if dur_sec is not None:
+        if 0 <= dur_sec <= 60 * 60 * 24 * 60:
+            score += 1
+        else:
+            score -= 1
+    if dur_hr is not None:
+        if 0 <= dur_hr <= 24 * 60:
+            score += 1
+        else:
+            score -= 1
+    if fil_mm is not None:
+        if 0 <= fil_mm <= 50_000_000:
+            score += 1
+        else:
+            score -= 1
+    if fil_m is not None:
+        if 0 <= fil_m <= 50_000:
+            score += 1
+        else:
+            score -= 1
+    if rate_hr is not None:
+        if 0 <= rate_hr <= 10_000:
+            score += 1
+        else:
+            score -= 1
+    if total_cost is not None:
+        if -1 <= total_cost <= 1_000_000:
+            score += 1
+        else:
+            score -= 1
+
+    return score
+
+
+def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
+    """
+    Ensure the CSV on disk uses expected_headers as its header row.
+
+    If the file header differs (missing/extra columns or different order),
+    we migrate safely:
+      - Create a timestamped backup
+      - Rewrite the CSV with expected_headers
+      - For each row, attempt to map values from either:
+          A) old header mapping, or
+          B) expected header mapping (for mixed-schema appended rows)
+        using a heuristic score
+      - Atomic replace
+    Returns True if a migration occurred, else False.
+    """
+    if not os.path.exists(csv_path):
+        return False
+
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            old_header = next(reader, [])
+    except Exception as e:
+        logger.warning("CSV schema check failed to read header: %s (%s)", csv_path, e)
+        return False
+
+    old_header = [str(h or "").strip() for h in old_header if str(h or "").strip()]
+    if old_header == list(expected_headers):
+        return False
+    prefix_mapping = bool(old_header) and list(expected_headers)[: len(old_header)] == old_header
+
+    logger.warning(
+        "CSV schema mismatch detected; migrating %s (old=%d cols, expected=%d cols)",
+        csv_path,
+        len(old_header),
+        len(expected_headers),
+    )
+
+    backup_path = None
+    try:
+        backup_path = _backup_file(csv_path)
+    except Exception as e:
+        logger.warning("Failed to create CSV backup for migration: %s (%s)", csv_path, e)
+
+    tmp_path = f"{csv_path}.tmp"
+    try:
+        with open(csv_path, newline="", encoding="utf-8-sig") as f_in, open(
+            tmp_path, "w", newline="", encoding="utf-8"
+        ) as f_out:
+            reader = csv.reader(f_in)
+            _ = next(reader, None)  # consume header
+
+            writer = csv.DictWriter(f_out, fieldnames=list(expected_headers))
+            writer.writeheader()
+
+            for row_list in reader:
+                if not row_list:
+                    continue
+
+                # Map by the old header (normal for legacy rows).
+                old_map = {old_header[i]: row_list[i] for i in range(min(len(old_header), len(row_list)))}
+                # Map by the expected header (for mixed-schema rows appended with the new order).
+                exp_map = {expected_headers[i]: row_list[i] for i in range(min(len(expected_headers), len(row_list)))}
+
+                chosen = old_map
+                # Common drift case: the file header is an older prefix of HEADERS, but newer rows were
+                # appended using the newer column order (so they contain extra positional fields).
+                if prefix_mapping and len(row_list) > len(old_header):
+                    chosen = exp_map
+                elif _score_row_mapping(exp_map) > _score_row_mapping(old_map):
+                    chosen = exp_map
+
+                out_row = {h: chosen.get(h, "") for h in expected_headers}
+                writer.writerow(out_row)
+
+        os.replace(tmp_path, csv_path)
+        logger.warning("CSV schema migration complete: %s (backup=%s)", csv_path, backup_path or "none")
+        return True
+    except Exception as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        logger.error("CSV schema migration failed: %s (%s)", csv_path, e)
+        return False
+
+
 def load_rows_raw(csv_file):
     """Load all rows from CSV file with timestamp parsing."""
     rows = []
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:
-        from core.config import HEADERS
-
-        # Prevent "shifted columns" by aligning the on-disk header to HEADERS.
-        # This is best-effort; if it fails we continue and attempt to load anyway.
+        # Ensure file header/schema matches current HEADERS (prevents shifted columns).
         try:
+            from core.config import HEADERS
             ensure_csv_schema(csv_file, HEADERS)
         except Exception:
             pass
@@ -301,6 +565,18 @@ def load_rows_raw(csv_file):
                     r["filament_profile_id"] = ""
                 if "filament_material" not in r:
                     r["filament_material"] = ""
+                if "paused_seconds_total" not in r:
+                    r["paused_seconds_total"] = "0"
+                elif not str(r.get("paused_seconds_total") or "").strip():
+                    r["paused_seconds_total"] = "0"
+                if "pause_count" not in r:
+                    r["pause_count"] = "0"
+                elif not str(r.get("pause_count") or "").strip():
+                    r["pause_count"] = "0"
+                if "runout_count" not in r:
+                    r["runout_count"] = "0"
+                elif not str(r.get("runout_count") or "").strip():
+                    r["runout_count"] = "0"
                 if "status" not in r:
                     r["status"] = "completed"
                 if "failure_reason" not in r:
@@ -574,9 +850,15 @@ def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_
             filament_mm = float(row.get("filament_mm") or 0.0)
         except (TypeError, ValueError):
             filament_mm = 0.0
+        try:
+            paused_seconds_total = float(row.get("paused_seconds_total") or 0.0)
+        except (TypeError, ValueError):
+            paused_seconds_total = 0.0
 
         try:
-            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm))
+            # Normalize persisted pause column shape during recalc.
+            row["paused_seconds_total"] = str(paused_seconds_total)
+            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total))
             updated += 1
         except Exception:
             continue

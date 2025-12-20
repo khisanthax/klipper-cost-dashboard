@@ -39,7 +39,19 @@ def get_date_range_from_params(args):
         now = ts_to_local_dt(datetime.now().timestamp())
         today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         
-        if quick_range == "last7":
+        if quick_range == "today":
+            start_dt = today
+            end_dt = now
+            range_label = "Today"
+        elif quick_range == "yesterday":
+            start_dt = today - timedelta(days=1)
+            end_dt = today
+            range_label = "Yesterday"
+        elif quick_range == "this_week":
+            start_dt = today - timedelta(days=today.weekday())
+            end_dt = now
+            range_label = "This week"
+        elif quick_range == "last7":
             start_dt = today - timedelta(days=7)
             end_dt = now
             range_label = "Last 7 days"
@@ -152,6 +164,45 @@ def compute_summary(rows):
         "total_cost": total_cost,
         "per_day": {},
         "per_printer": {},
+    }
+
+
+def compute_pause_analytics(rows):
+    """
+    Compute pause/runout analytics from finalized history rows.
+
+    Returns:
+      {
+        "total_paused_seconds": float,
+        "average_paused_seconds": float,
+        "runouts_by_printer": {printer: int},
+      }
+    """
+    total_paused = 0.0
+    total_prints = 0
+    runouts_by_printer = {}
+
+    for r in rows:
+        total_prints += 1
+        try:
+            total_paused += float(r.get("paused_seconds_total") or 0.0)
+        except (TypeError, ValueError):
+            pass
+
+        printer = str(r.get("printer") or "").strip()
+        if printer:
+            try:
+                runouts = int(float(r.get("runout_count") or 0))
+            except Exception:
+                runouts = 0
+            if runouts:
+                runouts_by_printer[printer] = runouts_by_printer.get(printer, 0) + runouts
+
+    avg = (total_paused / total_prints) if total_prints else 0.0
+    return {
+        "total_paused_seconds": float(total_paused),
+        "average_paused_seconds": float(avg),
+        "runouts_by_printer": runouts_by_printer,
     }
 
 

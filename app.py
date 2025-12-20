@@ -25,6 +25,7 @@ from core.storage import (
     rewrite_csv_without_indices, rewrite_csv_mark_completed,
     rewrite_csv_without_job_uids, rewrite_csv_mark_completed_job_uids,
     rewrite_csv_recalculate_costs_job_uids,
+    get_visible_columns_for_table, set_visible_columns_for_table,
     ts_to_local_dt
 )
 from core.pricing import (
@@ -34,6 +35,7 @@ from core.pricing import (
 from core.reports import (
     get_date_range_from_params, compute_monthly_breakdown,
     compute_top_printers, compute_summary,
+    compute_pause_analytics,
     aggregate_by_material, aggregate_by_profile
 )
 from core import profiles
@@ -250,6 +252,9 @@ def log_print():
 
     # If live job exists and matches filename, optionally capture failure/cancel reason.
     # Only allow cancel/failed to override completed; never write "printing"/"paused" to history.
+    paused_seconds_total = 0.0
+    pause_count = 0
+    runout_count = 0
     if live_metadata and live_metadata.get("filename") == filename:
         live_job = live.get_job(printer_name)
         if live_job:
@@ -259,8 +264,27 @@ def log_print():
             elif live_status == "failed":
                 status = "failed"
             failure_reason = str(live_job.get("failure_reason") or "").strip()
+        try:
+            paused_seconds_total = float(live_metadata.get("total_paused_duration") or 0.0)
+        except Exception:
+            paused_seconds_total = 0.0
+        try:
+            pause_count = int(live_metadata.get("pause_count") or 0)
+        except Exception:
+            pause_count = 0
+        try:
+            runout_count = int(live_metadata.get("runout_count") or 0)
+        except Exception:
+            runout_count = 0
+        # Persist wall-clock duration (elapsed excluding pauses + paused total) so that pause accounting
+        # can reliably exclude paused time later.
+        try:
+            elapsed_excluding_pauses = float(live_metadata.get("elapsed_seconds") or 0.0)
+            duration_seconds = max(0.0, elapsed_excluding_pauses + float(paused_seconds_total))
+        except Exception:
+            pass
 
-    cost_data = compute_costs(printer_name, duration_seconds, filament_mm)
+    cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
 
     row = {
         "timestamp": ts,
@@ -268,6 +292,9 @@ def log_print():
         "printer": printer_name,
         "filename": filename,
         "duration_seconds": duration_seconds,
+        "paused_seconds_total": paused_seconds_total,
+        "pause_count": pause_count,
+        "runout_count": runout_count,
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
@@ -421,6 +448,7 @@ def job_pause():
     
     data = request.get_json() or request.form.to_dict()
     printer_name = data.get("printer_name")
+    reason = data.get("reason") or data.get("pause_reason")
     
     if not printer_name:
         return jsonify({"success": False, "error": "Missing required field: printer_name"}), 400
@@ -437,7 +465,13 @@ def job_pause():
         app.logger.warning("Allowed printers: %s", sorted(canonical))
         return jsonify({"success": False, "error": reason}), 400
     
-    result = live.pause_job(printer_name)
+    pause_reason = str(reason or "").strip().lower()
+    if pause_reason and pause_reason not in ("user_pause", "filament_runout", "filament_change"):
+        # Be permissive: accept unknown reasons but normalize to a safe value.
+        app.logger.warning("Unknown pause reason received for %s: %r", printer_name, pause_reason)
+        pause_reason = ""
+
+    result = live.pause_job(printer_name, reason=pause_reason)
     
     if result is None:
         return jsonify({"success": False, "error": "Job not found"}), 404
@@ -556,14 +590,39 @@ def job_cancel():
     # Record a canceled job in history so it appears in Print History.
     ts = time.time()
     filament_mm = 0.0
-    cost_data = compute_costs(printer_name, float(elapsed_seconds), filament_mm)
+    try:
+        paused_seconds_total = float(live_result.get("total_paused_duration") or 0.0)
+    except Exception:
+        paused_seconds_total = 0.0
+    try:
+        pause_count = int(live_result.get("pause_count") or 0)
+    except Exception:
+        pause_count = 0
+    try:
+        runout_count = int(live_result.get("runout_count") or 0)
+    except Exception:
+        runout_count = 0.0
+
+    # Store duration_seconds as total wall time, with paused time tracked separately.
+    # This keeps cost calculation consistent when excluding paused time is enabled.
+    duration_seconds_total = float(elapsed_seconds) + float(paused_seconds_total)
+
+    cost_data = compute_costs(
+        printer_name,
+        float(duration_seconds_total),
+        filament_mm,
+        paused_seconds_total=paused_seconds_total,
+    )
 
     row = {
         "timestamp": ts,
         "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
-        "duration_seconds": float(elapsed_seconds),
+        "duration_seconds": float(duration_seconds_total),
+        "paused_seconds_total": paused_seconds_total,
+        "pause_count": pause_count,
+        "runout_count": runout_count,
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
@@ -672,6 +731,8 @@ def index():
     # Apply date filtering (printer + range + legacy date range inputs)
     selected_printer = (request.args.get("printer") or "All").strip()
     selected_range = (request.args.get("range") or "all").strip().lower()
+    paused_min_raw = (request.args.get("paused_min") or "").strip()
+    has_runout = (request.args.get("has_runout") or "").strip() in {"1", "true", "yes", "on"}
 
     start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
     if selected_range in {"today", "yesterday", "week", "month"}:
@@ -722,6 +783,37 @@ def index():
             rows = [r for r in rows if (r.get("printer") or "") == selected_printer]
         else:
             selected_printer = "All"
+
+    paused_min = 0
+    if paused_min_raw:
+        try:
+            paused_min = int(float(paused_min_raw))
+        except Exception:
+            paused_min = 0
+    paused_min = max(0, min(24 * 60, paused_min))
+
+    if paused_min > 0:
+        threshold = float(paused_min) * 60.0
+        filtered = []
+        for r in rows:
+            try:
+                paused_s = float(r.get("paused_seconds_total") or 0.0)
+            except (TypeError, ValueError):
+                paused_s = 0.0
+            if paused_s >= threshold:
+                filtered.append(r)
+        rows = filtered
+
+    if has_runout:
+        filtered = []
+        for r in rows:
+            try:
+                rc = int(float(r.get("runout_count") or 0))
+            except Exception:
+                rc = 0
+            if rc > 0:
+                filtered.append(r)
+        rows = filtered
 
     history_per_page = _parse_per_page(request.args.get("history_per_page"), default=25)
     history_rows_page, history_pager = _paginate(rows, request.args.get("history_page", 1), history_per_page)
@@ -837,6 +929,8 @@ def index():
         printers=canonical_printers,
         selected_printer=selected_printer,
         selected_range=selected_range,
+        paused_min=str(paused_min) if paused_min else "",
+        has_runout=has_runout,
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
         csv_file=CSV_FILE,
@@ -879,6 +973,8 @@ def reports_page():
     summary.setdefault("total_cost", 0.0)
     summary.setdefault("per_day", {})
     summary.setdefault("per_printer", {})
+
+    pause_analytics = compute_pause_analytics(rows)
     
     # Aggregate by material and profile
     material_summary = aggregate_by_material(rows)
@@ -892,6 +988,7 @@ def reports_page():
         monthly_breakdown=monthly,
         top_printers=top_printers,
         summary=summary,
+        pause_analytics=pause_analytics,
         material_summary=material_summary,
         profile_summary=profile_summary,
         range_label=range_label,
@@ -1011,6 +1108,12 @@ def recalculate_page():
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
+    display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+    recalc_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "recalc_jobs",
+        ["printer", "filename", "status", "hours", "total", "job_uid"],
+    )
     return render_template(
         "recalculate.html",
         error=error,
@@ -1038,6 +1141,7 @@ def recalculate_page():
         selected_job_uids=set(),
         select_filtered=False,
         preview=None,
+        recalc_visible_cols=recalc_visible_cols,
         pager={
             "page": page,
             "per_page": per_page,
@@ -1104,11 +1208,12 @@ def recalculate_run():
         if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
             from core.pricing import compute_costs_with_overrides
 
-            def compute_fn(p, d, f):
+            def compute_fn(p, d, f, paused_seconds_total=0.0):
                 return compute_costs_with_overrides(
                     p,
                     d,
                     f,
+                    paused_seconds_total,
                     filament_profile_id=filament_profile_id if apply_filament_profile else None,
                     rate_profile_id=rate_profile_id if apply_rate_profile else None,
                     rate_per_hour_override=rate_per_hour_override,
@@ -1331,11 +1436,12 @@ def recalculate_preview():
         if apply_rate_profile or apply_filament_profile or rate_per_hour_override is not None or filament_rate_per_meter_override is not None:
             from core.pricing import compute_costs_with_overrides
 
-            def compute_fn(p, d, f):
+            def compute_fn(p, d, f, paused_seconds_total=0.0):
                 return compute_costs_with_overrides(
                     p,
                     d,
                     f,
+                    paused_seconds_total,
                     filament_profile_id=filament_profile_id if apply_filament_profile else None,
                     rate_profile_id=rate_profile_id if apply_rate_profile else None,
                     rate_per_hour_override=rate_per_hour_override,
@@ -1444,6 +1550,12 @@ def recalculate_preview():
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
+    display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+    recalc_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "recalc_jobs",
+        ["printer", "filename", "status", "hours", "total", "job_uid"],
+    )
 
     msg = f"Previewing {len(preview_rows)} job(s)."
     if missing:
@@ -1489,6 +1601,7 @@ def recalculate_preview():
         rows_page=rows_page,
         selected_job_uids=to_preview,
         select_filtered=select_filtered,
+        recalc_visible_cols=recalc_visible_cols,
         preview={
             "rows": preview_rows,
             "totals": {"before": before_total, "after": after_total, "delta": after_total - before_total},
@@ -1519,6 +1632,14 @@ def projects_page():
         action = (request.form.get("action") or "").strip()
         redirect_args = {}
         try:
+            if action == "update_projects_display":
+                display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+                display_settings["projects_show_cost_totals"] = bool(
+                    request.form.get("projects_show_cost_totals")
+                )
+                save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
+                redirect_args = {"msg": "Projects display preferences updated."}
+
             if action == "create_project":
                 name = request.form.get("name", "").strip()
                 notes = request.form.get("notes", "").strip()
@@ -1798,6 +1919,8 @@ def projects_page():
             projects_by_id={},
         )
 
+    display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+
     if orphans_added:
         orphan_msg = (
             f"Cleaned up {orphans_added} orphaned legacy assignment entr"
@@ -1925,12 +2048,27 @@ def projects_page():
             j["_thumbs_enabled"] = bool(thumbs_enabled)
             j["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
 
+    # Server-backed per-table column visibility (Settings → Other).
+    projects_unassigned_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "projects_unassigned",
+        ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"],
+    )
+    projects_project_jobs_visible_cols = get_visible_columns_for_table(
+        display_settings,
+        "projects_project_jobs",
+        ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"],
+    )
+
     return render_template(
         "projects.html",
         error=error,
         message=message,
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
+        display_settings=display_settings,
+        projects_unassigned_visible_cols=projects_unassigned_visible_cols,
+        projects_project_jobs_visible_cols=projects_project_jobs_visible_cols,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
         unassigned_jobs_page=unassigned_jobs_page,
@@ -1950,6 +2088,7 @@ def settings_page():
 
 def _settings_endpoint_for_action(action: str) -> str:
     other_actions = {"update_columns", "backup_now", "update_backup_settings"}
+    pause_actions = {"update_pause_settings"}
     profiles_actions = {
         "add_filament_profile",
         "update_filament_profile",
@@ -1960,6 +2099,8 @@ def _settings_endpoint_for_action(action: str) -> str:
     }
     if action in other_actions:
         return "settings_other_page"
+    if action in pause_actions:
+        return "settings_pause_page"
     if action in profiles_actions:
         return "settings_profiles_page"
     return "settings_printers_page"
@@ -1967,7 +2108,7 @@ def _settings_endpoint_for_action(action: str) -> str:
 
 def _settings_view(tab: str):
     tab = (tab or "printers").strip().lower()
-    if tab not in {"printers", "profiles", "other"}:
+    if tab not in {"printers", "profiles", "other", "pause"}:
         tab = "printers"
 
     if request.method == "POST":
@@ -2009,6 +2150,41 @@ def _settings_view(tab: str):
                 # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
                 pricing.hide_printer(printer)
             return redirect(url_for(_settings_endpoint_for_action(action)))
+
+        if action == "update_pause_settings":
+            # Global default is stored in display.json (display settings).
+            global_include = bool(request.form.get("pause_include_paused_time_default"))
+            display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
+            display_settings["pause_include_paused_time_default"] = bool(global_include)
+            save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
+
+            # Per-printer overrides are stored alongside printer settings in settings.json.
+            printers = pricing.get_configured_printers()
+            settings = load_settings(SETTINGS_FILE)
+            if not isinstance(settings, dict):
+                settings = {}
+
+            for p in printers:
+                if p not in settings or not isinstance(settings.get(p), dict):
+                    settings[p] = {}
+                use_global = bool(request.form.get(f"pause_use_global_{p}"))
+                if use_global:
+                    settings[p].pop("pause_include_paused_time_override_enabled", None)
+                    settings[p].pop("pause_include_paused_time_override_value", None)
+                    # Backwards compat cleanup
+                    settings[p].pop("pause_exclude_paused_time_override_enabled", None)
+                    settings[p].pop("pause_exclude_paused_time_override_value", None)
+                else:
+                    settings[p]["pause_include_paused_time_override_enabled"] = True
+                    settings[p]["pause_include_paused_time_override_value"] = bool(
+                        request.form.get(f"pause_include_paused_time_{p}")
+                    )
+                    # Backwards compat cleanup
+                    settings[p].pop("pause_exclude_paused_time_override_enabled", None)
+                    settings[p].pop("pause_exclude_paused_time_override_value", None)
+
+            save_settings(SETTINGS_FILE, DATA_DIR, settings)
+            return redirect(url_for(_settings_endpoint_for_action(action), msg="Pause accounting settings saved."))
 
         if action == "save_printer_defaults":
             printer = request.form.get("printer")
@@ -2112,9 +2288,27 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker import complete for {printer}: {counts}"))
 
         if action == "update_columns":
+            table_id = (request.form.get("table") or "history").strip()
             cols = request.form.getlist("columns")
             display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
-            display_settings["visible_columns"] = cols
+
+            if table_id == "history":
+                allowed = [h for h in HEADERS if h != "job_uid"]
+            elif table_id == "recalc_jobs":
+                allowed = ["printer", "filename", "status", "hours", "total", "job_uid"]
+            elif table_id == "projects_unassigned":
+                allowed = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
+            elif table_id == "projects_project_jobs":
+                allowed = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
+            else:
+                allowed = [h for h in HEADERS if h != "job_uid"]
+                table_id = "history"
+
+            selected = [c for c in cols if c in allowed]
+            if not selected:
+                selected = list(allowed)
+
+            display_settings = set_visible_columns_for_table(display_settings, table_id, selected)
             save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -2275,6 +2469,20 @@ def _settings_view(tab: str):
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     selected_columns = display_settings.get("visible_columns") or HEADERS
 
+    # Settings → Other: per-table column visibility (server-backed display.json).
+    # Defaults: show all allowed columns if no saved selection exists.
+    recalc_allowed_cols = ["printer", "filename", "status", "hours", "total", "job_uid"]
+    projects_unassigned_allowed_cols = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
+    projects_project_jobs_allowed_cols = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
+
+    recalc_selected_columns = get_visible_columns_for_table(display_settings, "recalc_jobs", recalc_allowed_cols)
+    projects_unassigned_selected_columns = get_visible_columns_for_table(
+        display_settings, "projects_unassigned", projects_unassigned_allowed_cols
+    )
+    projects_project_jobs_selected_columns = get_visible_columns_for_table(
+        display_settings, "projects_project_jobs", projects_project_jobs_allowed_cols
+    )
+
     # Load profile data
     all_profiles = profiles.get_all_profiles()
     printer_mappings = profiles.get_all_printer_mappings()
@@ -2285,11 +2493,13 @@ def _settings_view(tab: str):
         "printers": "settings/printers.html",
         "profiles": "settings/profiles.html",
         "other": "settings/other.html",
+        "pause": "settings/pause.html",
     }
     subtitle_by_tab = {
         "printers": "Manage printers connected to KCD.",
         "profiles": "Rates and material costs used for calculations.",
         "other": "Display preferences, backups, and exports.",
+        "pause": "Pause accounting preferences for hourly time cost.",
     }
 
     return render_template(
@@ -2306,6 +2516,13 @@ def _settings_view(tab: str):
         headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,
+        recalc_allowed_cols=recalc_allowed_cols,
+        recalc_selected_columns=recalc_selected_columns,
+        projects_unassigned_allowed_cols=projects_unassigned_allowed_cols,
+        projects_unassigned_selected_columns=projects_unassigned_selected_columns,
+        projects_project_jobs_allowed_cols=projects_project_jobs_allowed_cols,
+        projects_project_jobs_selected_columns=projects_project_jobs_selected_columns,
+        display_settings=display_settings,
         profiles=all_profiles,
         printer_mappings=printer_mappings,
         rate_profiles=rate_profiles,
@@ -2326,6 +2543,11 @@ def settings_profiles_page():
 @app.route("/settings/other", methods=["GET", "POST"], endpoint="settings_other_page")
 def settings_other_page():
     return _settings_view(tab="other")
+
+
+@app.route("/settings/pause", methods=["GET", "POST"], endpoint="settings_pause_page")
+def settings_pause_page():
+    return _settings_view(tab="pause")
 
 
 @app.route("/download-csv")

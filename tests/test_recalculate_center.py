@@ -21,6 +21,7 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
                 "printer": "SV08",
                 "filename": "Cube_PETG_0.2_11m55s.gcode",
                 "duration_seconds": "3600",
+                "paused_seconds_total": "60",
                 "filament_mm": "10000",
                 "status": "completed",
                 "total_cost": "0.00",
@@ -60,7 +61,7 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.fail(f"job_uid not found in CSV: {job_uid}")
 
     def test_recalculate_run_updates_known_job_uid(self):
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
             return {"total_cost": 123.45}
 
         with patch.object(self.app_module, "compute_costs", fake_compute_costs):
@@ -73,8 +74,21 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertIn("/recalculate", resp.headers.get("Location", ""))
         self.assertEqual(self._read_total_cost(), "123.45")
 
+    def test_recalculate_run_passes_paused_seconds_total(self):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, paused_seconds_total=0.0):
+            return {"total_cost": float(paused_seconds_total)}
+
+        with patch.object(self.app_module, "compute_costs", fake_compute_costs):
+            resp = self.client.post(
+                "/recalculate/run",
+                data={"job_uids": ["test-job-uid-1"]},
+                follow_redirects=False,
+            )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(self._read_total_cost(), "60.0")
+
     def test_recalculate_run_skips_missing_job_uid(self):
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
             return {"total_cost": 999.99}
 
         before = self._read_total_cost()
@@ -150,7 +164,7 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertEqual(self._read_total_cost(), "12.0")
 
     def test_recalculate_preview_does_not_write_csv(self):
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
             return {"total_cost": 123.45}
 
         before = self._read_total_cost()
@@ -170,7 +184,7 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertEqual(self._read_total_cost(), before)
 
     def test_recalculate_run_appends_audit_log(self):
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
             return {"total_cost": 5.0}
 
         log_path = os.path.join(self.app_module.DATA_DIR, "recalc_runs.jsonl")
@@ -217,7 +231,7 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
                 )
                 writer.writerow(row)
 
-        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm):
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
             return {"total_cost": 5.0}
 
         before = self._read_total_cost()
