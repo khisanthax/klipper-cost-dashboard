@@ -569,29 +569,36 @@
                             {% for h in headers %}
                             {% if h in visible %}
                             <td class="col-{{ h|replace(' ', '-')|lower }}">
-                                {% if h == 'thumbnail' %}
-                                    {% if row.get('_thumbs_enabled') %}
-                                        {% set thumb_url = row.get('_thumb_small') %}
-                                        {% set size = "small" %}
-                                        {% set alt = row.get('filename', 'Thumbnail') %}
-                                        {% include "partials/_thumbnail.html" %}
-                                    {% endif %}
-                                {% elif h == 'timestamp' %}
-                                    {% set dt = row.get(h, '') %}
-                                    {% if dt and ' ' in dt %}
-                                        {% set parts = dt.split(' ', 1) %}
-                                        <div class="kcd-dt">
-                                            <div class="kcd-date">{{ parts[0] }}</div>
-                                            <div class="kcd-time">{{ parts[1] }}</div>
-                                        </div>
-                                    {% else %}
-                                        <div class="kcd-dt">{{ dt }}</div>
-                                    {% endif %}
-                                {% elif h == 'printer' %}
-                                <span class="printer-tag"
-                                      style="background-color: {{ printer_colors.get(row.get(h, ''), '#eee') }}">
-                                    {{ row.get(h, '') }}
-                                </span>
+                                 {% if h == 'thumbnail' %}
+                                     {% if row.get('_thumbs_enabled') %}
+                                         {% set thumb_url = row.get('_thumb_small') %}
+                                         {% set size = 'small' %}
+                                         {% set alt = row.get('filename', 'Thumbnail') %}
+                                         {% include 'partials/_thumbnail.html' %}
+                                     {% endif %}
+                                 {% elif h == 'timestamp' %}
+                                     {% set dt = row.get(h, '') %}
+                                     {% if dt and ' ' in dt %}
+                                         {% set parts = dt.split(' ', 1) %}
+                                         <div class="kcd-dt">
+                                             <div class="kcd-date">{{ parts[0] }}</div>
+                                             <div class="kcd-time">{{ parts[1] }}</div>
+                                         </div>
+                                     {% else %}
+                                         <div class="kcd-dt">{{ dt }}</div>
+                                     {% endif %}
+                                 {% elif h == 'filename' %}
+                                     <div>{{ row.get(h, '') }}</div>
+                                     {% if row.get('import_source') == 'moonraker_history' %}
+                                     <div class="text-muted small">
+                                         Imported (Moonraker){% if row.get('job_outcome') %} &middot; {{ row.get('job_outcome')|upper }}{% endif %}
+                                     </div>
+                                     {% endif %}
+                                 {% elif h == 'printer' %}
+                                     <span class="printer-tag" style="background-color: {{ printer_colors.get(row.get(h, ''), '#eee') }}">
+                                         {{ row.get(h, '') }}
+                                     </span>
+
                                 {% elif h == 'status' %}
                                 <span
                                     class="badge {% if row.get(h, '') == 'printing' %}bg-success{% elif row.get(h, '') == 'paused' %}bg-warning text-dark{% elif row.get(h, '') == 'failed' or row.get(h, '') == 'canceled' %}bg-danger{% elif row.get(h, '') == 'idle' %}bg-secondary{% else %}bg-light text-dark border{% endif %}">

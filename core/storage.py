@@ -54,8 +54,24 @@ def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
-        # Keep pause analytics columns opt-in to avoid surprising users.
-        visible = [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
+        # Keep analytics/internal columns opt-in to avoid surprising users.
+        _hidden_defaults = {
+            "job_uid",
+            "thumbnail",
+            "pause_count",
+            "runout_count",
+            # Moonraker import fields are opt-in (auditing/debug).
+            "import_source",
+            "import_id",
+            "job_outcome",
+            "duration_seconds_raw",
+            "duration_seconds_est",
+            "duration_seconds_effective",
+            "filament_mm_raw",
+            "filament_mm_est",
+            "filament_mm_effective",
+        }
+        visible = [h for h in headers if h not in _hidden_defaults]
         data = {
             "visible_columns": visible,
             "tables": {
@@ -90,67 +106,76 @@ def _coerce_display_tables(value):
 def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
     ensure_display_exists(display_file, headers)
-    try:
-        with open(display_file) as f:
-            data = json.load(f)
-            if not isinstance(data, dict):
-                return {
-                    "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")],
-                    "tables": {"history": {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]}},
-                    "hidden_printers": [],
-                    "pause_include_paused_time_default": False,
-                    "projects_show_cost_totals": True,
-                }
+    _hidden_defaults = {
+        "job_uid",
+        "thumbnail",
+        "pause_count",
+        "runout_count",
+        "import_source",
+        "import_id",
+        "job_outcome",
+        "duration_seconds_raw",
+        "duration_seconds_est",
+        "duration_seconds_effective",
+        "filament_mm_raw",
+        "filament_mm_est",
+        "filament_mm_effective",
+    }
 
-            tables = _coerce_display_tables(data.get("tables"))
-
-            # Backwards-compatible: top-level visible_columns = history visible columns.
-            history_cols = None
-            if isinstance(tables.get("history"), dict):
-                history_cols = tables.get("history", {}).get("visible_columns")
-            if not isinstance(history_cols, list):
-                history_cols = data.get("visible_columns", headers)
-            cols = history_cols
-            cols = [c for c in cols if c in headers]
-            cols = [c for c in cols if c != "job_uid"]
-            if not cols:
-                cols = [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
-
-            # Ensure the history table always exists in the returned "tables" mapping.
-            tables.setdefault("history", {"visible_columns": cols})
-
-            hidden = data.get("hidden_printers", [])
-            if not isinstance(hidden, list):
-                hidden = []
-            hidden = [str(p) for p in hidden if str(p).strip()]
-
-            # Pause accounting semantics:
-            # - pause_include_paused_time_default == True  => bill wall-clock duration_seconds
-            # - pause_include_paused_time_default == False => bill max(0, duration_seconds - paused_seconds_total)
-            if "pause_include_paused_time_default" in data:
-                pause_include = bool(data.get("pause_include_paused_time_default", False))
-            elif "pause_exclude_paused_time_default" in data:
-                pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
-            else:
-                pause_include = False
-
-            show_cost_totals = data.get("projects_show_cost_totals", True)
-            show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
-            return {
-                "visible_columns": cols,
-                "tables": tables,
-                "hidden_printers": hidden,
-                "pause_include_paused_time_default": pause_include,
-                "projects_show_cost_totals": show_cost_totals,
-            }
-    except Exception:
+    def _default_settings():
+        visible = [h for h in headers if h not in _hidden_defaults]
         return {
-            "visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")],
-            "tables": {"history": {"visible_columns": [h for h in headers if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]}},
+            "visible_columns": visible,
+            "tables": {"history": {"visible_columns": visible}},
             "hidden_printers": [],
             "pause_include_paused_time_default": False,
             "projects_show_cost_totals": True,
         }
+
+    try:
+        with open(display_file) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return _default_settings()
+
+        tables = _coerce_display_tables(data.get("tables"))
+
+        history_cols = None
+        if isinstance(tables.get("history"), dict):
+            history_cols = tables.get("history", {}).get("visible_columns")
+        if not isinstance(history_cols, list):
+            history_cols = data.get("visible_columns", headers)
+
+        cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
+        if not cols:
+            cols = [h for h in headers if h not in _hidden_defaults]
+
+        tables.setdefault("history", {"visible_columns": cols})
+
+        hidden = data.get("hidden_printers", [])
+        if not isinstance(hidden, list):
+            hidden = []
+        hidden = [str(p) for p in hidden if str(p).strip()]
+
+        if "pause_include_paused_time_default" in data:
+            pause_include = bool(data.get("pause_include_paused_time_default", False))
+        elif "pause_exclude_paused_time_default" in data:
+            pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
+        else:
+            pause_include = False
+
+        show_cost_totals = data.get("projects_show_cost_totals", True)
+        show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
+
+        return {
+            "visible_columns": cols,
+            "tables": tables,
+            "hidden_printers": hidden,
+            "pause_include_paused_time_default": pause_include,
+            "projects_show_cost_totals": show_cost_totals,
+        }
+    except Exception:
+        return _default_settings()
 
 def get_visible_columns_for_table(display_settings, table_id, allowed_columns):
     """
@@ -454,6 +479,7 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
     old_header = [str(h or "").strip() for h in old_header if str(h or "").strip()]
     if old_header == list(expected_headers):
         return False
+    prefix_mapping = bool(old_header) and list(expected_headers)[: len(old_header)] == old_header
 
     logger.warning(
         "CSV schema mismatch detected; migrating %s (old=%d cols, expected=%d cols)",
@@ -489,7 +515,11 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
                 exp_map = {expected_headers[i]: row_list[i] for i in range(min(len(expected_headers), len(row_list)))}
 
                 chosen = old_map
-                if _score_row_mapping(exp_map) > _score_row_mapping(old_map):
+                # Common drift case: the file header is an older prefix of HEADERS, but newer rows were
+                # appended using the newer column order (so they contain extra positional fields).
+                if prefix_mapping and len(row_list) > len(old_header):
+                    chosen = exp_map
+                elif _score_row_mapping(exp_map) > _score_row_mapping(old_map):
                     chosen = exp_map
 
                 out_row = {h: chosen.get(h, "") for h in expected_headers}
@@ -552,6 +582,24 @@ def load_rows_raw(csv_file):
                 if "failure_reason" not in r:
                     r["failure_reason"] = ""
 
+                # Moonraker import columns (safe defaults)
+                if "import_source" not in r:
+                    r["import_source"] = ""
+                if "import_id" not in r:
+                    r["import_id"] = ""
+                if "job_outcome" not in r:
+                    r["job_outcome"] = ""
+                for k in (
+                    "duration_seconds_raw",
+                    "duration_seconds_est",
+                    "duration_seconds_effective",
+                    "filament_mm_raw",
+                    "filament_mm_est",
+                    "filament_mm_effective",
+                ):
+                    if k not in r or not str(r.get(k) or "").strip():
+                        r[k] = "0"
+
                 # History rows should represent finalized jobs only. If older rows
                 # incorrectly captured transient live states, normalize them for display.
                 try:
@@ -590,7 +638,6 @@ def load_rows_raw(csv_file):
             needs_writeback = True
 
         if needs_writeback:
-            from core.config import HEADERS
             with open(csv_file, "w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=HEADERS)
                 writer.writeheader()
@@ -599,6 +646,28 @@ def load_rows_raw(csv_file):
         return rows, None
     except Exception as e:
         return [], f"Error reading CSV: {e}"
+
+
+def rewrite_csv_all_rows(csv_file: str, headers: list, rows: list[dict]) -> None:
+    """
+    Rewrite the entire CSV from an in-memory row list (as returned by load_rows_raw).
+
+    Uses _row_to_csv_dict to preserve raw timestamps and other persisted fields.
+    """
+    tmp_path = f"{csv_file}.tmp"
+    try:
+        with open(tmp_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(_row_to_csv_dict(row, headers))
+        os.replace(tmp_path, csv_file)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 def _canon_float(value, *, decimals: int = 6) -> str:

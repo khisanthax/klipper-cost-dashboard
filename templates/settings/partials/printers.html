@@ -81,6 +81,7 @@
             <div class="d-flex justify-content-between align-items-center mt-3">
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
+                    <button type="submit" class="btn btn-outline-secondary" name="action" value="test_moonraker">Test Moonraker</button>
 
                     {% set _ps = printer_settings.get(p, {}) %}
                     <div class="form-check form-switch ms-2">
@@ -111,6 +112,30 @@
                         onclick="return confirm('Delete printer {{ p }}?')">
                     Delete printer
                 </button>
+            </div>
+
+            <div class="border-top pt-3 mt-3">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="text-muted small me-2">Moonraker history import:</span>
+                    <select name="import_limit" class="form-select form-select-sm" style="width: auto;">
+                        <option value="50">Last 50</option>
+                        <option value="200" selected>Last 200</option>
+                        <option value="500">Last 500</option>
+                        <option value="all">All (may take a while)</option>
+                    </select>
+                    <div class="form-check form-check-inline mb-0">
+                        <input class="form-check-input" type="checkbox" id="import_skip_existing_{{ p }}" name="import_skip_existing" checked>
+                        <label class="form-check-label small" for="import_skip_existing_{{ p }}">Skip existing</label>
+                    </div>
+                    <div class="form-check form-check-inline mb-0">
+                        <input class="form-check-input" type="checkbox" id="import_overwrite_existing_{{ p }}" name="import_overwrite_existing">
+                        <label class="form-check-label small" for="import_overwrite_existing_{{ p }}">Overwrite existing</label>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-success" name="action" value="import_moonraker_history">
+                        Import
+                    </button>
+                </div>
+                <div class="text-muted small mt-1">Backfill print attempts from Moonraker job history for this printer.</div>
             </div>
         </form>
     </div>
