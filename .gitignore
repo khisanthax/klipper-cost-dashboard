@@ -12,3 +12,12 @@ codex_memory/
 
 # Local/dev compose override (keep private)
 docker-compose.dev.yml
+
+# Runtime data artifacts (created in ./data volume)
+data/system_events.jsonl
+data/projects.json
+data/project_assignments.json
+data/project_assignments_orphans.json
+data/project_plans.json
+data/project_manual_jobs.json
+data/thumb_cache/

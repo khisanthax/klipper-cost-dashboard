@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <h3 class="mb-0">System Events</h3>
+    <div class="text-muted small">Recent activity, deletions, warnings, and failures.</div>
+  </div>
+
+  <form method="get" class="d-flex align-items-center gap-2 mb-0">
+    <label class="text-muted small mb-0" for="filter">View</label>
+    <select id="filter" name="filter" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="all" {% if filter_name == "all" %}selected{% endif %}>All</option>
+      <option value="failures" {% if filter_name == "failures" %}selected{% endif %}>Failures &amp; Warnings</option>
+      <option value="deleted" {% if filter_name == "deleted" %}selected{% endif %}>Deleted</option>
+    </select>
+    <noscript><button type="submit" class="btn btn-sm btn-primary">Apply</button></noscript>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width: 170px;">Time</th>
+            <th style="width: 120px;">Category</th>
+            <th style="width: 240px;">Title</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if events and (events|length > 0) %}
+            {% for ev in events %}
+            <tr>
+              <td class="text-muted small">{{ ev.get("_ts_display") or ev.get("ts", "") }}</td>
+              <td>
+                {% set cat = (ev.get("category") or "")|lower %}
+                <span class="badge
+                  {% if cat == "failure" %}bg-danger
+                  {% elif cat == "warning" %}bg-warning text-dark
+                  {% elif cat == "deleted" %}bg-secondary
+                  {% else %}bg-light text-dark border{% endif %}">
+                  {{ cat|upper }}
+                </span>
+              </td>
+              <td class="fw-semibold">{{ ev.get("title", "") }}</td>
+              <td>{{ ev.get("message", "") }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr>
+              <td colspan="4" class="text-muted p-3">No events yet.</td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

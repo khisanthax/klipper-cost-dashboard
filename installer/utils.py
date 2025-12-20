@@ -45,6 +45,19 @@ def println(msg: str = "") -> None:
     sys.stdout.flush()
 
 
+def _emit_system_event(category: str, title: str, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Best-effort system event emitter for installer runs.
+
+    Installer should never crash if the dashboard code isn't available.
+    """
+    try:
+        from core import system_events
+        system_events.emit_event(category, title, message, meta=meta)
+    except Exception:
+        return
+
+
 def _safe_input(prompt: str) -> str:
     try:
         return input(prompt)
@@ -773,12 +786,24 @@ def _ensure_include_in_printer_cfg(printer_dir: str, include_filename: str) -> N
     printer_cfg_path = os.path.join(printer_dir, "printer.cfg")
     if not os.path.exists(printer_cfg_path):
         println(f"WARNING: printer.cfg not found at {printer_cfg_path}; please add [include {include_filename}] manually.")
+        _emit_system_event(
+            "warning",
+            "Manual action required (installer)",
+            f"printer.cfg not found; add [include {include_filename}] manually for the client install to work.",
+            meta={"action": "install_client_local", "printer_cfg": "missing"},
+        )
         return
     try:
         with open(printer_cfg_path, "r") as f:
             text = f.read()
     except Exception as e:
         println(f"WARNING: Failed to read {printer_cfg_path}: {e}")
+        _emit_system_event(
+            "warning",
+            "Manual action required (installer)",
+            "Could not read printer.cfg while trying to add the KCD include line. You may need to add it manually.",
+            meta={"action": "install_client_local", "printer_cfg": "read_failed"},
+        )
         return
     include_line = f"[include {include_filename}]"
     if include_line in text:
@@ -790,6 +815,12 @@ def _ensure_include_in_printer_cfg(printer_dir: str, include_filename: str) -> N
         println(f"Prepended {include_line} to {printer_cfg_path}")
     except Exception as e:
         println(f"WARNING: Failed to update {printer_cfg_path}: {e}")
+        _emit_system_event(
+            "warning",
+            "Manual action required (installer)",
+            "Could not update printer.cfg to add the KCD include line. You may need to add it manually.",
+            meta={"action": "install_client_local", "printer_cfg": "write_failed"},
+        )
 
 
 def _remove_include_line(printer_dir: str, include_filename: str) -> None:
@@ -987,6 +1018,12 @@ def install_client_local() -> None:
     except Exception as e:
         println(f"WARNING: Macro integration wizard failed: {e}")
         println("You may need to add KCD blocks to your macros manually.")
+        _emit_system_event(
+            "warning",
+            "Manual action required (installer)",
+            "Macro integration failed; you may need to add KCD blocks to PRINT_START/END_PRINT manually.",
+            meta={"action": "install_client_local", "printer": printer_name},
+        )
 
     save_state("master_url", master_url)
     save_state("api_key", api_key)
@@ -1167,6 +1204,12 @@ def install_client_remote() -> None:
     include_line = "[include print_cost.cfg]"
     if not r.remote_append_line_if_missing(remote, remote_printer_cfg, include_line):
         println("WARNING: Failed to ensure include line in remote printer.cfg; please check manually.")
+        _emit_system_event(
+            "warning",
+            "Manual action required (remote installer)",
+            "Could not ensure [include print_cost.cfg] on the remote printer.cfg. Please verify it manually.",
+            meta={"action": "install_client_remote", "printer": printer_name, "host": remote, "config_dir": printer_dir},
+        )
     elif auto_mode:
         println("[auto] Verified [include print_cost.cfg] in printer.cfg.")
 
@@ -1175,6 +1218,12 @@ def install_client_remote() -> None:
     except Exception as e:
         println(f"WARNING: Remote macro integration failed: {e}")
         println("You may need to add KCD blocks to your macros on the remote host manually.")
+        _emit_system_event(
+            "warning",
+            "Manual action required (remote installer)",
+            "Remote macro integration failed; you may need to add KCD blocks to START/END macros manually.",
+            meta={"action": "install_client_remote", "printer": printer_name, "host": remote, "config_dir": printer_dir},
+        )
     save_state("master_url", master_url)
     save_state("api_key", api_key)
 
@@ -1448,6 +1497,12 @@ def uninstall_client_local(printer_name: str) -> None:
 
     unregister_client(lambda c: c.get("type") == "local" and c.get("printer_name") == printer_name)
     println(f"Local client uninstall complete for '{printer_name}'.")
+    _emit_system_event(
+        "deleted",
+        "Client removed",
+        f"Uninstalled local client files for printer {printer_name!r}.",
+        meta={"action": "uninstall_client_local", "printer": printer_name},
+    )
 
 
 def uninstall_client_remote(printer_name: str) -> None:
@@ -1489,6 +1544,12 @@ def uninstall_client_remote(printer_name: str) -> None:
 
     unregister_client(lambda c: c.get("type") == "remote" and c.get("printer_name") == printer_name)
     println(f"Remote client uninstall complete for '{printer_name}'.")
+    _emit_system_event(
+        "deleted",
+        "Client removed",
+        f"Uninstalled remote client files for printer {printer_name!r}.",
+        meta={"action": "uninstall_client_remote", "printer": printer_name, "host": host, "config_dir": config_dir},
+    )
 
 
 # ----------------------------------------------------------------------
