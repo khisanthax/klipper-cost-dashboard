@@ -44,6 +44,7 @@ from core import pricing
 from core import live
 from core import projects
 from core import thumbnails as thumbs
+from core import system_events
 from core.moonraker import test_moonraker_url
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
@@ -117,6 +118,29 @@ def thumb_cache(printer_name: str, cache_file: str):
     resp = send_file(str(file_path), mimetype="image/png")
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
+
+
+@app.get("/system-events")
+def system_events_page():
+    filter_name = (request.args.get("filter") or "all").strip().lower()
+    if filter_name not in {"all", "failures", "deleted"}:
+        filter_name = "all"
+    events = system_events.list_events(filter_name=filter_name, limit=500)
+    for ev in events:
+        ts = str(ev.get("ts") or "").strip()
+        if not ts:
+            ev["_ts_display"] = ""
+            continue
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(TIMEZONE_OBJ)
+            ev["_ts_display"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            ev["_ts_display"] = ts
+    return render_template(
+        "system_events.html",
+        events=events,
+        filter_name=filter_name,
+    )
 
 def _parse_per_page(raw, default=25):
     try:
@@ -226,6 +250,12 @@ def log_print():
     if not norm.valid_printer:
         app.logger.warning(norm.reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming print log",
+            f"{norm.reason} Next: check Settings → Printers for the correct printer name and re-run the client installer if needed.",
+            meta={"action": "log_print", "printer": str(printer_name_raw or ""), "filename": str(filename_raw or "")},
+        )
         return jsonify({"status": "error", "error": norm.reason}), 400
 
     printer_name = norm.printer_name
@@ -360,12 +390,24 @@ def job_start():
     if not norm.valid_printer:
         app.logger.warning(norm.reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming job start",
+            f"{norm.reason} Next: check Settings → Printers for the correct printer name and re-run the client installer if needed.",
+            meta={"action": "job_start", "printer": str(printer_name_raw or ""), "filename": str(filename_raw or "")},
+        )
         return jsonify({"success": False, "error": norm.reason}), 400
 
     printer_name = norm.printer_name
     filename = norm.filename
 
     if not printer_name or not filename:
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming job start",
+            "Missing required fields (printer_name or filename). Next: verify the Klipper start macro sends both fields.",
+            meta={"action": "job_start", "printer": str(printer_name or ""), "filename": str(filename or "")},
+        )
         return jsonify({"success": False, "error": "Missing required fields: printer_name, filename"}), 400
     
     # Optional fields
@@ -413,12 +455,24 @@ def job_update():
     if looks_like_gcode_filename(printer_name):
         reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
         app.logger.warning(reason)
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming job update",
+            f"{reason} Next: confirm your Klipper macro sends the printer name first, not the filename.",
+            meta={"action": "job_update", "printer": str(printer_name or "")},
+        )
         return jsonify({"success": False, "error": reason}), 400
 
     if printer_name not in canonical:
         reason = f"Unknown printer_name received: {printer_name!r}"
         app.logger.warning(reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
+        system_events.emit_event(
+            "warning",
+            "Ignored update for unknown printer",
+            f"{reason} Next: add the printer in Settings → Printers and reinstall the client.",
+            meta={"action": "job_update", "printer": str(printer_name or "")},
+        )
         return jsonify({"success": False, "error": reason}), 400
     
     # Extract update fields (exclude printer_name from updates)
@@ -457,12 +511,24 @@ def job_pause():
     if looks_like_gcode_filename(printer_name):
         reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
         app.logger.warning(reason)
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming job pause",
+            f"{reason} Next: confirm your Klipper macro sends the printer name first, not the filename.",
+            meta={"action": "job_pause", "printer": str(printer_name or "")},
+        )
         return jsonify({"success": False, "error": reason}), 400
 
     if printer_name not in canonical:
         reason = f"Unknown printer_name received: {printer_name!r}"
         app.logger.warning(reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
+        system_events.emit_event(
+            "warning",
+            "Ignored pause for unknown printer",
+            f"{reason} Next: add the printer in Settings → Printers and reinstall the client.",
+            meta={"action": "job_pause", "printer": str(printer_name or "")},
+        )
         return jsonify({"success": False, "error": reason}), 400
     
     pause_reason = str(reason or "").strip().lower()
@@ -495,12 +561,24 @@ def job_resume():
     if looks_like_gcode_filename(printer_name):
         reason = f"Rejected printer_name because it looks like a gcode filename: {printer_name!r}"
         app.logger.warning(reason)
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming job resume",
+            f"{reason} Next: confirm your Klipper macro sends the printer name first, not the filename.",
+            meta={"action": "job_resume", "printer": str(printer_name or "")},
+        )
         return jsonify({"success": False, "error": reason}), 400
 
     if printer_name not in canonical:
         reason = f"Unknown printer_name received: {printer_name!r}"
         app.logger.warning(reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
+        system_events.emit_event(
+            "warning",
+            "Ignored resume for unknown printer",
+            f"{reason} Next: add the printer in Settings → Printers and reinstall the client.",
+            meta={"action": "job_resume", "printer": str(printer_name or "")},
+        )
         return jsonify({"success": False, "error": reason}), 400
     
     result = live.resume_job(printer_name)
@@ -528,6 +606,12 @@ def job_cancel():
     if not norm.valid_printer:
         app.logger.warning(norm.reason)
         app.logger.warning("Allowed printers: %s", sorted(canonical))
+        system_events.emit_event(
+            "warning",
+            "Rejected incoming job cancel",
+            f"{norm.reason} Next: check Settings → Printers for the correct printer name and re-run the client installer if needed.",
+            meta={"action": "job_cancel", "printer": str(printer_name_raw or ""), "filename": str(filename_raw or "")},
+        )
         return jsonify({"success": False, "error": norm.reason}), 400
 
     printer_name = norm.printer_name
@@ -714,16 +798,28 @@ def index():
             return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
 
         # Handle row deletion
-        if action in ("delete_rows", "delete"):
-            selected = request.form.getlist("delete_rows")
-            if selected:
-                if all(str(v).strip().isdigit() for v in selected):
-                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
-                    rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
-                else:
-                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
-            return redirect(url_for("index"))
+    if action in ("delete_rows", "delete"):
+        selected = request.form.getlist("delete_rows")
+        if selected:
+            if all(str(v).strip().isdigit() for v in selected):
+                indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                system_events.emit_event(
+                    "deleted",
+                    "Deleted history jobs",
+                    f"Deleted {len(indices)} job(s) from Print History.",
+                    meta={"action": "delete_history_rows", "count": len(indices)},
+                )
+            else:
+                job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
+                system_events.emit_event(
+                    "deleted",
+                    "Deleted history jobs",
+                    f"Deleted {len(job_uids)} job(s) from Print History.",
+                    meta={"action": "delete_history_rows", "count": len(job_uids)},
+                )
+        return redirect(url_for("index"))
 
     rows, error = load_rows_raw(CSV_FILE)
     message = request.args.get("msg", "").strip()
@@ -1672,7 +1768,19 @@ def projects_page():
 
             elif action == "delete_project":
                 project_id = request.form.get("project_id", "").strip()
+                project_name = ""
+                try:
+                    project_obj = projects.load_projects().get(project_id)
+                    project_name = project_obj.name if project_obj else ""
+                except Exception:
+                    project_name = ""
                 projects.delete_project(project_id)
+                system_events.emit_event(
+                    "deleted",
+                    "Project deleted",
+                    f"Project{(' ' + repr(project_name)) if project_name else ''} was deleted. Tracked jobs were unassigned (history was not deleted).",
+                    meta={"action": "delete_project", "project_id": project_id, "project_name": project_name},
+                )
 
             elif action == "assign_jobs":
                 project_id = request.form.get("project_id", "").strip()
@@ -2149,6 +2257,12 @@ def _settings_view(tab: str):
                 pricing.delete_printer(printer, delete_csv=False)
                 # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
                 pricing.hide_printer(printer)
+                system_events.emit_event(
+                    "deleted",
+                    "Printer removed",
+                    f"Printer {printer!r} was removed from Settings. History rows were kept.",
+                    meta={"action": "delete_printer", "printer": printer},
+                )
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "update_pause_settings":
@@ -2385,7 +2499,23 @@ def _settings_view(tab: str):
         if action == "delete_filament_profile":
             profile_id = request.form.get("profile_id", "").strip()
             if profile_id:
+                profile_obj = None
+                try:
+                    profile_obj = profiles.get_profile(profile_id)
+                except Exception:
+                    profile_obj = None
                 profiles.delete_profile(profile_id)
+                profile_name = ""
+                try:
+                    profile_name = str((profile_obj or {}).get("name") or "").strip()
+                except Exception:
+                    profile_name = ""
+                system_events.emit_event(
+                    "deleted",
+                    "Filament profile deleted",
+                    f"Filament profile{(' ' + repr(profile_name)) if profile_name else ''} was deleted.",
+                    meta={"action": "delete_filament_profile", "profile_id": profile_id, "profile_name": profile_name},
+                )
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "set_active_filament_profile":
@@ -2431,7 +2561,23 @@ def _settings_view(tab: str):
         if action == "delete_rate_profile":
             profile_id = request.form.get("rate_profile_id", "").strip()
             if profile_id:
+                rate_obj = None
+                try:
+                    rate_obj = rates.get_rate_profile(profile_id)
+                except Exception:
+                    rate_obj = None
                 rates.delete_rate_profile(profile_id)
+                rate_name = ""
+                try:
+                    rate_name = str((rate_obj or {}).get("name") or "").strip()
+                except Exception:
+                    rate_name = ""
+                system_events.emit_event(
+                    "deleted",
+                    "Hourly rate profile deleted",
+                    f"Hourly rate profile{(' ' + repr(rate_name)) if rate_name else ''} was deleted.",
+                    meta={"action": "delete_rate_profile", "rate_profile_id": profile_id, "rate_profile_name": rate_name},
+                )
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "set_active_rate_profile":

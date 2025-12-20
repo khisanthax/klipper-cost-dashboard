@@ -86,6 +86,8 @@
                     href="{{ url_for('projects_page') }}">Projects</a>
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/recalculate') %}active{% endif %}"
                     href="{{ url_for('recalculate_page') }}">Recalculate</a>
+                <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/system-events') %}active{% endif %}"
+                    href="{{ url_for('system_events_page') }}">System Events</a>
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
                     href="{{ url_for('settings_printers_page') }}">Settings</a>
             </div>
