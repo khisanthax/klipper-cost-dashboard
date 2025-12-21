@@ -15,4 +15,8 @@
        class="btn btn-outline-primary {% if request.path.startswith('/settings/pause') %}active{% endif %}">
         Pause Accounting
     </a>
+    <a href="{{ url_for('system_events_page') }}"
+       class="btn btn-outline-primary {% if request.path.startswith('/system-events') %}active{% endif %}">
+        System Events
+    </a>
 </div>

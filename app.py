@@ -798,28 +798,28 @@ def index():
             return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
 
         # Handle row deletion
-    if action in ("delete_rows", "delete"):
-        selected = request.form.getlist("delete_rows")
-        if selected:
-            if all(str(v).strip().isdigit() for v in selected):
-                indices = [int(i) for i in selected if str(i).strip().isdigit()]
-                rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
-                system_events.emit_event(
-                    "deleted",
-                    "Deleted history jobs",
-                    f"Deleted {len(indices)} job(s) from Print History.",
-                    meta={"action": "delete_history_rows", "count": len(indices)},
-                )
-            else:
-                job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
-                system_events.emit_event(
-                    "deleted",
-                    "Deleted history jobs",
-                    f"Deleted {len(job_uids)} job(s) from Print History.",
-                    meta={"action": "delete_history_rows", "count": len(job_uids)},
-                )
-        return redirect(url_for("index"))
+        if action in ("delete_rows", "delete"):
+            selected = request.form.getlist("delete_rows")
+            if selected:
+                if all(str(v).strip().isdigit() for v in selected):
+                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                    rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                    system_events.emit_event(
+                        "deleted",
+                        "Deleted history jobs",
+                        f"Deleted {len(indices)} job(s) from Print History.",
+                        meta={"action": "delete_history_rows", "count": len(indices)},
+                    )
+                else:
+                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
+                    system_events.emit_event(
+                        "deleted",
+                        "Deleted history jobs",
+                        f"Deleted {len(job_uids)} job(s) from Print History.",
+                        meta={"action": "delete_history_rows", "count": len(job_uids)},
+                    )
+            return redirect(url_for("index"))
 
     rows, error = load_rows_raw(CSV_FILE)
     message = request.args.get("msg", "").strip()
