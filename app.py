@@ -202,6 +202,44 @@ def _pager_links(endpoint, args_dict, page_key, per_page_key, pager_meta):
     return pager_meta
 
 
+def _history_sort_key(row: dict) -> float:
+    """
+    Return a stable numeric sort key for history rows (newest first).
+
+    Prefers epoch seconds (timestamp_raw / timestamp_epoch). Falls back to parsing
+    a rendered timestamp string (including newline-separated date/time).
+    Rows with missing/invalid timestamps sort last consistently.
+    """
+    try:
+        ts_raw = row.get("timestamp_raw")
+        if ts_raw is not None and ts_raw != "":
+            return float(ts_raw)
+    except Exception:
+        pass
+
+    # Prefer the original epoch string stored in CSV.
+    try:
+        ts_epoch = row.get("timestamp_epoch")
+        if ts_epoch is not None and str(ts_epoch).strip() != "":
+            return float(ts_epoch)
+    except Exception:
+        pass
+
+    # Fallback: parse display timestamp (YYYY-MM-DD HH:MM:SS), tolerate newline split.
+    try:
+        ts_text = str(row.get("timestamp") or "").strip().replace("\n", " ").strip()
+        if not ts_text:
+            return float("-inf")
+        dt = datetime.strptime(ts_text[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=TIMEZONE_OBJ)
+        return float(dt.timestamp())
+    except Exception:
+        return float("-inf")
+
+
+def _sort_history_rows(rows: list[dict]) -> list[dict]:
+    return sorted(rows, key=_history_sort_key, reverse=True)
+
+
 @app.before_request
 def _kcd_auto_backup_hook():
     # Best-effort auto backup. This is intentionally lightweight: it only runs when due.
@@ -910,6 +948,9 @@ def index():
             if rc > 0:
                 filtered.append(r)
         rows = filtered
+
+    # Stable ordering: sort the full filtered list before paginating.
+    rows = _sort_history_rows(rows)
 
     history_per_page = _parse_per_page(request.args.get("history_per_page"), default=25)
     history_rows_page, history_pager = _paginate(rows, request.args.get("history_page", 1), history_per_page)
