@@ -28,11 +28,14 @@
             <th style="width: 120px;">Category</th>
             <th style="width: 240px;">Title</th>
             <th>Message</th>
+            <th style="width: 90px;">Details</th>
           </tr>
         </thead>
         <tbody>
           {% if events and (events|length > 0) %}
             {% for ev in events %}
+            {% set meta = ev.get("meta") %}
+            {% set has_meta = meta and (meta|length > 0) %}
             <tr>
               <td class="text-muted small">{{ ev.get("_ts_display") or ev.get("ts", "") }}</td>
               <td>
@@ -47,11 +50,39 @@
               </td>
               <td class="fw-semibold">{{ ev.get("title", "") }}</td>
               <td>{{ ev.get("message", "") }}</td>
+              <td>
+                {% if has_meta %}
+                <button class="btn btn-sm btn-outline-secondary"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target="#ev-meta-{{ loop.index }}"
+                        aria-expanded="false"
+                        aria-controls="ev-meta-{{ loop.index }}">
+                  View
+                </button>
+                {% endif %}
+              </td>
             </tr>
+            {% if has_meta %}
+            <tr class="collapse" id="ev-meta-{{ loop.index }}">
+              <td colspan="5" class="bg-light">
+                {% if meta is mapping %}
+                <dl class="row mb-0 small">
+                  {% for key, value in meta|dictsort %}
+                  <dt class="col-sm-3 text-muted">{{ key }}</dt>
+                  <dd class="col-sm-9 mb-1">{{ value }}</dd>
+                  {% endfor %}
+                </dl>
+                {% else %}
+                <pre class="small mb-0">{{ meta }}</pre>
+                {% endif %}
+              </td>
+            </tr>
+            {% endif %}
             {% endfor %}
           {% else %}
             <tr>
-              <td colspan="4" class="text-muted p-3">No events yet.</td>
+              <td colspan="5" class="text-muted p-3">No events yet.</td>
             </tr>
           {% endif %}
         </tbody>
@@ -60,4 +91,3 @@
   </div>
 </div>
 {% endblock %}
-
