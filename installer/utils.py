@@ -1,4 +1,4 @@
-# --------------------------------------------------------------------------------------
+﻿# --------------------------------------------------------------------------------------
 # File: installer/utils.py
 # Description: Utility helpers for Print Cost Dashboard installer.
 #   - Installer state (DATA_DIR/STATE_FILE constants, key-based load/save)
@@ -110,6 +110,23 @@ def _service_is_active(service_name: str) -> str:
         return "unknown"
 
 
+def _service_is_enabled(service_name: str) -> str:
+    if not _systemctl_exists():
+        return "unknown"
+    try:
+        proc = subprocess.run(
+            ["systemctl", "is-enabled", service_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return (proc.stdout or proc.stderr or "disabled").strip()
+        return (proc.stdout or "disabled").strip()
+    except Exception:
+        return "unknown"
+
+
 def _check_port_open(port: int) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", int(port)), timeout=2.0):
@@ -185,14 +202,59 @@ def _write_systemd_service(service_name: str, workdir: str, venv_python: str, po
 
 def _print_master_summary(status: str, service_name: str, port: int) -> None:
     if status == "success":
-        println("\n✅ Master install complete")
+        println("\nOK: Master install complete")
     elif status == "skipped":
-        println("\n⚠️ Master install skipped (already installed)")
+        println("\nSKIP: Master install skipped (already installed)")
     else:
-        println("\n❌ Master install failed")
+        println("\nFAIL: Master install failed")
     println(f"Service name : {service_name}")
     println(f"Port         : {port}")
     println(f"Logs         : journalctl -u {service_name} -f")
+
+
+def _perform_master_install(port: int, url: str, service_name: str) -> bool:
+    repo_root = _repo_root()
+    venv_dir, venv_python, venv_pip = _venv_paths(repo_root)
+    python_bin = shutil.which("python3") or sys.executable
+    if not python_bin:
+        println("Python3 not found; cannot create virtualenv.")
+        return False
+
+    steps = [
+        ("Creating virtual environment", f"{python_bin} -m venv \"{venv_dir}\""),
+        ("Installing dependencies", f"\"{venv_pip}\" install -r \"{os.path.join(repo_root, 'requirements.txt')}\""),
+    ]
+
+    for idx, (label, cmd) in enumerate(steps, 1):
+        println(f"[{idx}/{len(steps) + 3}] {label}...")
+        code = _run_cmd(cmd, cwd=repo_root)
+        if code != 0:
+            return False
+
+    println(f"[{len(steps) + 1}/{len(steps) + 3}] Writing config files...")
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        ensure_api_key(secret_file=os.path.join(DATA_DIR, "secret.json"), data_dir=DATA_DIR)
+    except Exception as e:
+        println(f"Failed to ensure config files: {e}")
+        return False
+
+    println(f"[{len(steps) + 2}/{len(steps) + 3}] Writing systemd service...")
+    service_path = _write_systemd_service(service_name, repo_root, venv_python, port)
+    if not service_path:
+        return False
+
+    println(f"[{len(steps) + 3}/{len(steps) + 3}] Enabling and starting service...")
+    _run_cmd("systemctl daemon-reload")
+    if _run_cmd(f"systemctl enable --now {service_name}") != 0:
+        return False
+
+    status = _service_is_active(service_name)
+    println(f"Service status : {status}")
+    println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
+    ok, detail = _check_url(url)
+    println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
+    return True
 
 
 def _master_install_or_status(host: str, port: int, url: str, service_name: str) -> None:
@@ -204,61 +266,38 @@ def _master_install_or_status(host: str, port: int, url: str, service_name: str)
 
     if _service_exists(service_name):
         println(f"Master already installed: service {service_name} found")
+        enabled = _service_is_enabled(service_name)
         status = _service_is_active(service_name)
-        println(f"Service status : {status}")
+        println(f"Service enabled: {enabled}")
+        println(f"Service active : {status}")
         println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
         ok, detail = _check_url(url)
         println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
-        _print_master_summary("skipped", service_name, port)
-        return
+        println(f"Saved URL      : {url}")
 
-    repo_root = _repo_root()
-    venv_dir, venv_python, venv_pip = _venv_paths(repo_root)
-    python_bin = shutil.which("python3") or sys.executable
-    if not python_bin:
-        println("Python3 not found; cannot create virtualenv.")
-        _print_master_summary("failed", service_name, port)
-        return
+        while True:
+            choice = _safe_input(
+                "Options: (R)estart service, (V)iew logs, (F)orce reinstall, (B)ack: "
+            ).strip().lower()
+            if choice in ("b", "", "back"):
+                _print_master_summary("skipped", service_name, port)
+                return
+            if choice in ("r", "restart"):
+                _run_cmd(f"systemctl restart {service_name}")
+                status = _service_is_active(service_name)
+                println(f"Service active : {status}")
+                continue
+            if choice in ("v", "view"):
+                _run_cmd(f"journalctl -u {service_name} -n 100 --no-pager")
+                continue
+            if choice in ("f", "force"):
+                ok_install = _perform_master_install(port, url, service_name)
+                _print_master_summary("success" if ok_install else "failed", service_name, port)
+                return
+            println("Invalid option. Choose R, V, F, or B.")
 
-    steps = [
-        ("Creating virtual environment", f"{python_bin} -m venv \"{venv_dir}\""),
-        ("Installing dependencies", f"\"{venv_pip}\" install -r \"{os.path.join(repo_root, 'requirements.txt')}\""),
-    ]
-
-    for idx, (label, cmd) in enumerate(steps, 1):
-        println(f"[{idx}/{len(steps) + 3}] {label}...")
-        code = _run_cmd(cmd, cwd=repo_root)
-        if code != 0:
-            _print_master_summary("failed", service_name, port)
-            return
-
-    println(f"[{len(steps) + 1}/{len(steps) + 3}] Writing config files...")
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        ensure_api_key(secret_file=os.path.join(DATA_DIR, "secret.json"), data_dir=DATA_DIR)
-    except Exception as e:
-        println(f"Failed to ensure config files: {e}")
-        _print_master_summary("failed", service_name, port)
-        return
-
-    println(f"[{len(steps) + 2}/{len(steps) + 3}] Writing systemd service...")
-    service_path = _write_systemd_service(service_name, repo_root, venv_python, port)
-    if not service_path:
-        _print_master_summary("failed", service_name, port)
-        return
-
-    println(f"[{len(steps) + 3}/{len(steps) + 3}] Enabling and starting service...")
-    _run_cmd("systemctl daemon-reload")
-    if _run_cmd(f"systemctl enable --now {service_name}") != 0:
-        _print_master_summary("failed", service_name, port)
-        return
-
-    status = _service_is_active(service_name)
-    println(f"Service status : {status}")
-    println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
-    ok, detail = _check_url(url)
-    println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
-    _print_master_summary("success", service_name, port)
+    ok_install = _perform_master_install(port, url, service_name)
+    _print_master_summary("success" if ok_install else "failed", service_name, port)
 
 
 def _emit_system_event(category: str, title: str, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
