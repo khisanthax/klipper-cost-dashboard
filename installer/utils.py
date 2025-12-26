@@ -14,6 +14,8 @@ import secrets
 import tempfile
 import shutil
 import sys
+import subprocess
+import socket
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -43,6 +45,220 @@ def println(msg: str = "") -> None:
     import sys
     print(msg)
     sys.stdout.flush()
+
+
+def _run_cmd(cmd: str, cwd: Optional[str] = None) -> int:
+    println(f"  $ {cmd}")
+    try:
+        proc = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except Exception as e:
+        println(f"  Command failed: {e}")
+        return 1
+
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    if out:
+        println(out)
+    if err:
+        println(err)
+    return proc.returncode
+
+
+def _systemctl_exists() -> bool:
+    return bool(shutil.which("systemctl"))
+
+
+def _service_exists(service_name: str) -> bool:
+    if not _systemctl_exists():
+        return False
+    try:
+        proc = subprocess.run(
+            ["systemctl", "show", "-p", "LoadState", "--value", service_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return False
+        state = (proc.stdout or "").strip()
+        return state == "loaded"
+    except Exception:
+        return False
+
+
+def _service_is_active(service_name: str) -> str:
+    if not _systemctl_exists():
+        return "unknown"
+    try:
+        proc = subprocess.run(
+            ["systemctl", "is-active", service_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return (proc.stdout or proc.stderr or "inactive").strip()
+        return (proc.stdout or "inactive").strip()
+    except Exception:
+        return "unknown"
+
+
+def _check_port_open(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=2.0):
+            return True
+    except Exception:
+        return False
+
+
+def _check_url(url: str) -> Tuple[bool, str]:
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "text/html"})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            status = getattr(resp, "status", None) or 0
+        return status == 200, f"HTTP {status}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _venv_paths(root_dir: str) -> Tuple[str, str, str]:
+    venv_dir = os.path.join(root_dir, ".venv")
+    if os.name == "nt":
+        venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+        venv_pip = os.path.join(venv_dir, "Scripts", "pip.exe")
+    else:
+        venv_python = os.path.join(venv_dir, "bin", "python")
+        venv_pip = os.path.join(venv_dir, "bin", "pip")
+    return venv_dir, venv_python, venv_pip
+
+
+def _write_systemd_service(service_name: str, workdir: str, venv_python: str, port: int) -> str:
+    user = os.getenv("SUDO_USER") or os.getenv("USER") or ""
+    service_path = f"/etc/systemd/system/{service_name}.service"
+    env_lines = [
+        "Environment=PYTHONUNBUFFERED=1",
+        "Environment=FLASK_APP=app.py",
+    ]
+    unit = [
+        "[Unit]",
+        f"Description=Klipper Cost Dashboard ({service_name})",
+        "After=network.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"WorkingDirectory={workdir}",
+    ]
+    if user:
+        unit.append(f"User={user}")
+    unit.extend(env_lines)
+    unit.extend(
+        [
+            f"ExecStart={venv_python} -m flask run --host 0.0.0.0 --port {port}",
+            "Restart=always",
+            "RestartSec=3",
+            "",
+            "[Install]",
+            "WantedBy=multi-user.target",
+            "",
+        ]
+    )
+    content = "\n".join(unit)
+    try:
+        with open(service_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return service_path
+    except Exception as e:
+        println(f"Failed to write systemd service file: {e}")
+        return ""
+
+
+def _print_master_summary(status: str, service_name: str, port: int) -> None:
+    if status == "success":
+        println("\n✅ Master install complete")
+    elif status == "skipped":
+        println("\n⚠️ Master install skipped (already installed)")
+    else:
+        println("\n❌ Master install failed")
+    println(f"Service name : {service_name}")
+    println(f"Port         : {port}")
+    println(f"Logs         : journalctl -u {service_name} -f")
+
+
+def _master_install_or_status(host: str, port: int, url: str, service_name: str) -> None:
+    println("\n=== Master Installation ===")
+    if not _systemctl_exists():
+        println("systemctl not found; cannot manage the master service automatically.")
+        _print_master_summary("failed", service_name, port)
+        return
+
+    if _service_exists(service_name):
+        println(f"Master already installed: service {service_name} found")
+        status = _service_is_active(service_name)
+        println(f"Service status : {status}")
+        println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
+        ok, detail = _check_url(url)
+        println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
+        _print_master_summary("skipped", service_name, port)
+        return
+
+    repo_root = _repo_root()
+    venv_dir, venv_python, venv_pip = _venv_paths(repo_root)
+    python_bin = shutil.which("python3") or sys.executable
+    if not python_bin:
+        println("Python3 not found; cannot create virtualenv.")
+        _print_master_summary("failed", service_name, port)
+        return
+
+    steps = [
+        ("Creating virtual environment", f"{python_bin} -m venv \"{venv_dir}\""),
+        ("Installing dependencies", f"\"{venv_pip}\" install -r \"{os.path.join(repo_root, 'requirements.txt')}\""),
+    ]
+
+    for idx, (label, cmd) in enumerate(steps, 1):
+        println(f"[{idx}/{len(steps) + 3}] {label}...")
+        code = _run_cmd(cmd, cwd=repo_root)
+        if code != 0:
+            _print_master_summary("failed", service_name, port)
+            return
+
+    println(f"[{len(steps) + 1}/{len(steps) + 3}] Writing config files...")
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        ensure_api_key(secret_file=os.path.join(DATA_DIR, "secret.json"), data_dir=DATA_DIR)
+    except Exception as e:
+        println(f"Failed to ensure config files: {e}")
+        _print_master_summary("failed", service_name, port)
+        return
+
+    println(f"[{len(steps) + 2}/{len(steps) + 3}] Writing systemd service...")
+    service_path = _write_systemd_service(service_name, repo_root, venv_python, port)
+    if not service_path:
+        _print_master_summary("failed", service_name, port)
+        return
+
+    println(f"[{len(steps) + 3}/{len(steps) + 3}] Enabling and starting service...")
+    _run_cmd("systemctl daemon-reload")
+    if _run_cmd(f"systemctl enable --now {service_name}") != 0:
+        _print_master_summary("failed", service_name, port)
+        return
+
+    status = _service_is_active(service_name)
+    println(f"Service status : {status}")
+    println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
+    ok, detail = _check_url(url)
+    println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
+    _print_master_summary("success", service_name, port)
 
 
 def _emit_system_event(category: str, title: str, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
@@ -915,6 +1131,8 @@ def master_setup(master_and_client: bool = False) -> None:
     println(f"  Port: {port}")
     println(f"  Service: {service_name}")
     println(f"  API key: {api_key}")
+
+    _master_install_or_status(host, port, url, service_name)
 
     if master_and_client:
         println("\nContinuing with local client installation on this machine...")
