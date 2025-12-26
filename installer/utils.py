@@ -616,11 +616,11 @@ import json, os
 def to_float(v):
     try: return float(v)
     except: return 0.0
-data = {
+data = {{
     "printer_name": os.environ.get("PRINTER_NAME", ""),
     "filename": os.environ.get("FILENAME", ""),
     "elapsed_seconds": to_float(os.environ.get("ELAPSED_SECONDS", "0")),
-}
+}}
 print(json.dumps(data))
 PY
 )
