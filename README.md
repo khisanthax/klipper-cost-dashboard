@@ -91,6 +91,24 @@ docker compose logs --tail=200
 docker image ls | grep -E 'klipper-cost-dashboard|kcd'
 ```
 
+## Experimental SQL backend (Phases 0–2)
+
+KCD still reads from CSV/JSON by default, but you can initialize an SQLite database for parity testing:
+
+```bash
+python -m kcd db init
+python -m kcd db import
+python -m kcd db verify
+```
+
+Dual-write mode (CSV + SQLite) can be enabled for testers:
+
+```bash
+KCD_STORAGE_BACKEND=dual python app.py
+```
+
+The database is stored at `data/kcd.db` and does not change the UI yet.
+
 ### 1. Install the Master
 
 Run the installer on the machine where you want the dashboard to live.
