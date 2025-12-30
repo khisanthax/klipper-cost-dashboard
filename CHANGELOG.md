@@ -1,6 +1,6 @@
 ﻿# Changelog
 
-## v1.1.0
+## v0.2.0
 - Added System Events audit trail with filters and expandable details for warnings, deletions, and failures.
 - Added Moonraker history import (idempotent) with inferred outcomes and effective durations for cancelled jobs.
 - Added pause tracking, counts, and per-printer pause accounting settings (exclude paused time by default).
