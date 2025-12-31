@@ -50,7 +50,6 @@ def main(argv: list[str] | None = None) -> int:
     history_parity_cmd = history_sub.add_parser("parity", help="Compare CSV and SQL history rows")
     history_parity_cmd.add_argument("--limit", type=int, default=200)
     history_parity_cmd.set_defaults(func=lambda args: _cmd_history_parity(args))
-
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
         parser.print_help()
