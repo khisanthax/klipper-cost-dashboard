@@ -21,6 +21,23 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _parse_timestamp(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except Exception:
+        pass
+    try:
+        cleaned = raw.replace("Z", "").replace("T", " ")
+        return datetime.fromisoformat(cleaned).timestamp()
+    except Exception:
+        return None
+
+
 def _load_csv_rows() -> list[dict]:
     if not os.path.exists(CSV_FILE):
         return []
@@ -90,10 +107,12 @@ def run_verify() -> Dict[str, Any]:
             }
         )
 
-    report["most_recent"]["csv"] = max(
-        (float(r.get("timestamp") or 0.0) for r in rows if str(r.get("timestamp") or "").strip()),
-        default=0.0,
-    )
+    csv_times = []
+    for r in rows:
+        ts = _parse_timestamp(r.get("timestamp"))
+        if ts is not None:
+            csv_times.append(ts)
+    report["most_recent"]["csv"] = max(csv_times) if csv_times else 0.0
     row = conn.execute("SELECT MAX(ended_at) AS ended_at FROM jobs").fetchone()
     report["most_recent"]["db"] = row["ended_at"] if row else None
 
