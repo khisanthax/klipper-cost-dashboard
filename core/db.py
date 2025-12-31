@@ -233,3 +233,12 @@ def upsert_job(conn: sqlite3.Connection, row: dict) -> None:
         """,
         list(payload.values()),
     )
+
+    logger.debug(
+        "SQL upsert job_uid=%s status=%s duration_seconds=%s rate_per_hour=%s time_cost=%s",
+        payload.get("job_uid"),
+        payload.get("status"),
+        payload.get("duration_seconds"),
+        payload.get("rate_per_hour"),
+        payload.get("time_cost"),
+    )

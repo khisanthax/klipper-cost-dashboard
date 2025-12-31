@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from core import db as db_module
+from core import pricing
 from core.config import CSV_FILE, HEADERS, TIMEZONE_OBJ
 from core.storage import load_rows_raw, ts_to_local_dt
 
@@ -152,6 +153,10 @@ def list_history_rows_csv(query: HistoryQuery, page: int, per_page: int, error: 
                 filtered.append(r)
         rows = filtered
 
+    # Ensure any missing derived cost fields are computed consistently.
+    for row in rows:
+        compute_job_cost_fields(row)
+
     rows = _sort_history_rows(rows)
     total = len(rows)
     pager = _pager_meta(total, page, per_page)
@@ -272,6 +277,7 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
             j.override_material_cost,
             j.override_total_cost,
             j.hourly_rate_profile_id,
+            j.started_at,
             j.ended_at,
             j.created_at,
             {ts_expr} AS timestamp_epoch
@@ -327,5 +333,120 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
             if record.get(key) is None:
                 record[key] = "" if key not in ("paused_seconds_total", "pause_count", "runout_count") else 0
 
+        # If duration_seconds is missing but we have both started_at and ended_at, derive it.
+        if not _as_float(record.get("duration_seconds")):
+            started_at = record.get("started_at")
+            ended_at = record.get("ended_at")
+            if started_at and ended_at:
+                start_epoch = _parse_iso_to_epoch(started_at)
+                end_epoch = _parse_iso_to_epoch(ended_at)
+                if start_epoch is not None and end_epoch is not None:
+                    record["duration_seconds"] = max(0.0, end_epoch - start_epoch)
+
+        # Compute derived fields if missing/zero.
+        compute_job_cost_fields(record)
+
         rows.append(record)
     return rows
+
+
+def _as_float(value: object) -> Optional[float]:
+    try:
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _parse_iso_to_epoch(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        cleaned = raw.replace("Z", "+00:00")
+        return datetime.fromisoformat(cleaned).timestamp()
+    except Exception:
+        return None
+
+
+def compute_job_cost_fields(row: dict) -> dict:
+    """
+    Compute missing/zero cost fields for a job row using the same pricing rules
+    as CSV reads. This is used to fill gaps in SQL rows that lack derived fields.
+    """
+    printer_name = str(row.get("printer") or "").strip()
+    if not printer_name:
+        return row
+
+    duration_seconds = _as_float(row.get("duration_seconds")) or 0.0
+    filament_mm = _as_float(row.get("filament_mm")) or 0.0
+    paused_seconds_total = _as_float(row.get("paused_seconds_total")) or 0.0
+
+    # If duration_seconds is missing but duration_hours is present, derive it.
+    if duration_seconds <= 0:
+        dur_hours = _as_float(row.get("duration_hours"))
+        if dur_hours and dur_hours > 0:
+            duration_seconds = dur_hours * 3600.0
+
+    # If there's still no signal, don't overwrite existing zeros.
+    if duration_seconds <= 0 and filament_mm <= 0:
+        return row
+
+    filament_profile_id = str(row.get("filament_profile_id") or "").strip() or None
+    rate_profile_id = str(row.get("hourly_rate_profile_id") or "").strip() or None
+
+    rate_override = _as_float(row.get("override_rate_per_hour"))
+    material_override = _as_float(row.get("override_material_cost"))
+    total_override = _as_float(row.get("override_total_cost"))
+
+    cost_data = pricing.compute_costs_with_overrides(
+        printer_name,
+        duration_seconds,
+        filament_mm,
+        paused_seconds_total=paused_seconds_total,
+        filament_profile_id=filament_profile_id,
+        rate_profile_id=rate_profile_id,
+        rate_per_hour_override=rate_override,
+    )
+
+    if material_override is not None:
+        cost_data["material_cost"] = material_override
+        cost_data["total_cost"] = cost_data["time_cost"] + material_override
+    if total_override is not None:
+        cost_data["total_cost"] = total_override
+
+    def _should_set(key: str, value: float) -> bool:
+        existing = _as_float(row.get(key))
+        if existing is None:
+            return True
+        if existing <= 0 and value > 0:
+            return True
+        return False
+
+    for key in (
+        "duration_hours",
+        "filament_meters",
+        "rate_per_hour",
+        "filament_mode",
+        "filament_rate",
+        "grams_per_meter",
+        "time_cost",
+        "material_cost",
+        "total_cost",
+        "filament_profile_id",
+        "filament_material",
+    ):
+        val = cost_data.get(key)
+        if key in ("filament_mode", "filament_profile_id", "filament_material"):
+            if row.get(key) in (None, "") and val:
+                row[key] = val
+            continue
+        if isinstance(val, (int, float)) and _should_set(key, float(val)):
+            row[key] = val
+
+    return row

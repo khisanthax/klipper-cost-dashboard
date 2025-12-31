@@ -6,6 +6,7 @@ import argparse
 from core import db as db_module
 from core import db_import
 from core import db_verify
+from core import db_backfill
 from core import history_parity
 
 
@@ -27,6 +28,12 @@ def _cmd_db_verify(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_db_backfill(_args: argparse.Namespace) -> int:
+    report = db_backfill.run_backfill()
+    print(f"DB backfill complete. Rows seen: {report.get('rows_seen', 0)}, upserted: {report.get('rows_upserted', 0)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Klipper Cost Dashboard utilities")
     sub = parser.add_subparsers(dest="command")
@@ -43,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
 
     db_verify_cmd = db_sub.add_parser("verify", help="Verify CSV/DB parity")
     db_verify_cmd.set_defaults(func=_cmd_db_verify)
+
+    db_backfill_cmd = db_sub.add_parser("backfill", help="Backfill DB rows from CSV history")
+    db_backfill_cmd.set_defaults(func=_cmd_db_backfill)
 
     history_parser = sub.add_parser("history", help="History utilities")
     history_sub = history_parser.add_subparsers(dest="history_command")
