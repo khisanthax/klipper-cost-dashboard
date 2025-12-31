@@ -14,6 +14,9 @@ codex_memory/
 docker-compose.dev.yml
 
 # Runtime data artifacts (created in ./data volume)
+data/kcd.db
+data/import_report.json
+data/verify_report.json
 data/system_events.jsonl
 data/projects.json
 data/project_assignments.json
