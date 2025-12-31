@@ -91,7 +91,7 @@ docker compose logs --tail=200
 docker image ls | grep -E 'klipper-cost-dashboard|kcd'
 ```
 
-## Experimental SQL backend (Phases 0–2)
+## Experimental SQL backend (Phases 0–3)
 
 KCD still reads from CSV/JSON by default, but you can initialize an SQLite database for parity testing:
 
@@ -109,7 +109,15 @@ KCD_STORAGE_BACKEND=dual python app.py
 
 Do not use `KCD_STORAGE_BACKEND=sql` yet; the UI still reads from CSV in Phases 0–2.
 
-The database is stored at `data/kcd.db` and does not change the UI yet.
+Enable SQL reads for Print History (Phase 3):
+
+```bash
+KCD_READ_BACKEND=sql python app.py
+```
+
+To roll back, set `KCD_READ_BACKEND=csv` (default). Other pages still read CSV in this phase.
+
+The database is stored at `data/kcd.db`.
 
 ### 1. Install the Master
 
