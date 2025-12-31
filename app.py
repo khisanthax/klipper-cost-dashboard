@@ -45,6 +45,7 @@ from core import projects
 from core import thumbnails as thumbs
 from core import system_events
 from core import storage_backend
+from core import history_repo
 from core.moonraker import test_moonraker_url
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
@@ -859,7 +860,7 @@ def index():
                     )
             return redirect(url_for("index"))
 
-    rows, error = load_rows_raw(CSV_FILE)
+    error = None
     message = request.args.get("msg", "").strip()
     
     # Apply date filtering (printer + range + legacy date range inputs)
@@ -891,30 +892,10 @@ def index():
         quick_range = ""
     
     end_exclusive = selected_range == "yesterday"
-    if start_dt or end_dt:
-        filtered = []
-        for r in rows:
-            ts_raw = r.get("timestamp_raw")
-            if not ts_raw:
-                continue
-            try:
-                row_dt = ts_to_local_dt(float(ts_raw))
-                if start_dt and row_dt < start_dt:
-                    continue
-                if end_dt:
-                    if end_exclusive and row_dt >= end_dt:
-                        continue
-                    if (not end_exclusive) and row_dt > end_dt:
-                        continue
-                filtered.append(r)
-            except Exception:
-                continue
-        rows = filtered
-
     canonical_printers = get_canonical_printer_names()
     if selected_printer and selected_printer != "All":
         if selected_printer in canonical_printers:
-            rows = [r for r in rows if (r.get("printer") or "") == selected_printer]
+            selected_printer = selected_printer
         else:
             selected_printer = "All"
 
@@ -926,34 +907,24 @@ def index():
             paused_min = 0
     paused_min = max(0, min(24 * 60, paused_min))
 
-    if paused_min > 0:
-        threshold = float(paused_min) * 60.0
-        filtered = []
-        for r in rows:
-            try:
-                paused_s = float(r.get("paused_seconds_total") or 0.0)
-            except (TypeError, ValueError):
-                paused_s = 0.0
-            if paused_s >= threshold:
-                filtered.append(r)
-        rows = filtered
-
-    if has_runout:
-        filtered = []
-        for r in rows:
-            try:
-                rc = int(float(r.get("runout_count") or 0))
-            except Exception:
-                rc = 0
-            if rc > 0:
-                filtered.append(r)
-        rows = filtered
-
-    # Stable ordering: sort the full filtered list before paginating.
-    rows = _sort_history_rows(rows)
-
     history_per_page = _parse_per_page(request.args.get("history_per_page"), default=25)
-    history_rows_page, history_pager = _paginate(rows, request.args.get("history_page", 1), history_per_page)
+    history_query = history_repo.HistoryQuery(
+        printer=selected_printer if selected_printer != "All" else None,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        end_exclusive=end_exclusive,
+        paused_min=paused_min,
+        has_runout=has_runout,
+    )
+    history_result = history_repo.list_history_rows(
+        history_query,
+        page=request.args.get("history_page", 1),
+        per_page=history_per_page,
+    )
+    history_rows_page = history_result.rows_page
+    history_pager = history_result.pager
+    error = history_result.error
+
     history_pager = _pager_links(
         endpoint="index",
         args_dict=request.args.to_dict(flat=True),
@@ -961,6 +932,8 @@ def index():
         per_page_key="history_per_page",
         pager_meta=history_pager,
     )
+
+    rows = history_result.rows_all
 
     summary = compute_summary(rows) or {}
     # Ensure expected keys exist to avoid template errors
@@ -1050,7 +1023,7 @@ def index():
     return render_template(
         "index.html",
         rows=rows,
-        history_rows_page=history_rows_page,
+      history_rows_page=history_rows_page,
         history_pager=history_pager,
         error=error,
         message=message,
