@@ -21,10 +21,9 @@ from core.config import (
 )
 from core.storage import (
     load_settings, save_settings, load_display_settings, save_display_settings,
-    append_row, load_rows_raw,
+    load_rows_raw,
     rewrite_csv_without_indices, rewrite_csv_mark_completed,
     rewrite_csv_without_job_uids, rewrite_csv_mark_completed_job_uids,
-    rewrite_csv_recalculate_costs_job_uids,
     get_visible_columns_for_table, set_visible_columns_for_table,
     ts_to_local_dt
 )
@@ -45,6 +44,7 @@ from core import live
 from core import projects
 from core import thumbnails as thumbs
 from core import system_events
+from core import storage_backend
 from core.moonraker import test_moonraker_url
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
@@ -371,7 +371,7 @@ def log_print():
     row["status"] = status
     row["failure_reason"] = failure_reason
 
-    append_row(CSV_FILE, HEADERS, row)
+    storage_backend.write_job(row)
 
     # Clear live job after successful logging
     if live_metadata and live_metadata.get("filename") == filename:
@@ -750,7 +750,7 @@ def job_cancel():
     row.update(cost_data)
     row["status"] = "canceled"
     row["failure_reason"] = str(reason or "").strip()
-    append_row(CSV_FILE, HEADERS, row)
+    storage_backend.write_job(row)
 
     app.logger.info(
         "job-cancel logged: printer=%s filename=%s elapsed_seconds=%s",
@@ -832,7 +832,7 @@ def index():
                 else:
                     job_uids = [str(v).strip() for v in selected if str(v).strip()]
 
-            updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_uids, compute_costs)
+            updated = storage_backend.recalc_jobs(job_uids, compute_costs)
             return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
 
         # Handle row deletion
@@ -1449,7 +1449,7 @@ def recalculate_run():
                 except Exception:
                     continue
 
-        updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, to_update, compute_fn)
+        updated = storage_backend.recalc_jobs(to_update, compute_fn)
 
         after_rows, after_error = load_rows_raw(CSV_FILE)
         after_total = 0.0
@@ -1841,7 +1841,7 @@ def projects_page():
 
             elif action == "recalc_costs":
                 job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
-                updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_ids, compute_costs)
+                updated = storage_backend.recalc_jobs(job_ids, compute_costs)
                 redirect_args = {"msg": f"Recalculated costs for {updated} job(s)."}
 
             elif action == "create_manual_job":
