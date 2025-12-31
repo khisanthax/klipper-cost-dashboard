@@ -101,11 +101,13 @@ python -m kcd db import
 python -m kcd db verify
 ```
 
-Dual-write mode (CSV + SQLite) can be enabled for testers:
+Dual-write mode (CSV + SQLite) can be enabled for testers (recommended):
 
 ```bash
 KCD_STORAGE_BACKEND=dual python app.py
 ```
+
+Do not use `KCD_STORAGE_BACKEND=sql` yet; the UI still reads from CSV in Phases 0–2.
 
 The database is stored at `data/kcd.db` and does not change the UI yet.
 

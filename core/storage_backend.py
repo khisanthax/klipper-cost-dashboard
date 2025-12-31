@@ -17,7 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 def _mode() -> str:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower()
+    mode = str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower()
+    if mode == "sql":
+        logger.warning(
+            "KCD_STORAGE_BACKEND=sql is not supported yet (UI still reads CSV). "
+            "Falling back to dual-write."
+        )
+        return "dual"
+    return mode
 
 
 def write_job(row: dict) -> None:
