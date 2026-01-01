@@ -156,7 +156,6 @@ def list_history_rows_csv(query: HistoryQuery, page: int, per_page: int, error: 
     # Ensure any missing derived cost fields are computed consistently.
     for row in rows:
         compute_job_cost_fields(row)
-
     rows = _sort_history_rows(rows)
     total = len(rows)
     pager = _pager_meta(total, page, per_page)

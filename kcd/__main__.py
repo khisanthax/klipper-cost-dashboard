@@ -53,7 +53,6 @@ def main(argv: list[str] | None = None) -> int:
 
     db_backfill_cmd = db_sub.add_parser("backfill", help="Backfill DB rows from CSV history")
     db_backfill_cmd.set_defaults(func=_cmd_db_backfill)
-
     history_parser = sub.add_parser("history", help="History utilities")
     history_sub = history_parser.add_subparsers(dest="history_command")
 
