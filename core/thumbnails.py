@@ -91,7 +91,16 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     settings = load_settings(SETTINGS_FILE)
     moonraker_url = None
     if isinstance(settings, dict):
-        moonraker_url = str(settings.get(printer_name, {}).get("moonraker_url") or "").strip()
+        # 1) settings.printers[printer].moonraker_url (if present)
+        printers_cfg = settings.get("printers") if isinstance(settings.get("printers"), dict) else None
+        if isinstance(printers_cfg, dict):
+            moonraker_url = str(printers_cfg.get(printer_name, {}).get("moonraker_url") or "").strip()
+        # 2) settings[printer].moonraker_url (legacy per-printer)
+        if not moonraker_url:
+            moonraker_url = str(settings.get(printer_name, {}).get("moonraker_url") or "").strip()
+        # 3) settings.moonraker_url (top-level)
+        if not moonraker_url:
+            moonraker_url = str(settings.get("moonraker_url") or "").strip()
     if moonraker_url:
         return moonraker_url.rstrip("/")
 

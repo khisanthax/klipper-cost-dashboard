@@ -357,6 +357,7 @@ def log_print():
     history_job_id = None
     if status == "completed":
         base_url = thumbs.resolve_moonraker_base_url(printer_name)
+        app.logger.info("job-finalize: printer=%s moonraker_url=%s", printer_name, base_url or "none")
         if base_url:
             ok, detail, job = find_history_job_for_completion(
                 base_url,
@@ -364,6 +365,12 @@ def log_print():
                 end_timestamp=ts,
                 window_seconds=600.0,
                 limit=200,
+            )
+            app.logger.info(
+                "job-finalize: history_lookup ok=%s detail=%s matched=%s",
+                ok,
+                detail,
+                bool(job),
             )
             if ok and job:
                 def _as_float(v):
