@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple
@@ -14,6 +15,7 @@ from core import pricing
 from core.config import CSV_FILE, HEADERS, TIMEZONE_OBJ
 from core.storage import load_rows_raw, ts_to_local_dt
 
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class HistoryQuery:
@@ -226,6 +228,16 @@ def list_history_rows_sql(query: HistoryQuery, page: int, per_page: int, error: 
 
     rows_page = _fetch_sql_rows(conn, where_sql, params, limit=limit, offset=offset)
     rows_all = _fetch_sql_rows(conn, where_sql, params, limit=None, offset=None)
+
+    for idx, row in enumerate(rows_page[:3]):
+        logger.debug(
+            "history-sql row[%s] job_uid=%s duration_seconds=%s duration_hours=%s time_cost=%s",
+            idx,
+            row.get("job_uid"),
+            row.get("duration_seconds"),
+            row.get("duration_hours"),
+            row.get("time_cost"),
+        )
 
     return HistoryResult(
         rows_page=rows_page,
