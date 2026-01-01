@@ -177,14 +177,15 @@ def upsert_job(conn: sqlite3.Connection, row: dict) -> None:
     printer_id = upsert_printer(conn, printer_name, None)
 
     now = _utc_now_iso()
-    ended_at = _timestamp_to_iso(row.get("timestamp"))
+    ended_at = _timestamp_to_iso(row.get("ended_at") or row.get("timestamp"))
+    started_at = _timestamp_to_iso(row.get("started_at"))
 
     payload = {
         "job_uid": job_uid,
         "printer_id": printer_id,
         "filename": str(row.get("filename") or "").strip(),
         "status": str(row.get("status") or "unknown").strip().lower() or "unknown",
-        "started_at": None,
+        "started_at": started_at,
         "ended_at": ended_at,
         "duration_seconds": _to_int(row.get("duration_seconds")),
         "paused_seconds_total": _to_float(row.get("paused_seconds_total")),

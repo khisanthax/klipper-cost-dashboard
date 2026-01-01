@@ -120,3 +120,72 @@ def fetch_moonraker_history(base_url: str, *, limit: Optional[int] = None) -> Tu
         return True, "OK", [j for j in jobs if isinstance(j, dict)]
 
     return True, "OK (no jobs)", []
+
+
+def _as_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _get_first(job: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in job and job.get(key) is not None:
+            return job.get(key)
+    return None
+
+
+def _normalize_history_filename(filename: str) -> str:
+    name = str(filename or "").strip().lstrip("/")
+    if name.lower().startswith("gcodes/"):
+        name = name[7:]
+    return name
+
+
+def find_history_job_for_completion(
+    base_url: str,
+    *,
+    filename: str,
+    end_timestamp: float,
+    window_seconds: float = 600.0,
+    limit: int = 200,
+) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+    """
+    Find the most likely Moonraker history entry for a completed job.
+
+    Matches by normalized filename and the closest end_time within the window.
+    """
+    ok, detail, jobs = fetch_moonraker_history(base_url, limit=limit)
+    if not ok:
+        return False, detail, None
+
+    target = _normalize_history_filename(filename)
+    if not target:
+        return False, "Missing filename", None
+
+    best_job = None
+    best_delta = None
+    for job in jobs:
+        job_name = str(_get_first(job, ("filename", "name", "file")) or "").strip()
+        if not job_name:
+            continue
+        if _normalize_history_filename(job_name) != target:
+            continue
+
+        end_ts = _as_float(_get_first(job, ("end_time", "timestamp")))
+        if end_ts <= 0:
+            continue
+
+        delta = abs(end_ts - float(end_timestamp or 0.0))
+        if delta > float(window_seconds):
+            continue
+
+        if best_delta is None or delta < best_delta:
+            best_delta = delta
+            best_job = job
+
+    if best_job:
+        return True, "OK", best_job
+
+    return True, "No matching history entry found", None
