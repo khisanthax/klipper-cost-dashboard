@@ -117,6 +117,14 @@ KCD_READ_BACKEND=sql python app.py
 
 To roll back, set `KCD_READ_BACKEND=csv` (default). Other pages still read CSV in this phase.
 
+Enable SQL reads for Reports (Phase 4):
+
+```bash
+KCD_REPORTS_BACKEND=sql python app.py
+```
+
+To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page uses SQL in this phase.
+
 The database is stored at `data/kcd.db`.
 
 ### 1. Install the Master
