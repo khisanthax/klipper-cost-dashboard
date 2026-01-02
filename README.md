@@ -127,6 +127,27 @@ To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page use
 
 The database is stored at `data/kcd.db`.
 
+### SQL/CSV parity after backfill
+
+If you backfilled SQL from Moonraker, SQL can legitimately have more jobs than `data/print_costs.csv`.
+When this happens, reports parity will show mismatches because the datasets differ.
+
+To regenerate a legacy CSV from SQL (same column order as `print_costs.csv`):
+
+```bash
+python -m kcd export csv --from sql --out data/print_costs.csv --overwrite
+```
+
+Reports parity enhancements:
+
+```bash
+# Dump job-set differences to data/parity_sql_only.json and data/parity_csv_only.json
+python -m kcd reports parity --range 90d --dump-job-diff
+
+# Compare SQL against a temporary CSV generated from SQL
+python -m kcd reports parity --range 90d --regen-csv-from-sql
+```
+
 ### 1. Install the Master
 
 Run the installer on the machine where you want the dashboard to live.

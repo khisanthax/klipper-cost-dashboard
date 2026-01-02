@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 from core import db as db_module
 from core import db_import
@@ -9,6 +10,7 @@ from core import db_verify
 from core import db_backfill
 from core import history_parity
 from core import reports_parity
+from core import export_csv
 
 
 def _cmd_db_init(_args: argparse.Namespace) -> int:
@@ -80,6 +82,9 @@ def main(argv: list[str] | None = None) -> int:
 
     reports_parity_cmd = reports_sub.add_parser("parity", help="Compare CSV and SQL reports totals")
     reports_parity_cmd.add_argument("--range", dest="range_str", default="30d")
+    reports_parity_cmd.add_argument("--dump-job-diff", action="store_true")
+    reports_parity_cmd.add_argument("--regen-csv-from-sql", action="store_true")
+    reports_parity_cmd.add_argument("--overwrite", action="store_true")
     reports_parity_cmd.set_defaults(func=lambda args: _cmd_reports_parity(args))
     history_parser = sub.add_parser("history", help="History utilities")
     history_sub = history_parser.add_subparsers(dest="history_command")
@@ -87,6 +92,15 @@ def main(argv: list[str] | None = None) -> int:
     history_parity_cmd = history_sub.add_parser("parity", help="Compare CSV and SQL history rows")
     history_parity_cmd.add_argument("--limit", type=int, default=200)
     history_parity_cmd.set_defaults(func=lambda args: _cmd_history_parity(args))
+    export_parser = sub.add_parser("export", help="Export utilities")
+    export_sub = export_parser.add_subparsers(dest="export_command")
+
+    export_csv_cmd = export_sub.add_parser("csv", help="Export CSV")
+    export_csv_cmd.add_argument("--from", dest="source", choices=("sql",), default="sql")
+    export_csv_cmd.add_argument("--out", dest="out_path", default=os.path.join("data", "print_costs.csv"))
+    export_csv_cmd.add_argument("--overwrite", action="store_true")
+    export_csv_cmd.set_defaults(func=lambda args: _cmd_export_csv(args))
+
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
         parser.print_help()
@@ -101,8 +115,19 @@ def _cmd_history_parity(args: argparse.Namespace) -> int:
 
 
 def _cmd_reports_parity(args: argparse.Namespace) -> int:
-    report = reports_parity.run_parity(range_str=args.range_str)
+    report = reports_parity.run_parity(
+        range_str=args.range_str,
+        dump_job_diff=args.dump_job_diff,
+        regen_csv_from_sql=args.regen_csv_from_sql,
+        overwrite_csv=args.overwrite,
+    )
     print(reports_parity.render_parity_summary(report))
+    return 0
+
+
+def _cmd_export_csv(args: argparse.Namespace) -> int:
+    count, path = export_csv.export_csv_from_sql(out_path=args.out_path, overwrite=args.overwrite)
+    print(f"Exported {count} rows to {path}")
     return 0
 
 
