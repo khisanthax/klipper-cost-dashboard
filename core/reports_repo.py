@@ -37,8 +37,9 @@ class ReportsRange:
 
 
 def _reports_backend() -> Tuple[str, Optional[str]]:
-    mode = str(os.getenv("KCD_REPORTS_BACKEND", "csv")).strip().lower()
-    if mode == "auto":
+    raw_mode = str(os.getenv("KCD_REPORTS_BACKEND", "csv")).strip().lower()
+    mode = raw_mode
+    if raw_mode == "auto":
         mode = "sql"
     if mode == "sql":
         try:
@@ -46,7 +47,8 @@ def _reports_backend() -> Tuple[str, Optional[str]]:
             version = db_module.current_schema_version(conn)
             if not version:
                 return "csv", "SQL reports backend not initialized; falling back to CSV."
-            _warn_if_sql_ahead_of_csv(conn)
+            if raw_mode == "auto":
+                _warn_if_sql_ahead_of_csv(conn)
             return "sql", None
         except Exception:
             return "csv", "SQL reports backend not available; falling back to CSV."
