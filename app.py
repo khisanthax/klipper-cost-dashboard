@@ -46,6 +46,7 @@ from core import thumbnails as thumbs
 from core import system_events
 from core import storage_backend
 from core import history_repo
+from core import reports_repo
 from core.moonraker import test_moonraker_url, find_history_job_for_completion
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
@@ -1128,60 +1129,21 @@ def index():
 @app.route("/reports")
 def reports_page():
     """Reports page with monthly breakdown and top printers."""
-    rows, error = load_rows_raw(CSV_FILE)
-    
-    # Apply date filtering
-    start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
-    
-    if start_dt or end_dt:
-        filtered = []
-        for r in rows:
-            ts_raw = r.get("timestamp_raw")
-            if not ts_raw:
-                continue
-            try:
-                row_dt = ts_to_local_dt(float(ts_raw))
-                if start_dt and row_dt < start_dt:
-                    continue
-                if end_dt and row_dt > end_dt:
-                    continue
-                filtered.append(r)
-            except Exception:
-                continue
-        rows = filtered
-
-    monthly = compute_monthly_breakdown(rows)
-    top_printers = compute_top_printers(rows, limit=5)
-    summary = compute_summary(rows) or {}
-    summary.setdefault("total_prints", 0)
-    summary.setdefault("total_hours", 0.0)
-    summary.setdefault("total_meters", 0.0)
-    summary.setdefault("total_cost", 0.0)
-    summary.setdefault("per_day", {})
-    summary.setdefault("per_printer", {})
-
-    pause_analytics = compute_pause_analytics(rows)
-    
-    # Aggregate by material and profile
-    material_summary = aggregate_by_material(rows)
-    
-    # Load profiles for profile aggregation
-    all_profiles = profiles.get_all_profiles()
-    profile_summary = aggregate_by_profile(rows, all_profiles)
+    data = reports_repo.get_reports_data(request.args)
 
     return render_template(
         "reports.html",
-        monthly_breakdown=monthly,
-        top_printers=top_printers,
-        summary=summary,
-        pause_analytics=pause_analytics,
-        material_summary=material_summary,
-        profile_summary=profile_summary,
-        range_label=range_label,
-        quick_range=quick_range,
-        start_date=request.args.get("start_date", ""),
-        end_date=request.args.get("end_date", ""),
-        error=error,
+        monthly_breakdown=data.get("monthly_breakdown", []),
+        top_printers=data.get("top_printers", []),
+        summary=data.get("summary", {}),
+        pause_analytics=data.get("pause_analytics", {}),
+        material_summary=data.get("material_summary", []),
+        profile_summary=data.get("profile_summary", []),
+        range_label=data.get("range_label", ""),
+        quick_range=data.get("quick_range", ""),
+        start_date=data.get("start_date", ""),
+        end_date=data.get("end_date", ""),
+        error=data.get("error"),
     )
 
 

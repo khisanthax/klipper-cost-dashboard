@@ -8,6 +8,7 @@ from core import db_import
 from core import db_verify
 from core import db_backfill
 from core import history_parity
+from core import reports_parity
 
 
 def _cmd_db_init(_args: argparse.Namespace) -> int:
@@ -73,6 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Backfill source (default: csv).",
     )
     db_backfill_cmd.set_defaults(func=_cmd_db_backfill)
+
+    reports_parser = sub.add_parser("reports", help="Reports utilities")
+    reports_sub = reports_parser.add_subparsers(dest="reports_command")
+
+    reports_parity_cmd = reports_sub.add_parser("parity", help="Compare CSV and SQL reports totals")
+    reports_parity_cmd.add_argument("--range", dest="range_str", default="30d")
+    reports_parity_cmd.set_defaults(func=lambda args: _cmd_reports_parity(args))
     history_parser = sub.add_parser("history", help="History utilities")
     history_sub = history_parser.add_subparsers(dest="history_command")
 
@@ -89,6 +97,12 @@ def main(argv: list[str] | None = None) -> int:
 def _cmd_history_parity(args: argparse.Namespace) -> int:
     report = history_parity.run_parity(limit=args.limit)
     print(history_parity.render_parity_summary(report))
+    return 0
+
+
+def _cmd_reports_parity(args: argparse.Namespace) -> int:
+    report = reports_parity.run_parity(range_str=args.range_str)
+    print(reports_parity.render_parity_summary(report))
     return 0
 
 
