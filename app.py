@@ -46,7 +46,7 @@ from core import thumbnails as thumbs
 from core import system_events
 from core import storage_backend
 from core import history_repo
-from core.moonraker import test_moonraker_url
+from core.moonraker import test_moonraker_url, find_history_job_for_completion
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
@@ -353,6 +353,69 @@ def log_print():
         except Exception:
             pass
 
+    # For completed jobs, attempt to finalize duration/filament using Moonraker history.
+    history_job_id = None
+    if status == "completed":
+        base_url = thumbs.resolve_moonraker_base_url(printer_name)
+        app.logger.info("job-finalize: printer=%s moonraker_url=%s", printer_name, base_url or "none")
+        if base_url:
+            ok, detail, job = find_history_job_for_completion(
+                base_url,
+                filename=filename,
+                end_timestamp=ts,
+                window_seconds=600.0,
+                limit=200,
+            )
+            app.logger.info(
+                "job-finalize: history_lookup ok=%s detail=%s matched=%s",
+                ok,
+                detail,
+                bool(job),
+            )
+            if ok and job:
+                def _as_float(v):
+                    try:
+                        return float(v)
+                    except Exception:
+                        return 0.0
+
+                def _get_first(j, keys):
+                    for k in keys:
+                        if k in j and j.get(k) is not None:
+                            return j.get(k)
+                    return None
+
+                start_ts = _as_float(_get_first(job, ("start_time", "timestamp")))
+                end_ts = _as_float(_get_first(job, ("end_time", "timestamp")))
+                print_time = _as_float(_get_first(job, ("print_time", "print_duration")))
+                total_duration = _as_float(_get_first(job, ("total_duration", "elapsed", "duration", "total_time")))
+                filament_used = _as_float(_get_first(job, ("filament_used", "filament", "filament_mm")))
+
+                if print_time > 0:
+                    duration_seconds = print_time
+                elif total_duration > 0:
+                    duration_seconds = total_duration
+
+                if filament_used > 0:
+                    filament_mm = filament_used
+
+                if end_ts > 0:
+                    ts = end_ts
+
+                history_job_id = _get_first(job, ("job_id", "uid", "id", "history_id"))
+                # Carry start/end for DB storage (CSV will ignore).
+                row_started_at = start_ts if start_ts > 0 else None
+                row_ended_at = end_ts if end_ts > 0 else None
+            else:
+                row_started_at = None
+                row_ended_at = None
+        else:
+            row_started_at = None
+            row_ended_at = None
+    else:
+        row_started_at = None
+        row_ended_at = None
+
     cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
 
     row = {
@@ -371,8 +434,21 @@ def log_print():
     # Add status and failure_reason
     row["status"] = status
     row["failure_reason"] = failure_reason
+    if row_started_at:
+        row["started_at"] = row_started_at
+    if row_ended_at:
+        row["ended_at"] = row_ended_at
 
     storage_backend.write_job(row)
+
+    if status == "completed":
+        app.logger.info(
+            "job-finalize: job_uid=%s filename=%s history_id=%s duration_seconds=%s",
+            row["job_uid"],
+            filename,
+            history_job_id,
+            duration_seconds,
+        )
 
     # Clear live job after successful logging
     if live_metadata and live_metadata.get("filename") == filename:
