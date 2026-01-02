@@ -148,6 +148,24 @@ python -m kcd reports parity --range 90d --dump-job-diff
 python -m kcd reports parity --range 90d --regen-csv-from-sql
 ```
 
+### Reports cache
+
+SQL reports support a DB-backed cache (default TTL 300s):
+
+```bash
+KCD_REPORTS_CACHE_TTL_SECONDS=300 python app.py
+```
+
+Set `KCD_REPORTS_CACHE_TTL_SECONDS=0` to disable caching. You can inspect/clear cache via:
+
+```bash
+python -m kcd cache info
+python -m kcd cache clear
+```
+
+When `KCD_REPORTS_BACKEND=auto` chooses SQL and the CSV appears behind the DB, KCD logs a warning suggesting:
+`python -m kcd export csv --from sql --overwrite`.
+
 ### 1. Install the Master
 
 Run the installer on the machine where you want the dashboard to live.

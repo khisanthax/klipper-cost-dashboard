@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 from core import db as db_module
+from core import reports_cache
 from core import profiles
 from core.config import CSV_FILE
 from core.reports import (
@@ -24,6 +25,7 @@ from core.reports import (
 from core.storage import load_rows_raw, ts_to_local_dt
 
 logger = logging.getLogger(__name__)
+_AUTO_WARNED = False
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,7 @@ def _reports_backend() -> Tuple[str, Optional[str]]:
             version = db_module.current_schema_version(conn)
             if not version:
                 return "csv", "SQL reports backend not initialized; falling back to CSV."
+            _warn_if_sql_ahead_of_csv(conn)
             return "sql", None
         except Exception:
             return "csv", "SQL reports backend not available; falling back to CSV."
@@ -146,6 +149,19 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
 
     where_sql, params = _build_date_filter(start_dt, end_dt)
 
+    cache_ttl = _cache_ttl_seconds()
+    range_key = _range_key(start_dt, end_dt)
+    fingerprint = _reports_jobs_fingerprint(conn, where_sql, params)
+    cached = reports_cache.get_cached_payload(
+        conn,
+        key="reports:full",
+        range_key=range_key,
+        fingerprint=fingerprint,
+        ttl_seconds=cache_ttl,
+    )
+    if cached is not None:
+        return cached
+
     summary = _sql_summary(conn, where_sql, params)
     monthly = _sql_monthly_breakdown(conn, where_sql, params)
     top_printers = _sql_top_printers(conn, where_sql, params)
@@ -153,7 +169,7 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
     material_summary = _sql_material_summary(conn, where_sql, params)
     profile_summary = _sql_profile_summary(conn, where_sql, params)
 
-    return {
+    payload = {
         "monthly_breakdown": monthly,
         "top_printers": top_printers,
         "summary": summary,
@@ -161,6 +177,21 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
         "material_summary": material_summary,
         "profile_summary": profile_summary,
     }
+
+    if cache_ttl > 0 and fingerprint:
+        try:
+            reports_cache.set_cached_payload(
+                conn,
+                key="reports:full",
+                range_key=range_key,
+                fingerprint=fingerprint,
+                payload=payload,
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    return payload
 
 
 def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Tuple[str, list]:
@@ -192,6 +223,75 @@ def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime])
     if where:
         where_sql = "WHERE " + " AND ".join(where)
     return where_sql, params
+
+
+def _range_key(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> str:
+    if not start_dt and not end_dt:
+        return "all"
+    start = start_dt.isoformat() if start_dt else ""
+    end = end_dt.isoformat() if end_dt else ""
+    return f"{start}..{end}"
+
+
+def _cache_ttl_seconds() -> int:
+    raw = os.getenv("KCD_REPORTS_CACHE_TTL_SECONDS", "300")
+    try:
+        return max(0, int(raw))
+    except Exception:
+        return 300
+
+
+def _reports_jobs_fingerprint(conn, where_sql: str, params: list) -> str:
+    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
+    row = conn.execute(
+        f"""
+        SELECT
+            COALESCE(MAX({ts_expr}), 0) AS max_ts,
+            COUNT(*) AS row_count,
+            COALESCE(MAX(rowid), 0) AS max_rowid
+        FROM jobs j
+        {where_sql}
+        """,
+        params,
+    ).fetchone()
+    if not row:
+        return "0:0:0"
+    return f"{row['max_ts']}:{row['row_count']}:{row['max_rowid']}"
+
+
+def _warn_if_sql_ahead_of_csv(conn) -> None:
+    global _AUTO_WARNED
+    if _AUTO_WARNED:
+        return
+    try:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(CAST(strftime('%s', COALESCE(ended_at, created_at)) AS INTEGER)), 0) AS max_ts FROM jobs"
+        ).fetchone()
+        sql_max = float(row["max_ts"] or 0.0) if row else 0.0
+    except Exception:
+        return
+
+    try:
+        from core.config import CSV_FILE
+        from core.storage import load_rows_raw
+
+        rows, _err = load_rows_raw(CSV_FILE)
+        csv_max = 0.0
+        for r in rows:
+            try:
+                ts = float(r.get("timestamp_raw") or 0.0)
+            except Exception:
+                ts = 0.0
+            if ts > csv_max:
+                csv_max = ts
+    except Exception:
+        return
+
+    if sql_max > csv_max and csv_max > 0:
+        logger.warning(
+            "CSV appears behind SQL; run python -m kcd export csv --from sql --overwrite to sync."
+        )
+        _AUTO_WARNED = True
 
 
 def _sql_summary(conn, where_sql: str, params: list) -> Dict[str, Any]:

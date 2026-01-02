@@ -11,6 +11,7 @@ from core import db_backfill
 from core import history_parity
 from core import reports_parity
 from core import export_csv
+from core import reports_cache
 
 
 def _cmd_db_init(_args: argparse.Namespace) -> int:
@@ -101,6 +102,17 @@ def main(argv: list[str] | None = None) -> int:
     export_csv_cmd.add_argument("--overwrite", action="store_true")
     export_csv_cmd.set_defaults(func=lambda args: _cmd_export_csv(args))
 
+    cache_parser = sub.add_parser("cache", help="Reports cache utilities")
+    cache_sub = cache_parser.add_subparsers(dest="cache_command")
+
+    cache_info_cmd = cache_sub.add_parser("info", help="Show reports cache stats")
+    cache_info_cmd.set_defaults(func=lambda args: _cmd_cache_info(args))
+
+    cache_clear_cmd = cache_sub.add_parser("clear", help="Clear reports cache")
+    cache_clear_cmd.add_argument("--key", dest="key", default="")
+    cache_clear_cmd.add_argument("--range", dest="range_key", default="")
+    cache_clear_cmd.set_defaults(func=lambda args: _cmd_cache_clear(args))
+
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
         parser.print_help()
@@ -128,6 +140,24 @@ def _cmd_reports_parity(args: argparse.Namespace) -> int:
 def _cmd_export_csv(args: argparse.Namespace) -> int:
     count, path = export_csv.export_csv_from_sql(out_path=args.out_path, overwrite=args.overwrite)
     print(f"Exported {count} rows to {path}")
+    return 0
+
+
+def _cmd_cache_info(_args: argparse.Namespace) -> int:
+    info = reports_cache.cache_info()
+    print(f"Cache rows: {info.get('count', 0)}")
+    print(f"Oldest: {info.get('oldest', 0)}")
+    print(f"Newest: {info.get('newest', 0)}")
+    for group in info.get("groups", []):
+        print(f"- {group}")
+    return 0
+
+
+def _cmd_cache_clear(args: argparse.Namespace) -> int:
+    key = str(args.key or "").strip() or None
+    range_key = str(args.range_key or "").strip() or None
+    removed = reports_cache.clear_cache(key=key, range_key=range_key)
+    print(f"Cleared cache rows: {removed}")
     return 0
 
 
