@@ -6,13 +6,26 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from core import db as db_module
 from core.config import DATA_DIR
+from core.export_csv import export_csv_from_sql
+from core.reports import (
+    aggregate_by_material,
+    aggregate_by_profile,
+    compute_monthly_breakdown,
+    compute_pause_analytics,
+    compute_summary,
+    compute_top_printers,
+)
 from core.reports_repo import get_reports_data_range
-from core.storage import ts_to_local_dt
+from core.storage import load_rows_raw, ts_to_local_dt
 
 REPORT_PATH = os.path.join(DATA_DIR, "reports_parity_report.json")
+SQL_ONLY_PATH = os.path.join(DATA_DIR, "parity_sql_only.json")
+CSV_ONLY_PATH = os.path.join(DATA_DIR, "parity_csv_only.json")
+TEMP_CSV_PATH = os.path.join(DATA_DIR, "_tmp_print_costs_from_sql.csv")
 
 
 def _utc_now_iso() -> str:
@@ -61,17 +74,31 @@ def _index_by_key(rows: List[dict], key: str) -> Dict[str, dict]:
     return out
 
 
-def run_parity(*, range_str: str = "30d") -> Dict[str, Any]:
+def run_parity(
+    *,
+    range_str: str = "30d",
+    dump_job_diff: bool = False,
+    regen_csv_from_sql: bool = False,
+    overwrite_csv: bool = False,
+) -> Dict[str, Any]:
     days = _parse_range(range_str)
     now = _now_local()
     start_dt = now - timedelta(days=days)
 
-    csv_data = get_reports_data_range(
+    csv_path = None
+    if regen_csv_from_sql:
+        if overwrite_csv:
+            from core.config import CSV_FILE
+            csv_path = CSV_FILE
+            export_csv_from_sql(out_path=csv_path, overwrite=True)
+        else:
+            csv_path = TEMP_CSV_PATH
+            export_csv_from_sql(out_path=csv_path, overwrite=True)
+
+    csv_data = _reports_from_csv_path(
+        csv_path=csv_path,
         start_dt=start_dt,
         end_dt=now,
-        range_label=f"Last {days} days",
-        quick_range=f"last{days}",
-        backend_override="csv",
     )
     sql_data = get_reports_data_range(
         start_dt=start_dt,
@@ -150,10 +177,24 @@ def run_parity(*, range_str: str = "30d") -> Dict[str, Any]:
         "range": range_str,
         "started_at": _utc_now_iso(),
         "finished_at": _utc_now_iso(),
+        "csv_path": csv_path or "data/print_costs.csv",
+        "regen_csv_from_sql": bool(regen_csv_from_sql),
         "csv_summary": csv_summary,
         "sql_summary": sql_summary,
         "mismatches": mismatches,
     }
+
+    if dump_job_diff:
+        sql_jobs = _load_sql_jobs(start_dt, now)
+        csv_jobs = _load_csv_jobs(csv_path or None, start_dt, now)
+        sql_keys, sql_only = _diff_job_sets(sql_jobs, csv_jobs)
+        csv_keys, csv_only = _diff_job_sets(csv_jobs, sql_jobs)
+        report["job_diff"] = {
+            "sql_only_count": len(sql_only),
+            "csv_only_count": len(csv_only),
+        }
+        _write_json(SQL_ONLY_PATH, sql_only)
+        _write_json(CSV_ONLY_PATH, csv_only)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(REPORT_PATH, "w", encoding="utf-8") as f:
@@ -174,3 +215,182 @@ def render_parity_summary(report: Dict[str, Any]) -> str:
         for item in mismatches[:10]:
             lines.append(f"    - {item}")
     return "\n".join(lines)
+
+
+def _reports_from_csv_path(csv_path: Optional[str], start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Dict[str, Any]:
+    if csv_path:
+        rows, error = load_rows_raw(csv_path)
+    else:
+        from core.config import CSV_FILE
+        rows, error = load_rows_raw(CSV_FILE)
+
+    if start_dt or end_dt:
+        filtered = []
+        for r in rows:
+            ts_raw = r.get("timestamp_raw")
+            if not ts_raw:
+                continue
+            try:
+                row_dt = ts_to_local_dt(float(ts_raw))
+                if start_dt and row_dt < start_dt:
+                    continue
+                if end_dt and row_dt > end_dt:
+                    continue
+                filtered.append(r)
+            except Exception:
+                continue
+        rows = filtered
+
+    monthly = compute_monthly_breakdown(rows)
+    top_printers = compute_top_printers(rows, limit=5)
+    summary = compute_summary(rows) or {}
+    summary.setdefault("total_prints", 0)
+    summary.setdefault("total_hours", 0.0)
+    summary.setdefault("total_meters", 0.0)
+    summary.setdefault("total_cost", 0.0)
+    summary.setdefault("per_day", {})
+    summary.setdefault("per_printer", {})
+
+    pause_analytics = compute_pause_analytics(rows)
+    material_summary = aggregate_by_material(rows)
+    try:
+        from core import profiles as profiles_module
+        profiles_dict = profiles_module.get_all_profiles()
+    except Exception:
+        profiles_dict = {}
+    profile_summary = aggregate_by_profile(rows, profiles_dict)
+
+    return {
+        "monthly_breakdown": monthly,
+        "top_printers": top_printers,
+        "summary": summary,
+        "pause_analytics": pause_analytics,
+        "material_summary": material_summary,
+        "profile_summary": profile_summary,
+        "error": error,
+    }
+
+
+def _job_identity(row: dict) -> str:
+    uid = str(row.get("job_uid") or "").strip()
+    if uid:
+        return f"uid:{uid}"
+    printer = str(row.get("printer") or "").strip()
+    filename = str(row.get("filename") or "").strip()
+    ts = row.get("timestamp_epoch") or row.get("timestamp_raw") or row.get("timestamp")
+    return f"composite:{printer}|{filename}|{ts}"
+
+
+def _load_csv_jobs(csv_path: Optional[str], start_dt: Optional[datetime], end_dt: Optional[datetime]) -> List[dict]:
+    if csv_path:
+        rows, _err = load_rows_raw(csv_path)
+    else:
+        from core.config import CSV_FILE
+        rows, _err = load_rows_raw(CSV_FILE)
+
+    if start_dt or end_dt:
+        filtered = []
+        for r in rows:
+            ts_raw = r.get("timestamp_raw")
+            if not ts_raw:
+                continue
+            try:
+                row_dt = ts_to_local_dt(float(ts_raw))
+                if start_dt and row_dt < start_dt:
+                    continue
+                if end_dt and row_dt > end_dt:
+                    continue
+                filtered.append(r)
+            except Exception:
+                continue
+        rows = filtered
+
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "job_uid": r.get("job_uid"),
+                "printer": r.get("printer"),
+                "filename": r.get("filename"),
+                "timestamp_epoch": r.get("timestamp_raw"),
+                "status": r.get("status"),
+                "duration_seconds": r.get("duration_seconds"),
+                "filament_mm": r.get("filament_mm"),
+                "total_cost": r.get("total_cost"),
+            }
+        )
+    return out
+
+
+def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> List[dict]:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+
+    where = []
+    params: list = []
+    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
+
+    if start_dt:
+        try:
+            where.append(f"{ts_expr} >= ?")
+            params.append(int(start_dt.timestamp()))
+        except Exception:
+            pass
+    if end_dt:
+        try:
+            where.append(f"{ts_expr} <= ?")
+            params.append(int(end_dt.timestamp()))
+        except Exception:
+            pass
+
+    where_sql = ""
+    if where:
+        where_sql = "WHERE " + " AND ".join(where)
+
+    rows = conn.execute(
+        f"""
+        SELECT
+            j.job_uid,
+            p.name AS printer,
+            j.filename,
+            j.status,
+            j.duration_seconds,
+            j.filament_mm,
+            j.total_cost,
+            {ts_expr} AS timestamp_epoch
+        FROM jobs j
+        JOIN printers p ON j.printer_id = p.id
+        {where_sql}
+        """,
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _diff_job_sets(primary: List[dict], other: List[dict]) -> Tuple[set, List[dict]]:
+    primary_map = {_job_identity(r): r for r in primary}
+    other_keys = {_job_identity(r) for r in other}
+    only_keys = [k for k in primary_map.keys() if k not in other_keys]
+    only_rows = []
+    for key in only_keys:
+        row = primary_map.get(key, {})
+        only_rows.append(
+            {
+                "key": key,
+                "job_uid": row.get("job_uid"),
+                "printer": row.get("printer"),
+                "filename": row.get("filename"),
+                "timestamp_epoch": row.get("timestamp_epoch"),
+                "status": row.get("status"),
+                "duration_seconds": row.get("duration_seconds"),
+                "filament_mm": row.get("filament_mm"),
+                "total_cost": row.get("total_cost"),
+            }
+        )
+    return set(primary_map.keys()), only_rows
+
+
+def _write_json(path: str, payload: Any) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
