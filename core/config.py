@@ -13,6 +13,8 @@ from core.storage import ensure_api_key
 DATA_DIR = "data"
 CSV_FILE = os.path.join(DATA_DIR, "print_costs.csv")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+CSV_EXAMPLE_FILE = os.path.join(DATA_DIR, "print_costs.example.csv")
+SETTINGS_EXAMPLE_FILE = os.path.join(DATA_DIR, "settings.example.json")
 DISPLAY_FILE = os.path.join(DATA_DIR, "display.json")
 SECRET_FILE = os.path.join(DATA_DIR, "secret.json")
 PROFILES_FILE = os.path.join(DATA_DIR, "profiles.json")
