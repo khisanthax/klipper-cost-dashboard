@@ -117,6 +117,15 @@ def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Opt
 # Basic helpers
 # ----------------------------------------------------------------------
 
+def _mask_secret(value: str) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    if len(raw) <= 8:
+        return raw[0:1] + "***"
+    return raw[:4] + "..." + raw[-4:]
+
+
 def println(msg: str = "") -> None:
     import sys
     print(msg)
@@ -1284,7 +1293,7 @@ def master_setup(master_and_client: bool = False) -> None:
     println(f"  Host: {host}")
     println(f"  Port: {port}")
     println(f"  Service: {service_name}")
-    println(f"  API key: {api_key}")
+    println(f"  API key: {_mask_secret(api_key)}")
 
     sql_state = _detect_sql_state()
     sql_enabled = False
