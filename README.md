@@ -92,6 +92,8 @@ docker compose logs --tail=200
 docker image ls | grep -E 'klipper-cost-dashboard|kcd'
 ```
 
+If long UUID fields (e.g., Profile ID / Job UID) make History rows tall, update to the latest version; the UI now truncates those columns with ellipsis and shows full values on hover.
+
 ## Experimental SQL backend (Phases 0–3)
 
 KCD still reads from CSV/JSON by default, but you can initialize an SQLite database for parity testing:

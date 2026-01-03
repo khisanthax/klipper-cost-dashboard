@@ -2054,9 +2054,11 @@ def projects_page():
         return redirect(url_for("projects_page", **redirect_args))
 
     # GET
-    rows, rows_error = load_rows_raw(CSV_FILE)
-    if rows_error:
-        error = rows_error
+    history_query = history_repo.HistoryQuery()
+    history_result = history_repo.list_history_rows(history_query, page=1, per_page=1)
+    rows = history_result.rows_all
+    if history_result.error:
+        error = history_result.error
 
     error = request.args.get("error") or error
     message = request.args.get("msg", "").strip()

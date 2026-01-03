@@ -604,14 +604,17 @@
                                     class="badge {% if row.get(h, '') == 'printing' %}bg-success{% elif row.get(h, '') == 'paused' %}bg-warning text-dark{% elif row.get(h, '') == 'failed' or row.get(h, '') == 'canceled' %}bg-danger{% elif row.get(h, '') == 'idle' %}bg-secondary{% else %}bg-light text-dark border{% endif %}">
                                     {{ row.get(h, '')|upper }}
                                 </span>
-                                {% elif h == 'total_cost' or h == 'time_cost' or h == 'material_cost' %}
-                                <span class="fw-semibold">${{ "%.2f"|format(row.get(h, 0)|float) }}</span>
-                                {% elif h == 'duration_hours' or h == 'filament_meters' %}
-                                <span class="fw-semibold">{{ "%.2f"|format(row.get(h, 0)|float) }}</span>
-                                {% else %}
-                                {{ row.get(h, '') }}
-                                {% endif %}
-                            </td>
+                                 {% elif h == 'total_cost' or h == 'time_cost' or h == 'material_cost' %}
+                                 <span class="fw-semibold">${{ "%.2f"|format(row.get(h, 0)|float) }}</span>
+                                 {% elif h == 'duration_hours' or h == 'filament_meters' %}
+                                 <span class="fw-semibold">{{ "%.2f"|format(row.get(h, 0)|float) }}</span>
+                                 {% elif h in ['job_uid', 'filament_profile_id', 'import_id'] %}
+                                 {% set full_val = row.get(h, '') %}
+                                 <span class="kcd-uuid" title="{{ full_val }}">{{ full_val }}</span>
+                                 {% else %}
+                                 {{ row.get(h, '') }}
+                                 {% endif %}
+                              </td>
                             {% endif %}
                             {% endfor %}
                         </tr>

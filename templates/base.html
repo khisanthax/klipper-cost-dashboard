@@ -41,6 +41,16 @@
         /* Column visibility */
         .kcd-col-hidden { display: none !important; }
 
+        /* UUID/id cells: truncate with ellipsis */
+        .kcd-uuid {
+            display: inline-block;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            vertical-align: bottom;
+        }
+
         /* Column resize UX */
         table.kcd-col-resize-table { table-layout: fixed; }
         .kcd-col-resize-table th { position: relative; }
