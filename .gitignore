@@ -43,3 +43,5 @@ data/print_costs_backup_*.csv
 data/backups/
 data/app_settings.json
 data/*.LOCAL_*
+data/settings.local.json
+data/print_costs.local.csv

@@ -36,7 +36,9 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     from core.config import (
         DATA_DIR,
         SETTINGS_EXAMPLE_FILE,
+        SETTINGS_LOCAL_FILE,
         CSV_EXAMPLE_FILE,
+        CSV_LOCAL_FILE,
         DEFAULT_PRICING,
         HEADERS,
     )
@@ -44,31 +46,34 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
 
     if not os.path.exists(settings_file):
-        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
-            initial = {}
-            for pname in ['SV08', 'SV07', 'Ender5P']:
-                initial[pname] = dict(DEFAULT_PRICING)
-            with open(settings_file, 'w') as f:
-                json.dump(initial, f, indent=2)
+        if not _copy_if_missing(SETTINGS_LOCAL_FILE, settings_file):
+            if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
+                initial = {}
+                for pname in ['SV08', 'SV07', 'Ender5P']:
+                    initial[pname] = dict(DEFAULT_PRICING)
+                with open(settings_file, 'w') as f:
+                    json.dump(initial, f, indent=2)
 
     if not os.path.exists(csv_file):
-        if not _copy_if_missing(CSV_EXAMPLE_FILE, csv_file):
-            with open(csv_file, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=HEADERS)
-                writer.writeheader()
+        if not _copy_if_missing(CSV_LOCAL_FILE, csv_file):
+            if not _copy_if_missing(CSV_EXAMPLE_FILE, csv_file):
+                with open(csv_file, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=HEADERS)
+                    writer.writeheader()
 
 
 
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
     if not os.path.exists(settings_file):
-        from core.config import SETTINGS_EXAMPLE_FILE
-        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
-            initial = {}
-            for pname in ["SV08", "SV07", "Ender5P"]:
-                initial[pname] = dict(default_pricing)
-            with open(settings_file, "w") as f:
-                json.dump(initial, f, indent=2)
+        from core.config import SETTINGS_EXAMPLE_FILE, SETTINGS_LOCAL_FILE
+        if not _copy_if_missing(SETTINGS_LOCAL_FILE, settings_file):
+            if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
+                initial = {}
+                for pname in ["SV08", "SV07", "Ender5P"]:
+                    initial[pname] = dict(default_pricing)
+                with open(settings_file, "w") as f:
+                    json.dump(initial, f, indent=2)
 
 
 def load_settings(settings_file):
