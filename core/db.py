@@ -111,11 +111,27 @@ def init_db() -> str:
     return version or "none"
 
 
-def upsert_printer(conn: sqlite3.Connection, name: str, moonraker_url: Optional[str] = None) -> int:
+def upsert_printer(
+    conn: sqlite3.Connection,
+    name: str,
+    moonraker_url: Optional[str] = None,
+    external_id: Optional[str] = None,
+) -> int:
     name = str(name or "").strip()
+    external_id = str(external_id or "").strip() or None
     if not name:
         raise ValueError("printer name is required")
     now = _utc_now_iso()
+
+    if external_id:
+        row = conn.execute("SELECT id FROM printers WHERE external_id = ?", (external_id,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE printers SET name = ?, moonraker_url = ?, updated_at = ? WHERE external_id = ?",
+                (name, moonraker_url, now, external_id),
+            )
+            return int(row["id"])
+
     row = conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()
     if row:
         conn.execute(
@@ -123,9 +139,10 @@ def upsert_printer(conn: sqlite3.Connection, name: str, moonraker_url: Optional[
             (moonraker_url, now, name),
         )
         return int(row["id"])
+
     conn.execute(
-        "INSERT INTO printers (name, moonraker_url, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (name, moonraker_url, now, now),
+        "INSERT INTO printers (name, moonraker_url, external_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (name, moonraker_url, external_id, now, now),
     )
     return int(conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()["id"])
 

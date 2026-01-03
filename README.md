@@ -127,6 +127,11 @@ To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page use
 
 The database is stored at `data/kcd.db`.
 
+Phase 5 installer notes: the installer can initialize the DB and import from CSV, and a
+DB + CSV setup is expected (dual/compat mode). The installer keeps `settings.json`
+moonraker_url mappings in sync until SQL becomes the source of truth. For SQL-capable
+installs, prefer `KCD_REPORTS_BACKEND=auto` to use SQL with CSV fallback.
+
 ### SQL/CSV parity after backfill
 
 If you backfilled SQL from Moonraker, SQL can legitimately have more jobs than `data/print_costs.csv`.
