@@ -19,19 +19,62 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
+def _copy_if_missing(src: str, dest: str) -> bool:
+    if os.path.exists(dest):
+        return False
+    if not os.path.exists(src):
+        return False
+    os.makedirs(os.path.dirname(dest) or '.', exist_ok=True)
+    shutil.copy2(src, dest)
+    return True
+
+
+def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
+    """
+    Ensure runtime files exist, bootstrapping from examples when missing.
+    """
+    from core.config import (
+        DATA_DIR,
+        SETTINGS_EXAMPLE_FILE,
+        CSV_EXAMPLE_FILE,
+        DEFAULT_PRICING,
+        HEADERS,
+    )
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    if not os.path.exists(settings_file):
+        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
+            initial = {}
+            for pname in ['SV08', 'SV07', 'Ender5P']:
+                initial[pname] = dict(DEFAULT_PRICING)
+            with open(settings_file, 'w') as f:
+                json.dump(initial, f, indent=2)
+
+    if not os.path.exists(csv_file):
+        if not _copy_if_missing(CSV_EXAMPLE_FILE, csv_file):
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=HEADERS)
+                writer.writeheader()
+
+
+
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
     if not os.path.exists(settings_file):
-        initial = {}
-        for pname in ["SV08", "SV07", "Ender5P"]:
-            initial[pname] = dict(default_pricing)
-        with open(settings_file, "w") as f:
-            json.dump(initial, f, indent=2)
+        from core.config import SETTINGS_EXAMPLE_FILE
+        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
+            initial = {}
+            for pname in ["SV08", "SV07", "Ender5P"]:
+                initial[pname] = dict(default_pricing)
+            with open(settings_file, "w") as f:
+                json.dump(initial, f, indent=2)
 
 
 def load_settings(settings_file):
     """Load printer settings from JSON file."""
-    from core.config import DEFAULT_PRICING
+    from core.config import DEFAULT_PRICING, CSV_FILE
+    ensure_runtime_files(settings_file, CSV_FILE)
     ensure_settings_exists(settings_file, DEFAULT_PRICING)
     try:
         with open(settings_file) as f:
@@ -345,6 +388,12 @@ def ensure_api_key(secret_file=None, data_dir=None):
 
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
+    try:
+        from core.config import CSV_FILE, SETTINGS_FILE
+        if os.path.abspath(csv_file) == os.path.abspath(CSV_FILE):
+            ensure_runtime_files(SETTINGS_FILE, CSV_FILE)
+    except Exception:
+        pass
     if "job_uid" in headers and not str(data.get("job_uid") or "").strip():
         data["job_uid"] = str(uuid.uuid4())
 
@@ -541,6 +590,12 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
 def load_rows_raw(csv_file):
     """Load all rows from CSV file with timestamp parsing."""
     rows = []
+    try:
+        from core.config import CSV_FILE, SETTINGS_FILE
+        if os.path.abspath(csv_file) == os.path.abspath(CSV_FILE):
+            ensure_runtime_files(SETTINGS_FILE, CSV_FILE)
+    except Exception:
+        pass
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:

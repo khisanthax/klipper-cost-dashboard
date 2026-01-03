@@ -81,6 +81,7 @@ docker compose up -d
 - Update: `docker compose pull && docker compose up -d`
 - Version pin: change `ghcr.io/khisanthax/klipper-cost-dashboard:latest` to `:vX.Y.Z`
 - Data persistence / upgrades: all persistent state is stored in `./data` (mounted to `/app/data`). You can safely upgrade/replace the container image without losing history/settings. Back up the `data/` directory.
+- Runtime files: `data/settings.json` and `data/print_costs.csv` are created on first run from `data/settings.example.json` and `data/print_costs.example.csv`. These runtime files are local-only and not tracked in git.
 - Dev (build from source): copy `docker-compose.dev.yml.example` to `docker-compose.dev.yml` and run `docker compose -f docker-compose.dev.yml up -d --build`
 
 Quick support / troubleshooting (paste into GitHub issues):

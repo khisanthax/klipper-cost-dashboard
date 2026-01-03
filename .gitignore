@@ -24,3 +24,18 @@ data/project_assignments_orphans.json
 data/project_plans.json
 data/project_manual_jobs.json
 data/thumb_cache/
+
+# Runtime data files (local-only)
+data/settings.json
+data/print_costs.csv
+data/display.json
+data/install_state.json
+data/live_jobs.json
+data/_tmp_print_costs_from_sql.csv
+data/reports_parity_report.json
+data/parity_csv_only.json
+data/parity_sql_only.json
+data/backfill_report.json
+data/print_costs.csv.bak.*
+data/backups/
+data/app_settings.json
