@@ -11,6 +11,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from core.sql_only import require_file_reads_allowed
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -61,6 +62,7 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
 
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
+    require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
     if not os.path.exists(settings_file):
         from core.config import SETTINGS_EXAMPLE_FILE
         if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
@@ -73,6 +75,7 @@ def ensure_settings_exists(settings_file, default_pricing):
 
 def load_settings(settings_file):
     """Load printer settings from JSON file."""
+    require_file_reads_allowed("settings.json", caller_hint="core.storage.load_settings")
     from core.config import DEFAULT_PRICING, CSV_FILE
     ensure_runtime_files(settings_file, CSV_FILE)
     ensure_settings_exists(settings_file, DEFAULT_PRICING)
@@ -148,6 +151,7 @@ def _coerce_display_tables(value):
 
 def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
+    require_file_reads_allowed("display.json", caller_hint="core.storage.load_display_settings")
     ensure_display_exists(display_file, headers)
     _hidden_defaults = {
         "job_uid",
@@ -589,6 +593,7 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
 
 def load_rows_raw(csv_file):
     """Load all rows from CSV file with timestamp parsing."""
+    require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.load_rows_raw")
     rows = []
     try:
         from core.config import CSV_FILE, SETTINGS_FILE
@@ -930,6 +935,7 @@ def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_
 # State management for installer (used by both app and installer)
 def load_state(state_file, key, default=""):
     """Load a value from install state."""
+    require_file_reads_allowed("install_state.json", caller_hint="core.storage.load_state")
     if not os.path.exists(state_file):
         return default
     try:
@@ -960,6 +966,7 @@ def load_profiles_data(profiles_file):
     Load profiles data (profiles + mappings) from JSON file.
     Returns a dict with 'profiles' and 'mappings' keys.
     """
+    require_file_reads_allowed("profiles.json", caller_hint="core.storage.load_profiles_data")
     if not os.path.exists(profiles_file):
         return {"profiles": {}, "mappings": {}}
     try:
@@ -1023,6 +1030,7 @@ def load_json_file(json_file):
     Generic JSON file loader.
     Returns the loaded data or None if file doesn't exist or is invalid.
     """
+    require_file_reads_allowed(json_file, caller_hint="core.storage.load_json_file")
     if not os.path.exists(json_file):
         return None
     try:

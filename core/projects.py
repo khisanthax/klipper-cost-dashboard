@@ -27,6 +27,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from core.config import DATA_DIR
 from core.config import DEFAULT_PRICING
 from core.storage import compute_job_uid
+from core.sql_only import require_file_reads_allowed
 
 
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
@@ -86,6 +87,7 @@ def _ensure_data_dir() -> None:
 
 
 def _read_json(path: str, default: Any) -> Any:
+    require_file_reads_allowed(path, caller_hint="core.projects._read_json")
     if not os.path.exists(path):
         return default
     try:
