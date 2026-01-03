@@ -67,6 +67,36 @@ def _checksum(data: str) -> str:
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        for row in rows:
+            if str(row["name"]) == column:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _check_external_id_duplicates(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT external_id, COUNT(*) AS cnt
+        FROM printers
+        WHERE external_id IS NOT NULL AND TRIM(external_id) != ''
+        GROUP BY external_id
+        HAVING cnt > 1
+        """
+    ).fetchall()
+    if rows:
+        sample = ", ".join(str(r["external_id"]) for r in rows[:5])
+        raise ValueError(
+            "Duplicate printers.external_id values detected; "
+            f"cannot create UNIQUE index (examples: {sample}). "
+            "Resolve duplicates or clear external_id values before migrating."
+        )
+
+
 def apply_migrations(conn: sqlite3.Connection) -> list[str]:
     _ensure_schema_migrations(conn)
     applied = {
@@ -84,7 +114,15 @@ def apply_migrations(conn: sqlite3.Connection) -> list[str]:
             applied_versions.append(version)
             continue
         logger.info("Applying migration %s", version)
-        conn.executescript(sql)
+        if version == "0003_printers_external_id":
+            if not _column_exists(conn, "printers", "external_id"):
+                conn.execute("ALTER TABLE printers ADD COLUMN external_id TEXT NULL")
+            _check_external_id_duplicates(conn)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_printers_external_id ON printers(external_id)"
+            )
+        else:
+            conn.executescript(sql)
         conn.execute(
             "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
             (version, _utc_now_iso(), checksum),
