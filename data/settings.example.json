@@ -1,20 +1,20 @@
 {
-  "SV08": {
+  "Printer1": {
     "rate_per_hour": 1.0,
     "filament_mode": "per_meter",
     "filament_rate": 0.25,
     "grams_per_meter": 3.0
   },
-  "SV07": {
+  "Printer2": {
     "rate_per_hour": 1.0,
     "filament_mode": "per_meter",
     "filament_rate": 0.25,
     "grams_per_meter": 3.0
   },
-  "Ender5P": {
-    "rate_per_hour": 6.0,
+  "Printer3": {
+    "rate_per_hour": 1.0,
     "filament_mode": "per_meter",
-    "filament_rate": 0.3,
+    "filament_rate": 0.25,
     "grams_per_meter": 3.0
   }
 }
