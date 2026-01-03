@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
 import installer_macro
 
-from core.config import DATA_DIR, SETTINGS_FILE
+from core.config import DATA_DIR, SETTINGS_FILE, CSV_FILE
 from core.storage import (
     load_state as _load_state_key,
     save_state as _save_state_key,
@@ -35,6 +35,82 @@ from core.storage import (
 STATE_FILE = os.path.join(DATA_DIR, "install_state.json")
 DEFAULT_PORT = 5000
 DEFAULT_SERVICE_NAME = "print-cost-dashboard"
+
+
+def _sql_db_path() -> str:
+    return os.path.join(DATA_DIR, "kcd.db")
+
+
+def _detect_sql_state() -> Dict[str, Any]:
+    db_path = _sql_db_path()
+    db_exists = os.path.exists(db_path)
+    csv_exists = os.path.exists(CSV_FILE)
+    schema_ok = False
+    schema_version = None
+
+    if db_exists:
+        try:
+            from core import db as db_module
+            conn = db_module.connect_db()
+            # Apply migrations so we can validate schema state.
+            db_module.apply_migrations(conn)
+            schema_version = db_module.current_schema_version(conn)
+            schema_ok = bool(schema_version)
+        except Exception:
+            schema_ok = False
+
+    if db_exists and schema_ok:
+        status = "sql_capable"
+    elif db_exists and not schema_ok:
+        status = "sql_needs_migration"
+    elif csv_exists:
+        status = "csv_only"
+    else:
+        status = "fresh"
+
+    return {
+        "status": status,
+        "db_exists": db_exists,
+        "schema_ok": schema_ok,
+        "schema_version": schema_version,
+        "csv_exists": csv_exists,
+        "db_path": db_path,
+    }
+
+
+def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
+    try:
+        from core import db as db_module
+        from core import db_import
+    except Exception as e:
+        println(f"WARNING: SQL support unavailable: {e}")
+        return False
+
+    try:
+        conn = db_module.connect_db()
+        applied = db_module.apply_migrations(conn)
+        if applied:
+            println(f"SQL migrations applied: {', '.join(applied)}")
+        if import_from_csv and os.path.exists(CSV_FILE):
+            println("Importing CSV into SQLite (best-effort)...")
+            db_import.run_import(skip_existing=True, overwrite=False)
+        return True
+    except Exception as e:
+        println(f"WARNING: failed to initialize SQL database: {e}")
+        return False
+
+
+def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Optional[str] = None) -> bool:
+    try:
+        from core import db as db_module
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
+        conn.commit()
+        return True
+    except Exception as e:
+        println(f"WARNING: failed to sync printer to SQL: {e}")
+        return False
 
 
 # ----------------------------------------------------------------------
@@ -160,13 +236,15 @@ def _venv_paths(root_dir: str) -> Tuple[str, str, str]:
     return venv_dir, venv_python, venv_pip
 
 
-def _write_systemd_service(service_name: str, workdir: str, venv_python: str, port: int) -> str:
+def _write_systemd_service(service_name: str, workdir: str, venv_python: str, port: int, reports_backend: Optional[str] = None) -> str:
     user = os.getenv("SUDO_USER") or os.getenv("USER") or ""
     service_path = f"/etc/systemd/system/{service_name}.service"
     env_lines = [
         "Environment=PYTHONUNBUFFERED=1",
         "Environment=FLASK_APP=app.py",
     ]
+    if reports_backend:
+        env_lines.append(f"Environment=KCD_REPORTS_BACKEND={reports_backend}")
     unit = [
         "[Unit]",
         f"Description=Klipper Cost Dashboard ({service_name})",
@@ -212,7 +290,7 @@ def _print_master_summary(status: str, service_name: str, port: int) -> None:
     println(f"Logs         : journalctl -u {service_name} -f")
 
 
-def _perform_master_install(port: int, url: str, service_name: str) -> bool:
+def _perform_master_install(port: int, url: str, service_name: str, reports_backend: Optional[str] = None) -> bool:
     repo_root = _repo_root()
     venv_dir, venv_python, venv_pip = _venv_paths(repo_root)
     python_bin = shutil.which("python3") or sys.executable
@@ -240,7 +318,7 @@ def _perform_master_install(port: int, url: str, service_name: str) -> bool:
         return False
 
     println(f"[{len(steps) + 2}/{len(steps) + 3}] Writing systemd service...")
-    service_path = _write_systemd_service(service_name, repo_root, venv_python, port)
+    service_path = _write_systemd_service(service_name, repo_root, venv_python, port, reports_backend=reports_backend)
     if not service_path:
         return False
 
@@ -257,7 +335,7 @@ def _perform_master_install(port: int, url: str, service_name: str) -> bool:
     return True
 
 
-def _master_install_or_status(host: str, port: int, url: str, service_name: str) -> None:
+def _master_install_or_status(host: str, port: int, url: str, service_name: str, reports_backend: Optional[str] = None) -> None:
     println("\n=== Master Installation ===")
     if not _systemctl_exists():
         println("systemctl not found; cannot manage the master service automatically.")
@@ -274,6 +352,8 @@ def _master_install_or_status(host: str, port: int, url: str, service_name: str)
         ok, detail = _check_url(url)
         println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
         println(f"Saved URL      : {url}")
+        if reports_backend:
+            println(f"Recommended reports backend: {reports_backend} (set in service to use SQL)")
 
         while True:
             choice = _safe_input(
@@ -291,12 +371,12 @@ def _master_install_or_status(host: str, port: int, url: str, service_name: str)
                 _run_cmd(f"journalctl -u {service_name} -n 100 --no-pager")
                 continue
             if choice in ("f", "force"):
-                ok_install = _perform_master_install(port, url, service_name)
+                ok_install = _perform_master_install(port, url, service_name, reports_backend=reports_backend)
                 _print_master_summary("success" if ok_install else "failed", service_name, port)
                 return
             println("Invalid option. Choose R, V, F, or B.")
 
-    ok_install = _perform_master_install(port, url, service_name)
+    ok_install = _perform_master_install(port, url, service_name, reports_backend=reports_backend)
     _print_master_summary("success" if ok_install else "failed", service_name, port)
 
 
@@ -480,6 +560,41 @@ def _configure_moonraker_url_local(printer_name: str) -> Optional[str]:
         raw = _safe_input("Moonraker URL (e.g. http://192.168.2.55:7125): ").strip()
         if not raw:
             println("Moonraker URL is required.")
+            continue
+        url = _normalize_url(raw)
+        ok, detail = test_moonraker_url(url)
+        if ok:
+            println(f"Moonraker reachable at {url}")
+            return url
+        println(f"Failed to reach Moonraker at {url}: {detail}")
+        if prompt_yes_no("Save anyway?", default=False):
+            return url
+
+
+
+
+def _configure_moonraker_url_remote(printer_name: str, default_url: Optional[str] = None) -> Optional[str]:
+    # Prompt for Moonraker URL for remote printers (manual entry only).
+    printer_name = str(printer_name or "").strip()
+    settings = load_settings(SETTINGS_FILE)
+    current = ""
+    if isinstance(settings, dict):
+        current = str(settings.get(printer_name, {}).get("moonraker_url") or "").strip()
+    if default_url and not current:
+        current = str(default_url).strip()
+
+    if current:
+        ok, detail = test_moonraker_url(current)
+        if ok:
+            println(f"[auto] Moonraker reachable at {current}")
+            return _normalize_url(current)
+        println(f"Saved Moonraker URL failed test: {current} ({detail})")
+
+    while True:
+        raw = _safe_input("Moonraker URL for this printer (leave blank to skip): ").strip()
+        if not raw:
+            if prompt_yes_no("Skip Moonraker URL setup?", default=True):
+                return None
             continue
         url = _normalize_url(raw)
         ok, detail = test_moonraker_url(url)
@@ -1171,7 +1286,46 @@ def master_setup(master_and_client: bool = False) -> None:
     println(f"  Service: {service_name}")
     println(f"  API key: {api_key}")
 
-    _master_install_or_status(host, port, url, service_name)
+    sql_state = _detect_sql_state()
+    sql_enabled = False
+    if sql_state.get("status") == "sql_capable":
+        println("[sql] SQL-capable install detected (CSV may also exist; running dual/compat mode).")
+        sql_enabled = True
+    elif sql_state.get("status") == "sql_needs_migration":
+        println("[sql] SQLite DB detected but schema outdated; applying migrations...")
+        sql_enabled = _ensure_sql_capable(import_from_csv=False)
+    elif sql_state.get("status") == "csv_only":
+        println("[sql] CSV-only install detected.")
+        if prompt_yes_no("Enable SQL-capable mode (initialize DB and import CSV)?", default=False):
+            sql_enabled = _ensure_sql_capable(import_from_csv=True)
+    else:
+        println("[sql] No CSV or DB detected (fresh install).")
+        if prompt_yes_no("Enable SQL-capable mode (initialize DB)?", default=True):
+            sql_enabled = _ensure_sql_capable(import_from_csv=False)
+
+    if sql_enabled:
+        println("[sql] SQL mode enabled; reports backend should be set to auto for best results.")
+        try:
+            s = load_settings(SETTINGS_FILE)
+            if isinstance(s, dict):
+                synced = 0
+                for pname, pdata in s.items():
+                    if not isinstance(pdata, dict):
+                        continue
+                    mr = pdata.get("moonraker_url")
+                    if not mr:
+                        continue
+                    if _sync_printer_to_sql(pname, mr):
+                        synced += 1
+                if synced:
+                    println(f"[sql] Synced {synced} printers to SQL.")
+        except Exception as e:
+            println(f"[sql] WARNING: failed to sync printers to SQL: {e}")
+    else:
+        println("[sql] SQL mode not enabled; continuing in CSV-only mode.")
+
+    reports_backend = "auto" if sql_enabled else None
+    _master_install_or_status(host, port, url, service_name, reports_backend=reports_backend)
 
     if master_and_client:
         println("\nContinuing with local client installation on this machine...")
@@ -1302,6 +1456,18 @@ def install_client_local() -> None:
     except Exception as e:
         println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
 
+    try:
+        sql_state = _detect_sql_state()
+        if moonraker_url and sql_state.get("status") in ("sql_capable",):
+            if _sync_printer_to_sql(printer_name, moonraker_url):
+                println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
+        elif moonraker_url and sql_state.get("status") == "sql_needs_migration":
+            if _ensure_sql_capable(import_from_csv=False):
+                if _sync_printer_to_sql(printer_name, moonraker_url):
+                    println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
+    except Exception as e:
+        println(f"WARNING: failed to sync printer to SQL: {e}")
+
     register_client({
         "type": "local",
         "printer_name": printer_name,
@@ -1350,6 +1516,7 @@ def install_client_remote() -> None:
     remote = ""
     printer_name = ""
     printer_dir = ""
+    default_moonraker = ""
 
     registry = get_client_registry()
     remote_clients = [c for c in registry if c.get("type") == "remote"]
@@ -1368,6 +1535,7 @@ def install_client_remote() -> None:
             remote = entry.get("host", "")
             printer_name = entry.get("printer_name", "")
             printer_dir = entry.get("config_dir", "")
+            default_moonraker = entry.get("moonraker_url", "")
         else:
             auto_mode = False
     elif auto_mode:
@@ -1424,6 +1592,10 @@ def install_client_remote() -> None:
     if not printer_dir:
         println("No remote config directory provided; aborting.")
         return
+
+    moonraker_url = _configure_moonraker_url_remote(printer_name, default_moonraker)
+    if not moonraker_url:
+        println("Moonraker URL not set; thumbnails will be disabled until configured.")
 
     remote_cfg_path = os.path.join(printer_dir, "print_cost.cfg")
     remote_job_start = os.path.join(printer_dir, "kcd_job_start.sh")
@@ -1484,11 +1656,38 @@ def install_client_remote() -> None:
     save_state("master_url", master_url)
     save_state("api_key", api_key)
 
+    if moonraker_url:
+        try:
+            s = load_settings(SETTINGS_FILE)
+            if not isinstance(s, dict):
+                s = {}
+            if printer_name not in s or not isinstance(s.get(printer_name), dict):
+                s[printer_name] = {}
+            s[printer_name]["moonraker_url"] = moonraker_url
+            save_settings(SETTINGS_FILE, DATA_DIR, s)
+            if auto_mode:
+                println(f"[auto] Saved Moonraker URL for {printer_name}: {moonraker_url}")
+        except Exception as e:
+            println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
+
+        try:
+            sql_state = _detect_sql_state()
+            if sql_state.get("status") in ("sql_capable",):
+                if _sync_printer_to_sql(printer_name, moonraker_url):
+                    println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
+            elif sql_state.get("status") == "sql_needs_migration":
+                if _ensure_sql_capable(import_from_csv=False):
+                    if _sync_printer_to_sql(printer_name, moonraker_url):
+                        println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
+        except Exception as e:
+            println(f"WARNING: failed to sync printer to SQL: {e}")
+
     register_client({
         "type": "remote",
         "printer_name": printer_name,
         "host": remote,
         "config_dir": printer_dir,
+        "moonraker_url": moonraker_url,
     })
 
     println("\nRemote client installation complete.")
@@ -1939,6 +2138,32 @@ def update_client_remote(printer_name: str) -> None:
 
     save_state("master_url", master_url)
     save_state("api_key", api_key)
+
+    if moonraker_url:
+        try:
+            s = load_settings(SETTINGS_FILE)
+            if not isinstance(s, dict):
+                s = {}
+            if printer_name not in s or not isinstance(s.get(printer_name), dict):
+                s[printer_name] = {}
+            s[printer_name]["moonraker_url"] = moonraker_url
+            save_settings(SETTINGS_FILE, DATA_DIR, s)
+            if auto_mode:
+                println(f"[auto] Saved Moonraker URL for {printer_name}: {moonraker_url}")
+        except Exception as e:
+            println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
+
+        try:
+            sql_state = _detect_sql_state()
+            if sql_state.get("status") in ("sql_capable",):
+                if _sync_printer_to_sql(printer_name, moonraker_url):
+                    println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
+            elif sql_state.get("status") == "sql_needs_migration":
+                if _ensure_sql_capable(import_from_csv=False):
+                    if _sync_printer_to_sql(printer_name, moonraker_url):
+                        println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
+        except Exception as e:
+            println(f"WARNING: failed to sync printer to SQL: {e}")
 
     register_client({
         "type": "remote",

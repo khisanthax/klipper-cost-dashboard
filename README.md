@@ -118,7 +118,59 @@ KCD_READ_BACKEND=sql python app.py
 
 To roll back, set `KCD_READ_BACKEND=csv` (default). Other pages still read CSV in this phase.
 
+Enable SQL reads for Reports (Phase 4):
+
+```bash
+KCD_REPORTS_BACKEND=sql python app.py
+```
+
+To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page uses SQL in this phase.
+
 The database is stored at `data/kcd.db`.
+
+Phase 5 installer notes: the installer can initialize the DB and import from CSV, and a
+DB + CSV setup is expected (dual/compat mode). The installer keeps `settings.json`
+moonraker_url mappings in sync until SQL becomes the source of truth. For SQL-capable
+installs, prefer `KCD_REPORTS_BACKEND=auto` to use SQL with CSV fallback.
+
+### SQL/CSV parity after backfill
+
+If you backfilled SQL from Moonraker, SQL can legitimately have more jobs than `data/print_costs.csv`.
+When this happens, reports parity will show mismatches because the datasets differ.
+
+To regenerate a legacy CSV from SQL (same column order as `print_costs.csv`):
+
+```bash
+python -m kcd export csv --from sql --out data/print_costs.csv --overwrite
+```
+
+Reports parity enhancements:
+
+```bash
+# Dump job-set differences to data/parity_sql_only.json and data/parity_csv_only.json
+python -m kcd reports parity --range 90d --dump-job-diff
+
+# Compare SQL against a temporary CSV generated from SQL
+python -m kcd reports parity --range 90d --regen-csv-from-sql
+```
+
+### Reports cache
+
+SQL reports support a DB-backed cache (default TTL 300s):
+
+```bash
+KCD_REPORTS_CACHE_TTL_SECONDS=300 python app.py
+```
+
+Set `KCD_REPORTS_CACHE_TTL_SECONDS=0` to disable caching. You can inspect/clear cache via:
+
+```bash
+python -m kcd cache info
+python -m kcd cache clear
+```
+
+When `KCD_REPORTS_BACKEND=auto` chooses SQL and the CSV appears behind the DB, KCD logs a warning suggesting:
+`python -m kcd export csv --from sql --overwrite`.
 
 ### 1. Install the Master
 

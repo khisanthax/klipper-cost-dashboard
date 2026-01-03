@@ -15,6 +15,8 @@ docker-compose.dev.yml
 
 # Runtime data artifacts (created in ./data volume)
 data/kcd.db
+data/kcd.db-wal
+data/kcd.db-shm
 data/import_report.json
 data/verify_report.json
 data/system_events.jsonl
@@ -37,5 +39,7 @@ data/parity_csv_only.json
 data/parity_sql_only.json
 data/backfill_report.json
 data/print_costs.csv.bak.*
+data/print_costs_backup_*.csv
 data/backups/
 data/app_settings.json
+data/*.LOCAL_*
