@@ -80,6 +80,7 @@ def set_cached_payload(
             json.dumps(payload),
         ),
     )
+    conn.commit()
 
 
 def cache_info() -> Dict[str, Any]:
