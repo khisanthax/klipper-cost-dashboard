@@ -113,9 +113,13 @@ def export_csv_from_sql(*, out_path: str, overwrite: bool = False) -> Tuple[int,
     out_rows = []
     for row in rows:
         record = dict(row)
-        ts_epoch = _iso_to_epoch(record.get("ended_at")) or _iso_to_epoch(record.get("started_at")) or _iso_to_epoch(record.get("created_at"))
+        ts_epoch = (
+            _iso_to_epoch(record.get("ended_at"))
+            or _iso_to_epoch(record.get("started_at"))
+            or _iso_to_epoch(record.get("created_at"))
+        )
         if ts_epoch is None:
-            ts_epoch = datetime.now(timezone.utc).timestamp()
+            ts_epoch = 0
 
         csv_row = {
             "timestamp": ts_epoch,

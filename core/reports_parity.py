@@ -32,6 +32,26 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_ts_epoch(value: object) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except Exception:
+        pass
+    try:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        cleaned = raw.replace("Z", "+00:00").replace("T", " ")
+        dt = datetime.fromisoformat(cleaned)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return None
+
+
 def _parse_range(range_str: str) -> int:
     raw = str(range_str or "").strip().lower()
     if not raw:
@@ -226,19 +246,19 @@ def _reports_from_csv_path(csv_path: Optional[str], start_dt: Optional[datetime]
 
     if start_dt or end_dt:
         filtered = []
+        start_ts = int(start_dt.timestamp()) if start_dt else None
+        end_ts = int(end_dt.timestamp()) if end_dt else None
         for r in rows:
-            ts_raw = r.get("timestamp_raw")
-            if not ts_raw:
+            ts_epoch = _normalize_ts_epoch(r.get("timestamp_epoch")) or _normalize_ts_epoch(
+                r.get("timestamp_raw")
+            ) or _normalize_ts_epoch(r.get("timestamp"))
+            if ts_epoch is None:
                 continue
-            try:
-                row_dt = ts_to_local_dt(float(ts_raw))
-                if start_dt and row_dt < start_dt:
-                    continue
-                if end_dt and row_dt > end_dt:
-                    continue
-                filtered.append(r)
-            except Exception:
+            if start_ts is not None and ts_epoch < start_ts:
                 continue
+            if end_ts is not None and ts_epoch > end_ts:
+                continue
+            filtered.append(r)
         rows = filtered
 
     monthly = compute_monthly_breakdown(rows)
@@ -277,8 +297,11 @@ def _job_identity(row: dict) -> str:
         return f"uid:{uid}"
     printer = str(row.get("printer") or "").strip()
     filename = str(row.get("filename") or "").strip()
-    ts = row.get("timestamp_epoch") or row.get("timestamp_raw") or row.get("timestamp")
-    return f"composite:{printer}|{filename}|{ts}"
+    ts = _normalize_ts_epoch(row.get("timestamp_epoch")) or _normalize_ts_epoch(
+        row.get("timestamp_raw")
+    ) or _normalize_ts_epoch(row.get("timestamp"))
+    ts_val = str(ts or 0)
+    return f"composite:{printer}|{filename}|{ts_val}"
 
 
 def _load_csv_jobs(csv_path: Optional[str], start_dt: Optional[datetime], end_dt: Optional[datetime]) -> List[dict]:
@@ -290,29 +313,32 @@ def _load_csv_jobs(csv_path: Optional[str], start_dt: Optional[datetime], end_dt
 
     if start_dt or end_dt:
         filtered = []
+        start_ts = int(start_dt.timestamp()) if start_dt else None
+        end_ts = int(end_dt.timestamp()) if end_dt else None
         for r in rows:
-            ts_raw = r.get("timestamp_raw")
-            if not ts_raw:
+            ts_epoch = _normalize_ts_epoch(r.get("timestamp_epoch")) or _normalize_ts_epoch(
+                r.get("timestamp_raw")
+            ) or _normalize_ts_epoch(r.get("timestamp"))
+            if ts_epoch is None:
                 continue
-            try:
-                row_dt = ts_to_local_dt(float(ts_raw))
-                if start_dt and row_dt < start_dt:
-                    continue
-                if end_dt and row_dt > end_dt:
-                    continue
-                filtered.append(r)
-            except Exception:
+            if start_ts is not None and ts_epoch < start_ts:
                 continue
+            if end_ts is not None and ts_epoch > end_ts:
+                continue
+            filtered.append(r)
         rows = filtered
 
     out = []
     for r in rows:
+        ts_epoch = _normalize_ts_epoch(r.get("timestamp_epoch")) or _normalize_ts_epoch(
+            r.get("timestamp_raw")
+        ) or _normalize_ts_epoch(r.get("timestamp"))
         out.append(
             {
                 "job_uid": r.get("job_uid"),
                 "printer": r.get("printer"),
                 "filename": r.get("filename"),
-                "timestamp_epoch": r.get("timestamp_raw"),
+                "timestamp_epoch": ts_epoch,
                 "status": r.get("status"),
                 "duration_seconds": r.get("duration_seconds"),
                 "filament_mm": r.get("filament_mm"),
@@ -328,7 +354,7 @@ def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> 
 
     where = []
     params: list = []
-    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
+    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.started_at, j.created_at)) AS INTEGER)"
 
     if start_dt:
         try:
@@ -347,7 +373,7 @@ def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> 
     if where:
         where_sql = "WHERE " + " AND ".join(where)
 
-    rows = conn.execute(
+      rows = conn.execute(
         f"""
         SELECT
             j.job_uid,
@@ -361,10 +387,15 @@ def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> 
         FROM jobs j
         JOIN printers p ON j.printer_id = p.id
         {where_sql}
-        """,
-        params,
-    ).fetchall()
-    return [dict(r) for r in rows]
+          """,
+          params,
+      ).fetchall()
+      out = []
+      for r in rows:
+          row = dict(r)
+          row["timestamp_epoch"] = _normalize_ts_epoch(row.get("timestamp_epoch"))
+          out.append(row)
+      return out
 
 
 def _diff_job_sets(primary: List[dict], other: List[dict]) -> Tuple[set, List[dict]]:
