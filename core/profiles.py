@@ -127,7 +127,7 @@ def get_printer_mapping(printer_name):
             if hasattr(row, "__getitem__"):
                 return row["hourly_rate_profile_id"] if "hourly_rate_profile_id" in row.keys() else row[0]
         except Exception:
-        return None
+            return None
     data = load_profiles_data(PROFILES_FILE)
     mappings = data.get("mappings", {})
     return mappings.get(printer_name)
