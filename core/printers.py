@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Set
 
@@ -89,7 +90,14 @@ def _load_sql_printers() -> Set[str]:
         return set()
     out: Set[str] = set()
     for r in rows:
-        name = _norm(r[0] if isinstance(r, (tuple, list)) else r.get("name"))
+        if isinstance(r, sqlite3.Row):
+            name = _norm(r["name"])
+        elif isinstance(r, (tuple, list)):
+            name = _norm(r[0])
+        elif isinstance(r, dict):
+            name = _norm(r.get("name"))
+        else:
+            name = _norm(getattr(r, "name", ""))
         if name:
             out.add(name)
     return out
