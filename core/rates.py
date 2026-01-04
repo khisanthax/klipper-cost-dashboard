@@ -5,6 +5,8 @@ Provides CRUD helpers for rate profiles stored in a JSON file, similar to filame
 """
 import os
 import uuid
+import sqlite3
+from core import db as db_module
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
 
@@ -12,7 +14,44 @@ from core.storage import load_json_file, save_json_file
 RATE_PROFILES_FILE = os.path.join(DATA_DIR, "rate_profiles.json")
 
 
+def _is_sql_only() -> bool:
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
+def _load_sql_profiles():
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            "SELECT id, profile_uid, name, description, rate_per_hour FROM hourly_rate_profiles"
+        ).fetchall()
+    except Exception:
+        return {"profiles": {}}
+
+    profiles = {}
+    for r in rows:
+        if isinstance(r, sqlite3.Row):
+            pid = r["profile_uid"] or str(r["id"])
+            profiles[str(pid)] = {
+                "id": str(pid),
+                "name": r["name"],
+                "description": r["description"],
+                "rate_per_hour": r["rate_per_hour"],
+            }
+        elif isinstance(r, (tuple, list)):
+            pid = r[1] or str(r[0])
+            profiles[str(pid)] = {
+                "id": str(pid),
+                "name": r[2],
+                "description": r[3],
+                "rate_per_hour": r[4],
+            }
+    return {"profiles": profiles}
+
+
 def _load_data():
+    if _is_sql_only():
+        return _load_sql_profiles()
     data = load_json_file(RATE_PROFILES_FILE)
     if not data or not isinstance(data, dict):
         return {"profiles": {}}

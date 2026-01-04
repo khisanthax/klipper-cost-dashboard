@@ -102,6 +102,8 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
 
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
+    if _is_sql_only():
+        return
     require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
     if not os.path.exists(settings_file):
         from core.config import SETTINGS_EXAMPLE_FILE
@@ -115,6 +117,9 @@ def ensure_settings_exists(settings_file, default_pricing):
 
 def load_settings(settings_file):
     """Load printer settings from JSON file."""
+    if _is_sql_only():
+        data = _load_user_settings_sql("settings")
+        return data if isinstance(data, dict) else {}
     require_file_reads_allowed("settings.json", caller_hint="core.storage.load_settings")
     from core.config import DEFAULT_PRICING, CSV_FILE
     ensure_runtime_files(settings_file, CSV_FILE)
@@ -131,6 +136,9 @@ def load_settings(settings_file):
 
 def save_settings(settings_file, data_dir, settings):
     """Save printer settings to JSON file."""
+    if _is_sql_only():
+        _save_user_settings_sql("settings", settings)
+        return
     os.makedirs(data_dir, exist_ok=True)
     with open(settings_file, "w") as f:
         json.dump(settings, f, indent=2)
@@ -1051,6 +1059,37 @@ def load_profiles_data(profiles_file):
     Load profiles data (profiles + mappings) from JSON file.
     Returns a dict with 'profiles' and 'mappings' keys.
     """
+    if _is_sql_only():
+        try:
+            from core import db as db_module
+            conn = db_module.connect_db()
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                """
+                SELECT id, profile_uid, name, material, filament_mode, filament_rate, grams_per_meter
+                  FROM filament_profiles
+                """
+            ).fetchall()
+        except Exception:
+            return {"profiles": {}, "mappings": {}}
+
+        profiles = {}
+        for r in rows:
+            if hasattr(r, "__getitem__"):
+                try:
+                    pid = r["profile_uid"] if "profile_uid" in r.keys() else r[1]
+                except Exception:
+                    pid = r[1] if len(r) > 1 else None
+                pid = pid or str(r["id"] if "id" in r.keys() else r[0])
+                profiles[str(pid)] = {
+                    "id": str(pid),
+                    "name": r["name"] if "name" in r.keys() else r[2],
+                    "material": r["material"] if "material" in r.keys() else r[3],
+                    "filament_mode": r["filament_mode"] if "filament_mode" in r.keys() else r[4],
+                    "filament_rate": r["filament_rate"] if "filament_rate" in r.keys() else r[5],
+                    "grams_per_meter": r["grams_per_meter"] if "grams_per_meter" in r.keys() else r[6],
+                }
+        return {"profiles": profiles, "mappings": {}}
     require_file_reads_allowed("profiles.json", caller_hint="core.storage.load_profiles_data")
     if not os.path.exists(profiles_file):
         return {"profiles": {}, "mappings": {}}
