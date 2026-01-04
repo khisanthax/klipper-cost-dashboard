@@ -15,15 +15,24 @@ LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
 _jobs = {}
 
 
+def _is_sql_only() -> bool:
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
 def _load_state():
     """Load live job state from disk."""
     global _jobs
+    if _is_sql_only():
+        _jobs = {}
+        return
     data = load_json_file(LIVE_JOBS_FILE)
     _jobs = data.get("jobs", {}) if data else {}
 
 
 def _save_state():
     """Save live job state to disk."""
+    if _is_sql_only():
+        return
     save_json_file(LIVE_JOBS_FILE, DATA_DIR, {"jobs": _jobs})
 
 
