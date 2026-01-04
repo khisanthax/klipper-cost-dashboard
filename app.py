@@ -12,7 +12,7 @@ import hashlib
 import time
 import re
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -47,6 +47,7 @@ from core import system_events
 from core import storage_backend
 from core import history_repo
 from core import reports_repo
+from core import db as db_module
 from core.moonraker import test_moonraker_url, find_history_job_for_completion
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
@@ -1253,6 +1254,128 @@ def _parse_int(value, default):
         return default
 
 
+def _is_sql_only() -> bool:
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
+def _load_history_rows_for_recalc() -> tuple[list, str | None]:
+    if _is_sql_only():
+        try:
+            history_query = history_repo.HistoryQuery()
+            history_result = history_repo.list_history_rows_sql(history_query, page=1, per_page=25, error=None)
+            return history_result.rows_all, history_result.error
+        except Exception as exc:
+            return [], f"Error loading history from SQL: {exc}"
+    return load_rows_raw(CSV_FILE)
+
+
+def _sum_total_cost_sql(job_uids: list[str]) -> float:
+    if not job_uids:
+        return 0.0
+    placeholders = ",".join(["?"] * len(job_uids))
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
+            job_uids,
+        ).fetchone()
+        if not row:
+            return 0.0
+        return float(row["total"] or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
+    if not job_uids:
+        return 0
+    placeholders = ",".join(["?"] * len(job_uids))
+    updated = 0
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            f"""
+            SELECT
+                j.job_uid,
+                p.name AS printer,
+                j.duration_seconds,
+                j.filament_mm,
+                j.paused_seconds_total
+            FROM jobs j
+            JOIN printers p ON j.printer_id = p.id
+            WHERE j.job_uid IN ({placeholders})
+            """,
+            job_uids,
+        ).fetchall()
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for row in rows:
+            job_uid = str(row["job_uid"] or "").strip()
+            if not job_uid:
+                continue
+            printer = str(row["printer"] or "").strip()
+            try:
+                duration_seconds = float(row["duration_seconds"] or 0.0)
+            except Exception:
+                duration_seconds = 0.0
+            try:
+                filament_mm = float(row["filament_mm"] or 0.0)
+            except Exception:
+                filament_mm = 0.0
+            try:
+                paused_seconds_total = float(row["paused_seconds_total"] or 0.0)
+            except Exception:
+                paused_seconds_total = 0.0
+
+            computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
+            if not computed:
+                continue
+
+            conn.execute(
+                """
+                UPDATE jobs
+                   SET duration_hours = ?,
+                       filament_meters = ?,
+                       rate_per_hour = ?,
+                       filament_mode = ?,
+                       filament_rate = ?,
+                       grams_per_meter = ?,
+                       time_cost = ?,
+                       material_cost = ?,
+                       total_cost = ?,
+                       filament_profile_id = ?,
+                       filament_material = ?,
+                       updated_at = ?
+                 WHERE job_uid = ?
+                """,
+                (
+                    computed.get("duration_hours"),
+                    computed.get("filament_meters"),
+                    computed.get("rate_per_hour"),
+                    computed.get("filament_mode"),
+                    computed.get("filament_rate"),
+                    computed.get("grams_per_meter"),
+                    computed.get("time_cost"),
+                    computed.get("material_cost"),
+                    computed.get("total_cost"),
+                    computed.get("filament_profile_id"),
+                    computed.get("filament_material"),
+                    now_iso,
+                    job_uid,
+                ),
+            )
+            updated += 1
+
+        conn.commit()
+    except Exception as exc:
+        app.logger.warning("SQL recalc failed: %s", exc)
+    if updated:
+        app.logger.info("SQL recalc updated %s job(s).", updated)
+    return updated
+
+
 @app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
 def recalculate_page():
     """
@@ -1263,7 +1386,7 @@ def recalculate_page():
       - Never changes job_uid / printer / filename / timestamps
       - Only rewrites computed pricing fields (same behavior as existing bulk recalc)
     """
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = _load_history_rows_for_recalc()
     message = request.args.get("msg", "").strip()
 
     filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args)
@@ -1432,7 +1555,7 @@ def recalculate_run():
     rate_per_hour_override_raw = (request.form.get("rate_per_hour_override") or "").strip()
     filament_rate_per_meter_override_raw = (request.form.get("filament_rate_per_meter_override") or "").strip()
 
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = _load_history_rows_for_recalc()
     if error:
         return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
 
@@ -1502,18 +1625,22 @@ def recalculate_run():
                 except Exception:
                     continue
 
-        updated = storage_backend.recalc_jobs(to_update, compute_fn)
+        if _is_sql_only():
+            updated = _recalc_jobs_sql(to_update, compute_fn)
+            after_total = _sum_total_cost_sql(to_update)
+        else:
+            updated = storage_backend.recalc_jobs(to_update, compute_fn)
 
-        after_rows, after_error = load_rows_raw(CSV_FILE)
-        after_total = 0.0
-        if not after_error:
-            for r in (after_rows or []):
-                uid = str(r.get("job_uid") or "").strip()
-                if uid and uid in to_update:
-                    try:
-                        after_total += float(r.get("total_cost") or 0.0)
-                    except Exception:
-                        continue
+            after_rows, after_error = load_rows_raw(CSV_FILE)
+            after_total = 0.0
+            if not after_error:
+                for r in (after_rows or []):
+                    uid = str(r.get("job_uid") or "").strip()
+                    if uid and uid in to_update:
+                        try:
+                            after_total += float(r.get("total_cost") or 0.0)
+                        except Exception:
+                            continue
 
         uids_sorted = sorted(to_update)
         uids_hash = hashlib.sha256(("|".join(uids_sorted)).encode("utf-8")).hexdigest()
@@ -1651,7 +1778,7 @@ def recalculate_preview():
     rate_per_hour_override_raw = (request.form.get("rate_per_hour_override") or "").strip()
     filament_rate_per_meter_override_raw = (request.form.get("filament_rate_per_meter_override") or "").strip()
 
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = _load_history_rows_for_recalc()
     if error:
         return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
 
@@ -1894,7 +2021,10 @@ def projects_page():
 
             elif action == "recalc_costs":
                 job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
-                updated = storage_backend.recalc_jobs(job_ids, compute_costs)
+                if _is_sql_only():
+                    updated = _recalc_jobs_sql(job_ids, compute_costs)
+                else:
+                    updated = storage_backend.recalc_jobs(job_ids, compute_costs)
                 redirect_args = {"msg": f"Recalculated costs for {updated} job(s)."}
 
             elif action == "create_manual_job":

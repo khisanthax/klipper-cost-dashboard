@@ -20,12 +20,14 @@ import json
 import os
 import time
 import uuid
+import sqlite3
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.config import DATA_DIR
 from core.config import DEFAULT_PRICING
+from core import db as db_module
 from core.storage import compute_job_uid
 from core.sql_only import require_file_reads_allowed
 
@@ -86,6 +88,10 @@ def _ensure_data_dir() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
 
 
+def _is_sql_only() -> bool:
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
 def _read_json(path: str, default: Any) -> Any:
     require_file_reads_allowed(path, caller_hint="core.projects._read_json")
     if not os.path.exists(path):
@@ -110,6 +116,8 @@ def _write_json(path: str, data: Any) -> None:
 
 def ensure_projects_files() -> None:
     """Create projects/assignments files if missing."""
+    if _is_sql_only():
+        return
     _ensure_data_dir()
     if not os.path.exists(PROJECTS_FILE):
         _write_json(PROJECTS_FILE, [])
@@ -119,6 +127,217 @@ def ensure_projects_files() -> None:
         _write_json(MANUAL_JOBS_FILE, [])
     if not os.path.exists(PLANS_FILE):
         _write_json(PLANS_FILE, [])
+
+
+def _parse_iso_to_epoch(value: object) -> float:
+    if value is None:
+        return 0.0
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _project_uid_from_row(row: sqlite3.Row) -> str:
+    pid = row["project_uid"] if "project_uid" in row.keys() else None
+    if pid:
+        return str(pid)
+    return str(row["id"])
+
+
+def _load_projects_sql() -> Dict[str, Project]:
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                project_uid,
+                name,
+                notes,
+                status,
+                hourly_rate_override,
+                filament_cost_per_kg_override,
+                labor_only,
+                created_at,
+                updated_at
+            FROM projects
+            """
+        ).fetchall()
+    except Exception:
+        return {}
+
+    projects: Dict[str, Project] = {}
+    for row in rows:
+        pid = _project_uid_from_row(row)
+        name = str(row["name"] or "").strip()
+        if not pid or not name:
+            continue
+        projects[pid] = Project(
+            id=pid,
+            name=name,
+            notes=str(row["notes"] or ""),
+            hourly_rate_override=_opt_nonneg_float(row["hourly_rate_override"]),
+            filament_cost_per_kg_override=_opt_nonneg_float(row["filament_cost_per_kg_override"]),
+            labor_only=bool(row["labor_only"] or False),
+            created_at=_parse_iso_to_epoch(row["created_at"]),
+            updated_at=_parse_iso_to_epoch(row["updated_at"]),
+        )
+    return projects
+
+
+def _save_projects_sql(projects: Iterable[Project]) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    now = _iso_now()
+    for p in projects:
+        conn.execute(
+            """
+            INSERT INTO projects (
+                project_uid,
+                name,
+                notes,
+                status,
+                hourly_rate_override,
+                filament_cost_per_kg_override,
+                labor_only,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_uid) DO UPDATE SET
+                name=excluded.name,
+                notes=excluded.notes,
+                status=excluded.status,
+                hourly_rate_override=excluded.hourly_rate_override,
+                filament_cost_per_kg_override=excluded.filament_cost_per_kg_override,
+                labor_only=excluded.labor_only,
+                updated_at=excluded.updated_at
+            """,
+            (
+                p.id,
+                p.name,
+                p.notes,
+                "active",
+                p.hourly_rate_override,
+                p.filament_cost_per_kg_override,
+                1 if p.labor_only else 0,
+                now,
+                now,
+            ),
+        )
+    conn.commit()
+
+
+def _load_assignments_sql() -> Dict[str, str]:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    assignments: Dict[str, str] = {}
+    for row in conn.execute(
+        """
+        SELECT pa.job_uid, p.id AS project_id, p.project_uid
+        FROM project_assignments pa
+        JOIN projects p ON pa.project_id = p.id
+        """
+    ):
+        job_uid = str(row["job_uid"] or "").strip()
+        if not job_uid:
+            continue
+        pid = str(row["project_uid"] or row["project_id"] or "").strip()
+        if not pid:
+            continue
+        assignments[job_uid] = pid
+    return assignments
+
+
+def _save_assignments_sql(assignments: Dict[str, str]) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    conn.execute("DELETE FROM project_assignments")
+    now = _iso_now()
+    for job_uid, project_uid in (assignments or {}).items():
+        job_uid = str(job_uid or "").strip()
+        project_uid = str(project_uid or "").strip()
+        if not job_uid or not project_uid:
+            continue
+        row = conn.execute(
+            "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+            (project_uid, project_uid),
+        ).fetchone()
+        if not row:
+            continue
+        project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+        conn.execute(
+            "INSERT OR REPLACE INTO project_assignments (project_id, job_uid, created_at) VALUES (?, ?, ?)",
+            (project_id, job_uid, now),
+        )
+    conn.commit()
+
+
+def _upsert_project_sql(project: Project) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    now = _iso_now()
+    conn.execute(
+        """
+        INSERT INTO projects (
+            project_uid,
+            name,
+            notes,
+            status,
+            hourly_rate_override,
+            filament_cost_per_kg_override,
+            labor_only,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_uid) DO UPDATE SET
+            name=excluded.name,
+            notes=excluded.notes,
+            status=excluded.status,
+            hourly_rate_override=excluded.hourly_rate_override,
+            filament_cost_per_kg_override=excluded.filament_cost_per_kg_override,
+            labor_only=excluded.labor_only,
+            updated_at=excluded.updated_at
+        """,
+        (
+            project.id,
+            project.name,
+            project.notes,
+            "active",
+            project.hourly_rate_override,
+            project.filament_cost_per_kg_override,
+            1 if project.labor_only else 0,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def _create_project_sql(project: Project) -> None:
+    _upsert_project_sql(project)
+
+
+def _update_project_sql(project: Project) -> None:
+    _upsert_project_sql(project)
+
+
+def _delete_project_sql(project_uid: str) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    row = conn.execute(
+        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+        (project_uid, project_uid),
+    ).fetchone()
+    if not row:
+        return
+    project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
 
 
 def _safe_read_orphaned_assignments() -> Optional[List[Dict[str, Any]]]:
@@ -161,6 +380,8 @@ def _safe_write_orphaned_assignments(items: List[Dict[str, Any]]) -> bool:
 
 
 def load_projects() -> Dict[str, Project]:
+    if _is_sql_only():
+        return _load_projects_sql()
     ensure_projects_files()
     raw = _read_json(PROJECTS_FILE, [])
     if not isinstance(raw, list):
@@ -205,6 +426,9 @@ def load_projects() -> Dict[str, Project]:
 
 
 def save_projects(projects: Iterable[Project]) -> None:
+    if _is_sql_only():
+        _save_projects_sql(projects)
+        return
     payload: List[Dict[str, Any]] = []
     for p in projects:
         payload.append(
@@ -223,6 +447,8 @@ def save_projects(projects: Iterable[Project]) -> None:
 
 
 def load_assignments() -> Dict[str, str]:
+    if _is_sql_only():
+        return _load_assignments_sql()
     ensure_projects_files()
     raw = _read_json(ASSIGNMENTS_FILE, {})
     if not isinstance(raw, dict):
@@ -237,6 +463,9 @@ def load_assignments() -> Dict[str, str]:
 
 
 def save_assignments(assignments: Dict[str, str]) -> None:
+    if _is_sql_only():
+        _save_assignments_sql(assignments)
+        return
     _write_json(ASSIGNMENTS_FILE, dict(assignments))
 
 
@@ -246,6 +475,8 @@ def load_manual_jobs() -> Dict[str, List[ManualJob]]:
 
     Storage is a list of dicts in `data/project_manual_jobs.json`.
     """
+    if _is_sql_only():
+        return {}
     ensure_projects_files()
     raw = _read_json(MANUAL_JOBS_FILE, [])
     if not isinstance(raw, list):
@@ -300,6 +531,8 @@ def load_manual_jobs() -> Dict[str, List[ManualJob]]:
 
 
 def _save_manual_jobs(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
+    if _is_sql_only():
+        return
     payload: List[Dict[str, Any]] = []
     for pid, jobs in jobs_by_project.items():
         for j in jobs:
@@ -628,6 +861,8 @@ def compute_manual_job_cost(
 
 def load_plans() -> Dict[str, List[PlannedItem]]:
     """Load planned items grouped by project_id."""
+    if _is_sql_only():
+        return {}
     ensure_projects_files()
     raw = _read_json(PLANS_FILE, [])
     if not isinstance(raw, list):
@@ -695,6 +930,8 @@ def load_plans() -> Dict[str, List[PlannedItem]]:
 
 
 def _save_plans(by_project: Dict[str, List[PlannedItem]]) -> None:
+    if _is_sql_only():
+        return
     payload: List[Dict[str, Any]] = []
     for pid, items in by_project.items():
         for p in items:
@@ -1083,6 +1320,9 @@ def create_project(
         created_at=now,
         updated_at=now,
     )
+    if _is_sql_only():
+        _create_project_sql(project)
+        return project
     projects = load_projects()
     projects[pid] = project
     save_projects(projects.values())
@@ -1104,6 +1344,23 @@ def update_project(
     name = str(name or "").strip()
     if not name:
         raise ValueError("Project name is required")
+
+    if _is_sql_only():
+        existing = load_projects().get(pid)
+        if not existing:
+            raise ValueError("Project not found")
+        updated = Project(
+            id=pid,
+            name=name,
+            notes=str(notes or ""),
+            hourly_rate_override=_opt_nonneg_float(hourly_rate_override) if hourly_rate_override is not None else existing.hourly_rate_override,
+            filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override) if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+            labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
+            created_at=existing.created_at,
+            updated_at=time.time(),
+        )
+        _update_project_sql(updated)
+        return updated
 
     projects = load_projects()
     existing = projects.get(pid)
@@ -1130,6 +1387,10 @@ def delete_project(project_id: str) -> None:
     """Delete a project and unassign any jobs mapped to it."""
     pid = str(project_id or "").strip()
     if not pid:
+        return
+
+    if _is_sql_only():
+        _delete_project_sql(pid)
         return
 
     projects = load_projects()
@@ -1225,6 +1486,8 @@ def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Tuple[Dict[str
     Returns (assignments, orphans_added) where orphans_added counts newly recorded orphan
     entries written during this run (useful for a one-time banner on /projects).
     """
+    if _is_sql_only():
+        return load_assignments(), 0
     assignments = load_assignments()
     if not assignments:
         return assignments, 0
