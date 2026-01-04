@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from core.sql_only import require_file_reads_allowed
+from core import db as db_module
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -19,6 +20,44 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+
+def _is_sql_only() -> bool:
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
+def _load_user_settings_sql(key: str):
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return None
+        raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _save_user_settings_sql(key: str, value) -> None:
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        raw = json.dumps(value, indent=2)
+        row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", (key,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
+                (raw, now, key),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
+                (key, raw, now),
+            )
+        conn.commit()
+    except Exception:
+        pass
 
 def _copy_if_missing(src: str, dest: str) -> bool:
     if os.path.exists(dest):
@@ -98,6 +137,8 @@ def save_settings(settings_file, data_dir, settings):
 
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
+    if _is_sql_only():
+        return
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
         # Keep analytics/internal columns opt-in to avoid surprising users.
@@ -151,8 +192,6 @@ def _coerce_display_tables(value):
 
 def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
-    require_file_reads_allowed("display.json", caller_hint="core.storage.load_display_settings")
-    ensure_display_exists(display_file, headers)
     _hidden_defaults = {
         "job_uid",
         "thumbnail",
@@ -178,6 +217,47 @@ def load_display_settings(display_file, headers):
             "pause_include_paused_time_default": False,
             "projects_show_cost_totals": True,
         }
+
+    if _is_sql_only():
+        data = _load_user_settings_sql("display") or {}
+        if not isinstance(data, dict):
+            return _default_settings()
+        tables = _coerce_display_tables(data.get("tables"))
+        history_cols = None
+        if isinstance(tables.get("history"), dict):
+            history_cols = tables.get("history", {}).get("visible_columns")
+        if not isinstance(history_cols, list):
+            history_cols = data.get("visible_columns", headers)
+
+        cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
+        if not cols:
+            cols = [h for h in headers if h not in _hidden_defaults]
+        tables.setdefault("history", {"visible_columns": cols})
+
+        hidden = data.get("hidden_printers", [])
+        if not isinstance(hidden, list):
+            hidden = []
+        hidden = [str(p) for p in hidden if str(p).strip()]
+
+        if "pause_include_paused_time_default" in data:
+            pause_include = bool(data.get("pause_include_paused_time_default", False))
+        elif "pause_exclude_paused_time_default" in data:
+            pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
+        else:
+            pause_include = False
+
+        show_cost_totals = data.get("projects_show_cost_totals", True)
+        show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
+        return {
+            "visible_columns": cols,
+            "tables": tables,
+            "hidden_printers": hidden,
+            "pause_include_paused_time_default": pause_include,
+            "projects_show_cost_totals": show_cost_totals,
+        }
+
+    require_file_reads_allowed("display.json", caller_hint="core.storage.load_display_settings")
+    ensure_display_exists(display_file, headers)
 
     try:
         with open(display_file) as f:
@@ -335,6 +415,10 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
     existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
+
+    if _is_sql_only():
+        _save_user_settings_sql("display", existing)
+        return
 
     with open(display_file, "w") as f:
         json.dump(existing, f, indent=2)
