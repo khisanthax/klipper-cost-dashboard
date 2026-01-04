@@ -8,11 +8,6 @@ from core import db as db_module
 from core import db_import
 from core import db_verify
 from core import db_backfill
-from core import history_parity
-from core import reports_parity
-from core import export_csv
-from core import reports_cache
-from core import projects
 
 
 def _cmd_db_init(_args: argparse.Namespace) -> int:
@@ -54,6 +49,8 @@ def _cmd_db_backfill(args: argparse.Namespace) -> int:
 
 
 def _cmd_projects_import_json(args: argparse.Namespace) -> int:
+    from core import projects
+
     apply = bool(args.apply or args.force)
     report = projects.import_json_to_sql(apply=apply)
     scanned = report.get("scanned", {})
@@ -159,12 +156,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_history_parity(args: argparse.Namespace) -> int:
+    from core import history_parity
+
     report = history_parity.run_parity(limit=args.limit)
     print(history_parity.render_parity_summary(report))
     return 0
 
 
 def _cmd_reports_parity(args: argparse.Namespace) -> int:
+    from core import reports_parity
+
     report = reports_parity.run_parity(
         range_str=args.range_str,
         dump_job_diff=args.dump_job_diff,
@@ -176,12 +177,16 @@ def _cmd_reports_parity(args: argparse.Namespace) -> int:
 
 
 def _cmd_export_csv(args: argparse.Namespace) -> int:
+    from core import export_csv
+
     count, path = export_csv.export_csv_from_sql(out_path=args.out_path, overwrite=args.overwrite)
     print(f"Exported {count} rows to {path}")
     return 0
 
 
 def _cmd_cache_info(_args: argparse.Namespace) -> int:
+    from core import reports_cache
+
     info = reports_cache.cache_info()
     print(f"Cache rows: {info.get('count', 0)}")
     print(f"Oldest: {info.get('oldest', 0)}")
@@ -192,6 +197,8 @@ def _cmd_cache_info(_args: argparse.Namespace) -> int:
 
 
 def _cmd_cache_clear(args: argparse.Namespace) -> int:
+    from core import reports_cache
+
     key = str(args.key or "").strip() or None
     range_key = str(args.range_key or "").strip() or None
     removed = reports_cache.clear_cache(key=key, range_key=range_key)

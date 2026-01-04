@@ -373,7 +373,7 @@ def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> 
     if where:
         where_sql = "WHERE " + " AND ".join(where)
 
-      rows = conn.execute(
+    rows = conn.execute(
         f"""
         SELECT
             j.job_uid,
@@ -387,15 +387,15 @@ def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> 
         FROM jobs j
         JOIN printers p ON j.printer_id = p.id
         {where_sql}
-          """,
-          params,
-      ).fetchall()
-      out = []
-      for r in rows:
-          row = dict(r)
-          row["timestamp_epoch"] = _normalize_ts_epoch(row.get("timestamp_epoch"))
-          out.append(row)
-      return out
+        """,
+        params,
+    ).fetchall()
+    out = []
+    for r in rows:
+        row = dict(r)
+        row["timestamp_epoch"] = _normalize_ts_epoch(row.get("timestamp_epoch"))
+        out.append(row)
+    return out
 
 
 def _diff_job_sets(primary: List[dict], other: List[dict]) -> Tuple[set, List[dict]]:
