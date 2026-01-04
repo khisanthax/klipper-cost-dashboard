@@ -31,7 +31,7 @@ def main() -> int:
 
     rows = conn.execute(
         """
-        SELECT j.job_uid, p.name AS printer, j.filename, j.thumbnail
+        SELECT j.job_uid, p.name AS printer, p.moonraker_url, j.filename, j.thumbnail
           FROM jobs j
           JOIN printers p ON j.printer_id = p.id
          WHERE j.thumbnail IS NULL OR TRIM(j.thumbnail) = ''
@@ -39,8 +39,11 @@ def main() -> int:
     ).fetchall()
 
     scanned = 0
+    fetched = 0
+    saved = 0
     updated = 0
-    missing = 0
+    missing_metadata = 0
+    download_fail = 0
     errors = 0
 
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
@@ -49,13 +52,13 @@ def main() -> int:
         scanned += 1
         job_uid = str(row["job_uid"] or "").strip()
         printer = str(row["printer"] or "").strip()
+        base_url = str(row["moonraker_url"] or "").strip()
         filename = str(row["filename"] or "").strip()
         if not job_uid or not printer or not filename:
-            missing += 1
+            missing_metadata += 1
             continue
 
         try:
-            base_url = thumbs.resolve_moonraker_base_url(printer)
             token = thumbs.compute_thumbnail_token(printer, filename, base_url=base_url)
             small_path = _thumb_path(printer, token, "small")
             card_path = _thumb_path(printer, token, "card")
@@ -85,21 +88,51 @@ def main() -> int:
                     except Exception:
                         pass
 
+            if not found:
+                if not base_url:
+                    missing_metadata += 1
+                    continue
+
+                meta = thumbs._metadata_thumbnails(printer, filename, size_hint="small", base_url=base_url)
+                if not meta:
+                    missing_metadata += 1
+                    continue
+
+                fetched += 1
+                small_cached = thumbs.get_cached_thumbnail_path(
+                    printer,
+                    filename,
+                    "small",
+                    base_url=base_url,
+                )
+                card_cached = thumbs.get_cached_thumbnail_path(
+                    printer,
+                    filename,
+                    "card",
+                    base_url=base_url,
+                )
+                if small_cached or card_cached:
+                    found = True
+                    saved += 1
+                else:
+                    download_fail += 1
+                    continue
+
             if found:
                 conn.execute(
                     "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
                     (token, now, job_uid),
                 )
                 updated += 1
-            else:
-                missing += 1
         except Exception:
             errors += 1
 
     conn.commit()
 
     print(
-        f"Backfill complete: scanned={scanned} updated={updated} missing_file={missing} errors={errors}"
+        "Backfill complete: "
+        f"scanned={scanned} fetched={fetched} saved={saved} updated={updated} "
+        f"missing_metadata={missing_metadata} download_fail={download_fail} errors={errors}"
     )
     return 0
 

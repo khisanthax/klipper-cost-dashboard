@@ -241,7 +241,13 @@ def _pick_thumbnail(thumbnails: List[Dict[str, Any]], size_hint: str) -> Optiona
         return candidates[0] if candidates else None
 
 
-def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "") -> List[Dict[str, Any]]:
+def _metadata_thumbnails(
+    printer_name: str,
+    filename: str,
+    *,
+    size_hint: str = "",
+    base_url: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     printer_key = str(printer_name or "").strip()
     raw_filename = str(filename or "").strip()
     filename_norm = _normalize_moonraker_filename(raw_filename)
@@ -256,7 +262,7 @@ def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "
         if now - ts < _TTL_SECONDS:
             return thumbs
 
-    base = resolve_moonraker_base_url(printer_key)
+    base = str(base_url or "").strip() or resolve_moonraker_base_url(printer_key)
     if not base:
         _meta_cache[key] = (now, [])
         return []
@@ -287,7 +293,13 @@ def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "
     return thumbs
 
 
-def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) -> Optional[str]:
+def get_cached_thumbnail_path(
+    printer_name: str,
+    filename: str,
+    size_hint: str,
+    *,
+    base_url: Optional[str] = None,
+) -> Optional[str]:
     """
     Ensure a thumbnail image is present in the local cache and return its path.
     Returns None if no thumbnail is available or any fetch fails.
@@ -298,7 +310,7 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     if not printer_name or not filename:
         return None
 
-    base = resolve_moonraker_base_url(printer_name)
+    base = str(base_url or "").strip() or resolve_moonraker_base_url(printer_name)
     if not base:
         return None
 
@@ -331,7 +343,7 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     except Exception:
         pass
 
-    thumbs = _metadata_thumbnails(printer_name, filename, size_hint=size_hint)
+    thumbs = _metadata_thumbnails(printer_name, filename, size_hint=size_hint, base_url=base)
     picked = _pick_thumbnail(thumbs, size_hint=size_hint)
     if not picked:
         return None
