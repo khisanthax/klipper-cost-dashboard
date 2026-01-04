@@ -501,3 +501,27 @@ def compute_job_cost_fields(row: dict) -> dict:
             row[key] = val
 
     return row
+
+
+def set_job_thumbnail(job_uid: str, token: str) -> None:
+    """
+    Persist a thumbnail token for a job row in SQL (best-effort).
+
+    The token should be the basename only (no suffix), e.g. "<hash>".
+    """
+    job_uid = str(job_uid or "").strip()
+    token = str(token or "").strip()
+    if not job_uid or not token:
+        return
+
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        conn.execute(
+            "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
+            (token, now, job_uid),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.debug("history-sql: failed to set thumbnail for job_uid=%s (%s)", job_uid, exc)

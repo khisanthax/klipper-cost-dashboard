@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -36,6 +37,41 @@ _log = logging.getLogger(__name__)
 def _safe_dir(name: str) -> str:
     s = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(name or "").strip())
     return s or "unknown"
+
+
+def compute_thumbnail_token(printer_name: str, filename: str, *, base_url: Optional[str] = None) -> str:
+    """
+    Compute the canonical thumbnail token for a printer+filename.
+
+    The token is size-independent and is used for both small/card thumbnails:
+      <token>_small.png / <token>_card.png
+    """
+    printer_key = str(printer_name or "").strip()
+    raw_filename = str(filename or "").strip()
+    filename_norm = _normalize_moonraker_filename(raw_filename)
+    base = str(base_url or "").strip()
+    digest = hashlib.sha1(f"{base}|{printer_key}|{filename_norm}".encode("utf-8")).hexdigest()
+    return digest
+
+
+def compute_legacy_thumbnail_token(printer_name: str, filename: str, size_hint: str, *, base_url: Optional[str] = None) -> str:
+    """
+    Legacy token included size_hint in the hash; kept for backfill compatibility.
+    """
+    return _legacy_thumbnail_token(printer_name, filename, size_hint, base_url=base_url)
+
+
+def _legacy_thumbnail_token(printer_name: str, filename: str, size_hint: str, *, base_url: Optional[str] = None) -> str:
+    """
+    Legacy token included size_hint in the hash; keep for backfill compatibility.
+    """
+    printer_key = str(printer_name or "").strip()
+    raw_filename = str(filename or "").strip()
+    filename_norm = _normalize_moonraker_filename(raw_filename)
+    base = str(base_url or "").strip()
+    hint = str(size_hint or "").strip().lower() or "small"
+    digest = hashlib.sha1(f"{base}|{printer_key}|{filename_norm}|{hint}".encode("utf-8")).hexdigest()
+    return digest
 
 def _is_running_in_docker() -> bool:
     # Best-effort: this code runs both on bare-metal and inside containers.
@@ -267,7 +303,7 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
         return None
 
     filename_norm = _normalize_moonraker_filename(filename)
-    cache_key = hashlib.sha1(f"{base}|{printer_name}|{filename_norm}|{size_hint}".encode("utf-8")).hexdigest()
+    cache_key = compute_thumbnail_token(printer_name, filename_norm, base_url=base)
     printer_dir = os.path.join(_CACHE_ROOT, _safe_dir(printer_name))
     os.makedirs(printer_dir, exist_ok=True)
     cache_path = os.path.join(printer_dir, f"{cache_key}_{size_hint}.png")
@@ -276,6 +312,21 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
         if os.path.exists(cache_path):
             age = time.time() - os.path.getmtime(cache_path)
             if age < _TTL_SECONDS:
+                return cache_path
+    except Exception:
+        pass
+
+    # Check for legacy cache filename (size-specific token) before fetching.
+    legacy_key = _legacy_thumbnail_token(printer_name, filename_norm, size_hint, base_url=base)
+    legacy_path = os.path.join(printer_dir, f"{legacy_key}_{size_hint}.png")
+    try:
+        if os.path.exists(legacy_path):
+            age = time.time() - os.path.getmtime(legacy_path)
+            if age < _TTL_SECONDS:
+                try:
+                    shutil.copy2(legacy_path, cache_path)
+                except Exception:
+                    pass
                 return cache_path
     except Exception:
         pass
