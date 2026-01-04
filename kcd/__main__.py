@@ -12,6 +12,7 @@ from core import history_parity
 from core import reports_parity
 from core import export_csv
 from core import reports_cache
+from core import projects
 
 
 def _cmd_db_init(_args: argparse.Namespace) -> int:
@@ -49,6 +50,35 @@ def _cmd_db_backfill(args: argparse.Namespace) -> int:
             f"Rows seen: {report.get('rows_seen', 0)}, "
             f"Upserted: {report.get('rows_upserted', 0)}"
         )
+    return 0
+
+
+def _cmd_projects_import_json(args: argparse.Namespace) -> int:
+    apply = bool(args.apply or args.force)
+    report = projects.import_json_to_sql(apply=apply)
+    scanned = report.get("scanned", {})
+    imported = report.get("imported", {})
+    print(f"Projects JSON import (apply={apply})")
+    print(
+        "Scanned: "
+        f"projects={scanned.get('projects', 0)}, "
+        f"assignments={scanned.get('assignments', 0)}, "
+        f"manual_jobs={scanned.get('manual_jobs', 0)}, "
+        f"planned_items={scanned.get('planned_items', 0)}"
+    )
+    if apply:
+        print(
+            "Imported: "
+            f"projects={imported.get('projects', 0)}, "
+            f"assignments={imported.get('assignments', 0)}, "
+            f"manual_jobs={imported.get('manual_jobs', 0)}, "
+            f"planned_items={imported.get('planned_items', 0)}"
+        )
+    errors = report.get("errors") or []
+    if errors:
+        print("Errors:")
+        for err in errors:
+            print(f"  - {err}")
     return 0
 
 
@@ -112,6 +142,14 @@ def main(argv: list[str] | None = None) -> int:
     cache_clear_cmd.add_argument("--key", dest="key", default="")
     cache_clear_cmd.add_argument("--range", dest="range_key", default="")
     cache_clear_cmd.set_defaults(func=lambda args: _cmd_cache_clear(args))
+
+    projects_parser = sub.add_parser("projects", help="Projects utilities")
+    projects_sub = projects_parser.add_subparsers(dest="projects_command")
+
+    projects_import_cmd = projects_sub.add_parser("import-json", help="Import legacy projects JSON into SQL")
+    projects_import_cmd.add_argument("--apply", action="store_true", help="Write imported data into SQL")
+    projects_import_cmd.add_argument("--force", action="store_true", help="Alias for --apply")
+    projects_import_cmd.set_defaults(func=lambda args: _cmd_projects_import_json(args))
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
