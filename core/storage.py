@@ -12,7 +12,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from core.sql_only import require_file_reads_allowed
-from core import db as db_module
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -27,6 +26,7 @@ def _is_sql_only() -> bool:
 
 def _load_user_settings_sql(key: str):
     try:
+        from core import db as db_module
         conn = db_module.connect_db()
         db_module.apply_migrations(conn)
         row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", (key,)).fetchone()
@@ -40,6 +40,7 @@ def _load_user_settings_sql(key: str):
 
 def _save_user_settings_sql(key: str, value) -> None:
     try:
+        from core import db as db_module
         conn = db_module.connect_db()
         db_module.apply_migrations(conn)
         now = datetime.now(timezone.utc).isoformat()
