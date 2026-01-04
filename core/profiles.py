@@ -3,6 +3,7 @@ Filament Profiles Management
 """
 import os
 import uuid
+import sqlite3
 from core import db as db_module
 from core.config import PROFILES_FILE, DATA_DIR
 from core.storage import load_profiles_data, save_profiles_data
@@ -13,6 +14,8 @@ def get_all_profiles():
     Get all filament profiles.
     Returns a dict of profile_id -> profile_data.
     """
+    if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
+        return _load_sql_profiles()
     data = load_profiles_data(PROFILES_FILE)
     return data.get("profiles", {})
 
@@ -124,7 +127,7 @@ def get_printer_mapping(printer_name):
             if hasattr(row, "__getitem__"):
                 return row["hourly_rate_profile_id"] if "hourly_rate_profile_id" in row.keys() else row[0]
         except Exception:
-            return None
+        return None
     data = load_profiles_data(PROFILES_FILE)
     mappings = data.get("mappings", {})
     return mappings.get(printer_name)
@@ -161,3 +164,50 @@ def get_all_printer_mappings():
     """
     data = load_profiles_data(PROFILES_FILE)
     return data.get("mappings", {})
+
+
+def _load_sql_profiles():
+    """
+    Load filament profiles from SQLite in SQL-only mode.
+    Returns dict of profile_uid (or id) -> profile_data.
+    """
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            """
+            SELECT id, profile_uid, name, material, filament_mode, filament_rate, grams_per_meter
+              FROM filament_profiles
+            """
+        ).fetchall()
+    except Exception:
+        return {}
+
+    profiles = {}
+    for r in rows:
+        if isinstance(r, sqlite3.Row):
+            pid = r["profile_uid"] or str(r["id"])
+            rec = {
+                "id": r["profile_uid"] or str(r["id"]),
+                "name": r["name"],
+                "material": r["material"],
+                "filament_mode": r["filament_mode"],
+                "filament_rate": r["filament_rate"],
+                "grams_per_meter": r["grams_per_meter"],
+            }
+        elif isinstance(r, (tuple, list)):
+            pid = r[1] or str(r[0])
+            rec = {
+                "id": r[1] or str(r[0]),
+                "name": r[2],
+                "material": r[3],
+                "filament_mode": r[4],
+                "filament_rate": r[5],
+                "grams_per_meter": r[6],
+            }
+        else:
+            pid = str(getattr(r, "profile_uid", "") or getattr(r, "id", "")).strip()
+            rec = {}
+        if pid:
+            profiles[str(pid)] = rec
+    return profiles
