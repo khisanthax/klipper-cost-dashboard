@@ -1,7 +1,9 @@
 """
 Filament Profiles Management
 """
+import os
 import uuid
+from core import db as db_module
 from core.config import PROFILES_FILE, DATA_DIR
 from core.storage import load_profiles_data, save_profiles_data
 
@@ -112,6 +114,17 @@ def get_printer_mapping(printer_name):
     Get the active profile ID for a printer.
     Returns profile_id or None.
     """
+    if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
+        try:
+            conn = db_module.connect_db()
+            db_module.apply_migrations(conn)
+            row = conn.execute("SELECT hourly_rate_profile_id FROM printers WHERE name = ?", (printer_name,)).fetchone()
+            if not row:
+                return None
+            if hasattr(row, "__getitem__"):
+                return row["hourly_rate_profile_id"] if "hourly_rate_profile_id" in row.keys() else row[0]
+        except Exception:
+            return None
     data = load_profiles_data(PROFILES_FILE)
     mappings = data.get("mappings", {})
     return mappings.get(printer_name)
