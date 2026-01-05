@@ -2678,6 +2678,13 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action), error=f"Moonraker test failed for {printer}: {detail} ({base_url})"))
 
         if action == "import_moonraker_history":
+            if _is_sql_only():
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        error="Moonraker history import is disabled in SQL-only mode. Use CSV/dual mode for imports.",
+                    )
+                )
             printer = (request.form.get("printer") or "").strip()
             if not printer:
                 return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
@@ -2983,6 +2990,7 @@ def _settings_view(tab: str):
         page_title="Print Cost Settings",
         settings_tab=tab,
         settings_subtitle=subtitle_by_tab[tab],
+        sql_only=_is_sql_only(),
         message=message,
         error=error,
         printers=printers,
