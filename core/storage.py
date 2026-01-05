@@ -74,6 +74,11 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     """
     Ensure runtime files exist, bootstrapping from examples when missing.
     """
+    if _is_sql_only():
+        # SQL-only mode must not auto-create runtime files.
+        require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_runtime_files")
+        require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.ensure_runtime_files")
+        return
     from core.config import (
         DATA_DIR,
         SETTINGS_EXAMPLE_FILE,
@@ -103,6 +108,7 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
     if _is_sql_only():
+        require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
         return
     require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
     if not os.path.exists(settings_file):
@@ -147,6 +153,7 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if _is_sql_only():
+        require_file_reads_allowed("display.json", caller_hint="core.storage.ensure_display_exists")
         return
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
@@ -485,6 +492,9 @@ def ensure_api_key(secret_file=None, data_dir=None):
 
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
+    if _is_sql_only():
+        require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.append_row")
+        return
     try:
         from core.config import CSV_FILE, SETTINGS_FILE
         if os.path.abspath(csv_file) == os.path.abspath(CSV_FILE):
@@ -611,6 +621,9 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
       - Atomic replace
     Returns True if a migration occurred, else False.
     """
+    if _is_sql_only():
+        require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.ensure_csv_schema")
+        return False
     if not os.path.exists(csv_path):
         return False
 

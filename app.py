@@ -60,6 +60,9 @@ from core.backup import load_backup_settings, save_backup_settings, create_backu
 
 app = Flask(__name__)
 
+if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
+    app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
+
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
 
