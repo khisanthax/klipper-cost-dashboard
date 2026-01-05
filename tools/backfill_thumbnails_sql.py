@@ -243,6 +243,11 @@ def main() -> int:
         f"fallback_searches={fallback_searches} fallback_hits={fallback_hits} "
         f"errors={errors}"
     )
+    if missing_metadata:
+        print(
+            "Note: missing_metadata usually means the gcode file is no longer present "
+            "in the printer's Moonraker gcodes storage, so thumbnails cannot be recovered."
+        )
     return 0
 
 

@@ -1123,6 +1123,7 @@ def index():
             if not pname:
                 row["_thumbs_enabled"] = False
                 row["_thumb_small"] = None
+                row["_thumb_unavailable"] = False
                 continue
             printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
             thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
@@ -1130,15 +1131,19 @@ def index():
             token = str(row.get("thumbnail") or "").strip()
             if thumbs_enabled and token:
                 row["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+                row["_thumb_unavailable"] = False
             elif thumbs_enabled and fname:
-                row["_thumb_small"] = get_job_thumbnail_url(
+                thumb_url = get_job_thumbnail_url(
                     pname,
                     fname,
                     size_hint="small",
                     job_uid=str(row.get("job_uid") or "").strip() or None,
                 )
+                row["_thumb_small"] = thumb_url
+                row["_thumb_unavailable"] = bool(not thumb_url)
             else:
                 row["_thumb_small"] = None
+                row["_thumb_unavailable"] = False
 
     return render_template(
         "index.html",
@@ -2363,6 +2368,7 @@ def projects_page():
         if not pname:
             j["_thumbs_enabled"] = False
             j["_thumb_small"] = None
+            j["_thumb_unavailable"] = False
             continue
         printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
         thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
@@ -2370,15 +2376,19 @@ def projects_page():
         token = str(j.get("thumbnail") or "").strip()
         if thumbs_enabled and token:
             j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+            j["_thumb_unavailable"] = False
         elif thumbs_enabled and fname:
-            j["_thumb_small"] = get_job_thumbnail_url(
+            thumb_url = get_job_thumbnail_url(
                 pname,
                 fname,
                 size_hint="small",
                 job_uid=str(j.get("job_uid") or "").strip() or None,
             )
+            j["_thumb_small"] = thumb_url
+            j["_thumb_unavailable"] = bool(not thumb_url)
         else:
             j["_thumb_small"] = None
+            j["_thumb_unavailable"] = False
 
     for p in project_rows:
         for j in p.get("jobs", []) or []:
@@ -2387,6 +2397,7 @@ def projects_page():
             if not pname:
                 j["_thumbs_enabled"] = False
                 j["_thumb_small"] = None
+                j["_thumb_unavailable"] = False
                 continue
             printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
             thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
@@ -2394,15 +2405,19 @@ def projects_page():
             token = str(j.get("thumbnail") or "").strip()
             if thumbs_enabled and token:
                 j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+                j["_thumb_unavailable"] = False
             elif thumbs_enabled and fname:
-                j["_thumb_small"] = get_job_thumbnail_url(
+                thumb_url = get_job_thumbnail_url(
                     pname,
                     fname,
                     size_hint="small",
                     job_uid=str(j.get("job_uid") or "").strip() or None,
                 )
+                j["_thumb_small"] = thumb_url
+                j["_thumb_unavailable"] = bool(not thumb_url)
             else:
                 j["_thumb_small"] = None
+                j["_thumb_unavailable"] = False
 
     # Server-backed per-table column visibility (Settings → Other).
     projects_unassigned_visible_cols = get_visible_columns_for_table(

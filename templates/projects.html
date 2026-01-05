@@ -250,6 +250,7 @@
                                       {% set thumb_url = j._thumb_small %}
                                       {% set size = "small" %}
                                       {% set alt = j.filename %}
+                                      {% set thumb_unavailable = j._thumb_unavailable %}
                                       {% include "partials/_thumbnail.html" %}
                                   {% endif %}
                               </td>
@@ -647,6 +648,7 @@
                                       {% set thumb_url = j._thumb_small %}
                                       {% set size = "small" %}
                                       {% set alt = j.filename %}
+                                      {% set thumb_unavailable = j._thumb_unavailable %}
                                       {% include "partials/_thumbnail.html" %}
                                   {% endif %}
                               </td>
