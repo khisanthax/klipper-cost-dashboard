@@ -926,12 +926,21 @@ def index():
         if action == "complete_rows":
             selected = request.form.getlist("delete_rows")
             if selected:
-                if all(str(v).strip().isdigit() for v in selected):
-                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
-                    rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+                if _is_sql_only():
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rows_for_map, _ = _load_history_rows_for_recalc()
+                        job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    _mark_completed_jobs_sql(job_uids)
                 else:
-                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                        rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
 
         if action == "recalc_costs":
@@ -952,24 +961,39 @@ def index():
         if action in ("delete_rows", "delete"):
             selected = request.form.getlist("delete_rows")
             if selected:
-                if all(str(v).strip().isdigit() for v in selected):
-                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
-                    rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                if _is_sql_only():
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rows_for_map, _ = _load_history_rows_for_recalc()
+                        job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    deleted = _delete_jobs_sql(job_uids)
                     system_events.emit_event(
                         "deleted",
                         "Deleted history jobs",
-                        f"Deleted {len(indices)} job(s) from Print History.",
-                        meta={"action": "delete_history_rows", "count": len(indices)},
+                        f"Deleted {deleted} job(s) from Print History (SQL-only).",
+                        meta={"action": "delete_history_rows", "count": deleted},
                     )
                 else:
-                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
-                    system_events.emit_event(
-                        "deleted",
-                        "Deleted history jobs",
-                        f"Deleted {len(job_uids)} job(s) from Print History.",
-                        meta={"action": "delete_history_rows", "count": len(job_uids)},
-                    )
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                        system_events.emit_event(
+                            "deleted",
+                            "Deleted history jobs",
+                            f"Deleted {len(indices)} job(s) from Print History.",
+                            meta={"action": "delete_history_rows", "count": len(indices)},
+                        )
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                        rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
+                        system_events.emit_event(
+                            "deleted",
+                            "Deleted history jobs",
+                            f"Deleted {len(job_uids)} job(s) from Print History.",
+                            meta={"action": "delete_history_rows", "count": len(job_uids)},
+                        )
             return redirect(url_for("index"))
 
     error = None
@@ -1382,6 +1406,46 @@ def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
     if updated:
         app.logger.info("SQL recalc updated %s job(s).", updated)
     return updated
+
+
+def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
+    if not job_uids:
+        return 0
+    placeholders = ",".join(["?"] * len(job_uids))
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            f"UPDATE jobs SET status = 'completed', failure_reason = NULL, updated_at = ? "
+            f"WHERE job_uid IN ({placeholders}) AND status = 'printing'",
+            [now_iso, *job_uids],
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    except Exception:
+        return 0
+
+
+def _delete_jobs_sql(job_uids: list[str]) -> int:
+    if not job_uids:
+        return 0
+    placeholders = ",".join(["?"] * len(job_uids))
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        conn.execute(
+            f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
+            job_uids,
+        )
+        cur = conn.execute(
+            f"DELETE FROM jobs WHERE job_uid IN ({placeholders})",
+            job_uids,
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    except Exception:
+        return 0
 
 
 @app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
