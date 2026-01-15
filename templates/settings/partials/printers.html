@@ -82,6 +82,7 @@
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
                     <button type="submit" class="btn btn-outline-secondary" name="action" value="test_moonraker">Test Moonraker</button>
+                    <a class="btn btn-outline-info" href="{{ url_for('printer_diagnostics_page') }}">Diagnostics</a>
 
                     {% set _ps = printer_settings.get(p, {}) %}
                     <div class="form-check form-switch ms-2">

@@ -93,6 +93,7 @@ docker image ls | grep -E 'klipper-cost-dashboard|kcd'
 ```
 
 If long UUID fields (e.g., Profile ID / Job UID) make History rows tall, update to the latest version; the UI now truncates those columns with ellipsis and shows full values on hover.
+If duration/thumbnail is missing for a printer, open **Settings → Printers → Diagnostics** and verify Moonraker connectivity (401/URL/HTML responses will show up there).
 
 ## Experimental SQL backend (Phases 0–3)
 

@@ -48,7 +48,11 @@ from core import storage_backend
 from core import history_repo
 from core import reports_repo
 from core import db as db_module
-from core.moonraker import test_moonraker_url, find_history_job_for_completion
+from core.moonraker import (
+    probe_moonraker_server_info,
+    test_moonraker_url,
+    find_history_job_for_completion,
+)
 from core.import_moonraker import import_moonraker_history_to_csv
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
@@ -391,6 +395,8 @@ def log_print():
 
     # For completed jobs, attempt to finalize duration/filament using Moonraker history.
     history_job_id = None
+    history_unavailable = False
+    history_detail = ""
     if status == "completed":
         base_url = thumbs.resolve_moonraker_base_url(printer_name)
         app.logger.info("job-finalize: printer=%s moonraker_url=%s", printer_name, base_url or "none")
@@ -408,6 +414,9 @@ def log_print():
                 detail,
                 bool(job),
             )
+            if not ok:
+                history_unavailable = True
+                history_detail = detail
             if ok and job:
                 def _as_float(v):
                     try:
@@ -427,10 +436,22 @@ def log_print():
                 total_duration = _as_float(_get_first(job, ("total_duration", "elapsed", "duration", "total_time")))
                 filament_used = _as_float(_get_first(job, ("filament_used", "filament", "filament_mm")))
 
+                duration_candidate = None
                 if print_time > 0:
-                    duration_seconds = print_time
+                    duration_candidate = print_time
                 elif total_duration > 0:
-                    duration_seconds = total_duration
+                    duration_candidate = total_duration
+                elif start_ts > 0 and end_ts > 0 and end_ts >= start_ts:
+                    duration_candidate = end_ts - start_ts
+
+                if duration_candidate is not None:
+                    duration_seconds = duration_candidate
+                else:
+                    duration_seconds = None
+                    app.logger.warning(
+                        "job-finalize: %s history missing duration fields; leaving duration unknown",
+                        printer_name,
+                    )
 
                 if filament_used > 0:
                     filament_mm = filament_used
@@ -443,23 +464,43 @@ def log_print():
                 row_started_at = start_ts if start_ts > 0 else None
                 row_ended_at = end_ts if end_ts > 0 else None
             else:
+                if ok and not job:
+                    history_unavailable = True
+                    history_detail = detail or "No matching history entry found"
                 row_started_at = None
                 row_ended_at = None
         else:
+            history_unavailable = True
+            history_detail = "Missing Moonraker URL"
             row_started_at = None
             row_ended_at = None
     else:
         row_started_at = None
         row_ended_at = None
 
-    cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
+    if history_unavailable:
+        app.logger.warning(
+            "%s: moonraker history unavailable (%s). duration/thumbnail not updated.",
+            printer_name,
+            history_detail or "unknown",
+        )
+        try:
+            if duration_seconds is None or float(duration_seconds) <= 0:
+                duration_seconds = None
+        except Exception:
+            duration_seconds = None
 
+    cost_data = {}
+    if duration_seconds is not None:
+        cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
+
+    row_duration = duration_seconds if duration_seconds is not None else ""
     row = {
         "timestamp": ts,
         "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
-        "duration_seconds": duration_seconds,
+        "duration_seconds": row_duration,
         "paused_seconds_total": paused_seconds_total,
         "pause_count": pause_count,
         "runout_count": runout_count,
@@ -3028,6 +3069,42 @@ def settings_profiles_page():
 def settings_other_page():
     return _settings_view(tab="other")
 
+
+@app.get("/printer-diagnostics")
+def printer_diagnostics_page():
+    printers = sorted(get_known_printers())
+    results = []
+    for pname in printers:
+        base_url = thumbs.resolve_moonraker_base_url(pname)
+        if base_url:
+            probe = probe_moonraker_server_info(base_url)
+        else:
+            probe = {
+                "ok": False,
+                "status_code": None,
+                "content_type": "",
+                "body_preview": "",
+                "error": "Missing Moonraker URL",
+                "payload": None,
+            }
+        results.append(
+            {
+                "printer": pname,
+                "moonraker_url": base_url or "",
+                "ok": bool(probe.get("ok")),
+                "status_code": probe.get("status_code"),
+                "content_type": probe.get("content_type") or "",
+                "error": probe.get("error") or "",
+                "body_preview": probe.get("body_preview") or "",
+                "api_key_configured": bool(API_KEY),
+            }
+        )
+
+    return render_template(
+        "printer_diagnostics.html",
+        page_title="Printer Diagnostics",
+        results=results,
+    )
 
 @app.route("/settings/pause", methods=["GET", "POST"], endpoint="settings_pause_page")
 def settings_pause_page():
