@@ -24,6 +24,13 @@ from core.config import DATA_DIR, SETTINGS_FILE
 from core.storage import load_settings
 
 
+def _is_sql_only() -> bool:
+    try:
+        return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    except Exception:
+        return False
+
+
 _CACHE_ROOT = os.path.join(DATA_DIR, "thumb_cache")
 _TTL_SECONDS = 24 * 60 * 60
 _HTTP_TIMEOUT_SECONDS = 2.5
@@ -123,6 +130,18 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     printer_name = str(printer_name or "").strip()
     if not printer_name:
         return None
+
+    if _is_sql_only():
+        try:
+            from core import db as db_module
+
+            with db_module.connect_db() as conn:
+                db_module.apply_migrations(conn)
+                moonraker_url = db_module.get_printer_moonraker_url(conn, printer_name)
+                if moonraker_url:
+                    return moonraker_url.rstrip("/")
+        except Exception:
+            pass
 
     settings = load_settings(SETTINGS_FILE)
     moonraker_url = None

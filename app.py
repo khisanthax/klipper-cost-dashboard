@@ -2739,7 +2739,7 @@ def _settings_view(tab: str):
                         _settings_endpoint_for_action(action),
                         error=(
                             f"No Moonraker URL configured for {printer}. "
-                            "Set settings.json moonraker_url for this printer, then retry."
+                              "Set a Moonraker URL for this printer, then retry."
                         ),
                     )
                 )
@@ -2748,6 +2748,59 @@ def _settings_view(tab: str):
             if ok:
                 return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker OK for {printer}: {base_url}"))
             return redirect(url_for(_settings_endpoint_for_action(action), error=f"Moonraker test failed for {printer}: {detail} ({base_url})"))
+
+        if action == "save_moonraker_url":
+            printer = (request.form.get("printer") or "").strip()
+            url_raw = (request.form.get("moonraker_url") or "").strip()
+            if not printer:
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+
+            url = url_raw.strip()
+            if url and not (url.startswith("http://") or url.startswith("https://")):
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Moonraker URL must start with http:// or https://"))
+
+            try:
+                if _is_sql_only():
+                    with db_module.connect_db() as conn:
+                        db_module.apply_migrations(conn)
+                        db_module.upsert_printer(conn, printer, url or None)
+                        conn.commit()
+                else:
+                    settings = load_settings(SETTINGS_FILE)
+                    if printer not in settings:
+                        settings[printer] = {}
+                    settings[printer]["moonraker_url"] = url or ""
+                    save_settings(SETTINGS_FILE, DATA_DIR, settings)
+            except Exception as exc:
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"Failed to save Moonraker URL: {exc}"))
+
+            return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker URL saved for {printer}."))
+
+        if action == "test_moonraker_url":
+            printer = (request.form.get("printer") or "").strip()
+            url_raw = (request.form.get("moonraker_url") or "").strip()
+            if not printer:
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+
+            url = url_raw.strip()
+            if not url:
+                url = thumbs.resolve_moonraker_base_url(printer) or ""
+            if not url:
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"No Moonraker URL configured for {printer}."))
+            if url and not (url.startswith("http://") or url.startswith("https://")):
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Moonraker URL must start with http:// or https://"))
+
+            probe = probe_moonraker_server_info(url)
+            if probe.get("ok"):
+                return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker OK for {printer}: {url}"))
+            detail = probe.get("error") or "Probe failed"
+            code = probe.get("status_code")
+            return redirect(
+                url_for(
+                    _settings_endpoint_for_action(action),
+                    error=f"Moonraker test failed for {printer}: {detail} ({code}) {url}",
+                )
+            )
 
         if action == "import_moonraker_history":
             if _is_sql_only():
@@ -2768,7 +2821,7 @@ def _settings_view(tab: str):
                         _settings_endpoint_for_action(action),
                         error=(
                             f"No Moonraker URL configured for {printer}. "
-                            "Set settings.json moonraker_url for this printer, then retry."
+                              "Set a Moonraker URL for this printer, then retry."
                         ),
                     )
                 )
@@ -3017,6 +3070,22 @@ def _settings_view(tab: str):
     for p in printers:
         printer_configs[p] = get_pricing_for_printer_raw(p)
 
+    moonraker_urls = {}
+    if _is_sql_only():
+        try:
+            with db_module.connect_db() as conn:
+                db_module.apply_migrations(conn)
+                for p in printers:
+                    moonraker_urls[p] = db_module.get_printer_moonraker_url(conn, p) or ""
+        except Exception:
+            for p in printers:
+                moonraker_urls[p] = ""
+    else:
+        if not isinstance(settings, dict):
+            settings = {}
+        for p in printers:
+            moonraker_urls[p] = str(settings.get(p, {}).get("moonraker_url") or "").strip()
+
     active_rate_profiles = {}
     for p in printers:
         active_rate_profiles[p] = settings.get(p, {}).get("active_rate_profile_id", "")
@@ -3069,6 +3138,7 @@ def _settings_view(tab: str):
         discovered_printers=discovered_printers,
         configs=printer_configs,
         printer_settings=settings,
+        moonraker_urls=moonraker_urls,
         headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,

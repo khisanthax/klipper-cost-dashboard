@@ -190,6 +190,18 @@ def get_printer_id(conn: sqlite3.Connection, name: str) -> Optional[int]:
     return int(row["id"]) if row else None
 
 
+def get_printer_moonraker_url(conn: sqlite3.Connection, name: str) -> Optional[str]:
+    row = conn.execute("SELECT moonraker_url FROM printers WHERE name = ?", (name,)).fetchone()
+    if not row:
+        return None
+    if hasattr(row, "__getitem__"):
+        return str(row["moonraker_url"] or "").strip() or None
+    try:
+        return str(row[0] or "").strip() or None
+    except Exception:
+        return None
+
+
 def job_exists(conn: sqlite3.Connection, job_uid: str) -> bool:
     row = conn.execute("SELECT 1 FROM jobs WHERE job_uid = ? LIMIT 1", (job_uid,)).fetchone()
     return bool(row)

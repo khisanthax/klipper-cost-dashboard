@@ -81,7 +81,6 @@
             <div class="d-flex justify-content-between align-items-center mt-3">
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
-                    <button type="submit" class="btn btn-outline-secondary" name="action" value="test_moonraker">Test Moonraker</button>
                     <a class="btn btn-outline-info" href="{{ url_for('printer_diagnostics_page') }}">Diagnostics</a>
 
                     {% set _ps = printer_settings.get(p, {}) %}
@@ -113,6 +112,24 @@
                         onclick="return confirm('Delete printer {{ p }}?')">
                     Delete printer
                 </button>
+            </div>
+
+            <div class="border-top pt-3 mt-3">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label">Moonraker URL</label>
+                        <input type="text"
+                               name="moonraker_url"
+                               value="{{ moonraker_urls.get(p, '') }}"
+                               placeholder="http://192.168.2.123:7125"
+                               class="form-control">
+                        <div class="text-muted small mt-1">Used for thumbnails and duration finalization.</div>
+                    </div>
+                    <div class="col-md-4 d-flex flex-wrap gap-2">
+                        <button type="submit" class="btn btn-outline-primary" name="action" value="save_moonraker_url">Save URL</button>
+                        <button type="submit" class="btn btn-outline-secondary" name="action" value="test_moonraker_url">Test Moonraker</button>
+                    </div>
+                </div>
             </div>
 
             <div class="border-top pt-3 mt-3">
