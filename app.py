@@ -13,6 +13,7 @@ import time
 import re
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+import flask
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -63,6 +64,7 @@ from core.printers import (
 from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
 
 app = Flask(__name__)
+app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
 
 if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
     app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
@@ -118,7 +120,7 @@ def get_job_thumbnail_url(
     return url
 
 
-@app.get("/thumb/<printer_name>/<cache_file>", endpoint="thumb_cache")
+@app.route("/thumb/<printer_name>/<cache_file>", methods=["GET"], endpoint="thumb_cache")
 def thumb_cache(printer_name: str, cache_file: str):
     # Path safety:
     # - serve only cached files for known printers (slugged)
@@ -161,7 +163,7 @@ def thumb_cache(printer_name: str, cache_file: str):
     return resp
 
 
-@app.get("/system-events")
+@app.route("/system-events", methods=["GET"])
 def system_events_page():
     filter_name = (request.args.get("filter") or "all").strip().lower()
     if filter_name not in {"all", "failures", "deleted"}:
@@ -3070,7 +3072,7 @@ def settings_other_page():
     return _settings_view(tab="other")
 
 
-@app.get("/printer-diagnostics")
+@app.route("/printer-diagnostics", methods=["GET"])
 def printer_diagnostics_page():
     printers = sorted(get_known_printers())
     results = []
