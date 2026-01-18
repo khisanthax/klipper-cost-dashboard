@@ -607,7 +607,14 @@
                                 </span>
                                  {% elif h == 'total_cost' or h == 'time_cost' or h == 'material_cost' %}
                                  <span class="fw-semibold">${{ "%.2f"|format(row.get(h, 0)|float) }}</span>
-                                 {% elif h == 'duration_hours' or h == 'filament_meters' %}
+                                 {% elif h == 'duration_hours' %}
+                                 {% set val = row.get(h) %}
+                                 {% if val is none or val == '' %}
+                                 <span class="text-muted">?</span>
+                                 {% else %}
+                                 <span class="fw-semibold">{{ "%.2f"|format(val|float) }}</span>
+                                 {% endif %}
+                                 {% elif h == 'filament_meters' %}
                                  <span class="fw-semibold">{{ "%.2f"|format(row.get(h, 0)|float) }}</span>
                                  {% elif h in ['job_uid', 'filament_profile_id', 'import_id'] %}
                                  {% set full_val = row.get(h, '') %}

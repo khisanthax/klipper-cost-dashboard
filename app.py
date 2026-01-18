@@ -326,6 +326,38 @@ def log_print():
     printer_name_raw = str(payload["printer"])
     filename_raw = str(payload["filename"])
 
+    def _choose_duration_seconds(payload_dur, live_dur, mr_print, mr_total, mr_calc):
+        def _pos(v):
+            try:
+                v = float(v)
+            except Exception:
+                return 0.0
+            return v if v > 0 else 0.0
+
+        payload_dur = _pos(payload_dur)
+        live_dur = _pos(live_dur)
+        mr_print = _pos(mr_print)
+        mr_total = _pos(mr_total)
+        mr_calc = _pos(mr_calc)
+
+        if payload_dur > 0:
+            return payload_dur
+        if mr_print > 0:
+            return mr_print
+        if mr_total > 0:
+            return mr_total
+        if mr_calc > 0:
+            return mr_calc
+        if live_dur > 0:
+            return live_dur
+        return None
+
+    payload_duration_seconds = duration_seconds
+    live_duration_seconds = None
+    mr_print_duration = 0.0
+    mr_total_duration = 0.0
+    mr_calc_duration = 0.0
+
     canonical = get_canonical_printer_names()
     norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
     if not norm.valid_printer:
@@ -391,9 +423,9 @@ def log_print():
         # can reliably exclude paused time later.
         try:
             elapsed_excluding_pauses = float(live_metadata.get("elapsed_seconds") or 0.0)
-            duration_seconds = max(0.0, elapsed_excluding_pauses + float(paused_seconds_total))
+            live_duration_seconds = max(0.0, elapsed_excluding_pauses + float(paused_seconds_total))
         except Exception:
-            pass
+            live_duration_seconds = None
 
     # For completed jobs, attempt to finalize duration/filament using Moonraker history.
     history_job_id = None
@@ -438,22 +470,12 @@ def log_print():
                 total_duration = _as_float(_get_first(job, ("total_duration", "elapsed", "duration", "total_time")))
                 filament_used = _as_float(_get_first(job, ("filament_used", "filament", "filament_mm")))
 
-                duration_candidate = None
                 if print_time > 0:
-                    duration_candidate = print_time
-                elif total_duration > 0:
-                    duration_candidate = total_duration
-                elif start_ts > 0 and end_ts > 0 and end_ts >= start_ts:
-                    duration_candidate = end_ts - start_ts
-
-                if duration_candidate is not None:
-                    duration_seconds = duration_candidate
-                else:
-                    duration_seconds = None
-                    app.logger.warning(
-                        "job-finalize: %s history missing duration fields; leaving duration unknown",
-                        printer_name,
-                    )
+                    mr_print_duration = print_time
+                if total_duration > 0:
+                    mr_total_duration = total_duration
+                if start_ts > 0 and end_ts > 0 and end_ts >= start_ts:
+                    mr_calc_duration = end_ts - start_ts
 
                 if filament_used > 0:
                     filament_mm = filament_used
@@ -486,11 +508,26 @@ def log_print():
             printer_name,
             history_detail or "unknown",
         )
-        try:
-            if duration_seconds is None or float(duration_seconds) <= 0:
-                duration_seconds = None
-        except Exception:
-            duration_seconds = None
+
+    duration_seconds = _choose_duration_seconds(
+        payload_duration_seconds,
+        live_duration_seconds,
+        mr_print_duration,
+        mr_total_duration,
+        mr_calc_duration,
+    )
+
+    app.logger.info(
+        "job-finalize: printer=%s file=%s payload_dur=%s live_dur=%s mr_print=%s mr_total=%s mr_calc=%s chosen=%s",
+        printer_name,
+        filename,
+        payload_duration_seconds,
+        live_duration_seconds,
+        mr_print_duration,
+        mr_total_duration,
+        mr_calc_duration,
+        duration_seconds,
+    )
 
     cost_data = {}
     if duration_seconds is not None:
