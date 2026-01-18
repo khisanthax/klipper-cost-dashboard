@@ -545,25 +545,54 @@ def health():
     """
     import os
     from datetime import datetime
-    
-    status = {
-        "status": "healthy",
-        "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
-        "api_key_configured": bool(API_KEY),
-        "csv_exists": os.path.exists(CSV_FILE),
-    }
-    
-    # Count rows if CSV exists
-    if os.path.exists(CSV_FILE):
-        rows, _ = load_rows_raw(CSV_FILE)
-        status["total_prints"] = len(rows)
-    else:
-        status["total_prints"] = 0
-    
-    # List known printers
-    status["known_printers"] = get_known_printers()
-    
-    return jsonify(status), 200
+    from core.sql_only import SqlOnlyViolationError
+
+    try:
+        if _is_sql_only():
+            db_ok = False
+            printers_count = 0
+            try:
+                with db_module.connect_db() as conn:
+                    db_module.apply_migrations(conn)
+                    row = conn.execute("SELECT COUNT(*) AS c FROM printers").fetchone()
+                    if row is not None:
+                        printers_count = row["c"] if hasattr(row, "__getitem__") else int(row[0])
+                    db_ok = True
+            except Exception as exc:
+                return jsonify({"status": "error", "backend": "sql", "error": str(exc)}), 500
+
+            return (
+                jsonify(
+                    {
+                        "status": "ok",
+                        "backend": "sql",
+                        "db_ok": db_ok,
+                        "printers_count": printers_count,
+                        "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
+                    }
+                ),
+                200,
+            )
+
+        status = {
+            "status": "healthy",
+            "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
+            "api_key_configured": bool(API_KEY),
+            "csv_exists": os.path.exists(CSV_FILE),
+        }
+
+        if os.path.exists(CSV_FILE):
+            rows, _ = load_rows_raw(CSV_FILE)
+            status["total_prints"] = len(rows)
+        else:
+            status["total_prints"] = 0
+
+        status["known_printers"] = get_known_printers()
+        return jsonify(status), 200
+    except SqlOnlyViolationError as exc:
+        return jsonify({"status": "error", "backend": "sql", "error": str(exc)}), 503
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
 
 
 # ============================================================================
