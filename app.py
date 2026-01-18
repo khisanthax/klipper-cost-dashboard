@@ -2792,13 +2792,20 @@ def _settings_view(tab: str):
 
             probe = probe_moonraker_server_info(url)
             if probe.get("ok"):
-                return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker OK for {printer}: {url}"))
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        msg=f"Moonraker OK for {printer}: {url}",
+                        **{f"moonraker_url_{printer}": url},
+                    )
+                )
             detail = probe.get("error") or "Probe failed"
             code = probe.get("status_code")
             return redirect(
                 url_for(
                     _settings_endpoint_for_action(action),
                     error=f"Moonraker test failed for {printer}: {detail} ({code}) {url}",
+                    **{f"moonraker_url_{printer}": url},
                 )
             )
 
@@ -3085,6 +3092,15 @@ def _settings_view(tab: str):
             settings = {}
         for p in printers:
             moonraker_urls[p] = str(settings.get(p, {}).get("moonraker_url") or "").strip()
+
+    # Preserve any in-form Moonraker URL when returning from a test action.
+    try:
+        for p in printers:
+            arg_key = f"moonraker_url_{p}"
+            if arg_key in request.args:
+                moonraker_urls[p] = (request.args.get(arg_key) or "").strip()
+    except Exception:
+        pass
 
     active_rate_profiles = {}
     for p in printers:
