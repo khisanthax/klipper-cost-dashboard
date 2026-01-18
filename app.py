@@ -3115,19 +3115,19 @@ def _settings_view(tab: str):
         printer_configs[p] = get_pricing_for_printer_raw(p)
 
     moonraker_urls = {}
-    if _is_sql_only():
-        try:
-            with db_module.connect_db() as conn:
-                db_module.apply_migrations(conn)
-                for p in printers:
-                    moonraker_urls[p] = db_module.get_printer_moonraker_url(conn, p) or ""
-        except Exception:
+    try:
+        with db_module.connect_db() as conn:
+            db_module.apply_migrations(conn)
             for p in printers:
-                moonraker_urls[p] = ""
-    else:
-        if not isinstance(settings, dict):
-            settings = {}
+                moonraker_urls[p] = db_module.get_printer_moonraker_url(conn, p) or ""
+    except Exception:
         for p in printers:
+            moonraker_urls[p] = ""
+
+    if not isinstance(settings, dict):
+        settings = {}
+    for p in printers:
+        if not moonraker_urls.get(p):
             moonraker_urls[p] = str(settings.get(p, {}).get("moonraker_url") or "").strip()
 
     # Preserve any in-form Moonraker URL when returning from a test action.
