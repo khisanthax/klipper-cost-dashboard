@@ -2800,7 +2800,7 @@ def _settings_view(tab: str):
                 if _is_sql_only():
                     with db_module.connect_db() as conn:
                         db_module.apply_migrations(conn)
-                        db_module.upsert_printer(conn, printer, url or None)
+                        db_module.upsert_printer(conn, printer, url)
                         conn.commit()
                 else:
                     settings = load_settings(SETTINGS_FILE)

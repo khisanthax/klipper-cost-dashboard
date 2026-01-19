@@ -160,27 +160,45 @@ def upsert_printer(
     if not name:
         raise ValueError("printer name is required")
     now = _utc_now_iso()
+    url_provided = moonraker_url is not None
+    url_value = None
+    if url_provided:
+        url_value = str(moonraker_url).strip()
+        if url_value == "":
+            url_value = None
 
     if external_id:
         row = conn.execute("SELECT id FROM printers WHERE external_id = ?", (external_id,)).fetchone()
         if row:
-            conn.execute(
-                "UPDATE printers SET name = ?, moonraker_url = ?, updated_at = ? WHERE external_id = ?",
-                (name, moonraker_url, now, external_id),
-            )
+            if url_provided:
+                conn.execute(
+                    "UPDATE printers SET name = ?, moonraker_url = ?, updated_at = ? WHERE external_id = ?",
+                    (name, url_value, now, external_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE printers SET name = ?, updated_at = ? WHERE external_id = ?",
+                    (name, now, external_id),
+                )
             return int(row["id"])
 
     row = conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()
     if row:
-        conn.execute(
-            "UPDATE printers SET moonraker_url = ?, updated_at = ? WHERE name = ?",
-            (moonraker_url, now, name),
-        )
+        if url_provided:
+            conn.execute(
+                "UPDATE printers SET moonraker_url = ?, updated_at = ? WHERE name = ?",
+                (url_value, now, name),
+            )
+        else:
+            conn.execute(
+                "UPDATE printers SET updated_at = ? WHERE name = ?",
+                (now, name),
+            )
         return int(row["id"])
 
     conn.execute(
         "INSERT INTO printers (name, moonraker_url, external_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-        (name, moonraker_url, external_id, now, now),
+        (name, url_value, external_id, now, now),
     )
     return int(conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()["id"])
 
