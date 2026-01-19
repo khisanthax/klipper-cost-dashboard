@@ -2879,10 +2879,11 @@ def _settings_view(tab: str):
                     limit = 200
                 limit = max(1, min(5000, limit))
 
-            skip_existing = bool(request.form.get("import_skip_existing"))
-            overwrite_existing = bool(request.form.get("import_overwrite_existing"))
-            if overwrite_existing:
-                skip_existing = False
+            import_mode = (request.form.get("import_mode") or "").strip().lower()
+            if import_mode not in ("skip", "overwrite"):
+                import_mode = "overwrite" if request.form.get("import_overwrite_existing") else "skip"
+            skip_existing = import_mode != "overwrite"
+            overwrite_existing = import_mode == "overwrite"
 
             summary = import_moonraker_history_to_csv(
                 csv_file=CSV_FILE,
