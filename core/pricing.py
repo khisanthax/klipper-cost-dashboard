@@ -34,8 +34,6 @@ def _is_sql_only() -> bool:
 
 def get_pricing_for_printer_raw(printer_name: str) -> dict:
     """Get pricing configuration for a printer as a dictionary."""
-    if _is_sql_only():
-        return dict(DEFAULT_PRICING)
     settings = load_settings(SETTINGS_FILE)
     base = dict(DEFAULT_PRICING)
     override = settings.get(printer_name, {})

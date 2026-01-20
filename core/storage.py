@@ -128,8 +128,26 @@ def ensure_settings_exists(settings_file, default_pricing):
 def load_settings(settings_file):
     """Load printer settings from JSON file."""
     if _is_sql_only():
-        data = _load_user_settings_sql("settings")
-        return data if isinstance(data, dict) else {}
+        data = _load_user_settings_sql("printer_settings")
+        if isinstance(data, dict):
+            return data
+        legacy = _load_user_settings_sql("settings")
+        if isinstance(legacy, dict):
+            _save_user_settings_sql("printer_settings", legacy)
+            return legacy
+        migrated = _load_user_settings_sql("printer_settings_migrated")
+        if not migrated:
+            try:
+                if os.path.exists(settings_file):
+                    with open(settings_file) as f:
+                        legacy = json.load(f)
+                        if isinstance(legacy, dict):
+                            _save_user_settings_sql("printer_settings", legacy)
+                            _save_user_settings_sql("printer_settings_migrated", True)
+                            return legacy
+            except Exception:
+                pass
+        return {}
     require_file_reads_allowed("settings.json", caller_hint="core.storage.load_settings")
     from core.config import DEFAULT_PRICING, CSV_FILE
     ensure_runtime_files(settings_file, CSV_FILE)
@@ -147,7 +165,7 @@ def load_settings(settings_file):
 def save_settings(settings_file, data_dir, settings):
     """Save printer settings to JSON file."""
     if _is_sql_only():
-        _save_user_settings_sql("settings", settings)
+        _save_user_settings_sql("printer_settings", settings if isinstance(settings, dict) else {})
         return
     require_file_writes_allowed("settings.json", caller_hint="core.storage.save_settings")
     os.makedirs(data_dir, exist_ok=True)
@@ -158,7 +176,7 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if _is_sql_only():
-        require_file_writes_allowed("display.json", caller_hint="core.storage.ensure_display_exists")
+        # SQL-only mode stores display settings in user_settings.
         return
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
@@ -213,6 +231,50 @@ def _coerce_display_tables(value):
 
 def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
+    if _is_sql_only():
+        data = _load_user_settings_sql("display_settings")
+        if isinstance(data, dict):
+            return data
+        legacy = _load_user_settings_sql("display")
+        if isinstance(legacy, dict):
+            _save_user_settings_sql("display_settings", legacy)
+            return legacy
+        migrated = _load_user_settings_sql("display_settings_migrated")
+        if not migrated:
+            try:
+                if os.path.exists(display_file):
+                    with open(display_file) as f:
+                        legacy = json.load(f)
+                        if isinstance(legacy, dict):
+                            _save_user_settings_sql("display_settings", legacy)
+                            _save_user_settings_sql("display_settings_migrated", True)
+                            return legacy
+            except Exception:
+                pass
+        # Default structure if nothing exists yet.
+        _hidden_defaults = {
+            "job_uid",
+            "thumbnail",
+            "pause_count",
+            "runout_count",
+            "import_source",
+            "import_id",
+            "job_outcome",
+            "duration_seconds_raw",
+            "duration_seconds_est",
+            "duration_seconds_effective",
+            "filament_mm_raw",
+            "filament_mm_est",
+            "filament_mm_effective",
+        }
+        visible = [h for h in headers if h not in _hidden_defaults]
+        return {
+            "visible_columns": visible,
+            "tables": {"history": {"visible_columns": visible}},
+            "hidden_printers": [],
+            "pause_include_paused_time_default": False,
+            "projects_show_cost_totals": True,
+        }
     _hidden_defaults = {
         "job_uid",
         "thumbnail",
@@ -370,7 +432,7 @@ def save_display_settings(display_file, data_dir, display_settings):
     - preserve unknown keys already present in the JSON file
     """
     if _is_sql_only():
-        _save_user_settings_sql("display", display_settings)
+        _save_user_settings_sql("display_settings", display_settings if isinstance(display_settings, dict) else {})
         return
 
     from core.config import HEADERS
@@ -1202,6 +1264,10 @@ def save_json_file(json_file, data_dir, data):
     Creates directory if needed.
     """
     require_file_writes_allowed(os.path.basename(str(json_file)), caller_hint="core.storage.save_json_file")
+    if _is_sql_only():
+        _save_user_settings_sql("display_settings", display_settings if isinstance(display_settings, dict) else {})
+        return
+
     os.makedirs(data_dir, exist_ok=True)
     with open(json_file, "w") as f:
         json.dump(data, f, indent=2)
