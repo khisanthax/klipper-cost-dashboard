@@ -830,11 +830,9 @@ def load_rows_raw(csv_file):
 def rewrite_csv_all_rows(csv_file: str, headers: list, rows: list[dict]) -> None:
     """
     Rewrite the entire CSV from an in-memory row list (as returned by load_rows_raw).
-    """
-    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_all_rows")
-
     Uses _row_to_csv_dict to preserve raw timestamps and other persisted fields.
     """
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_all_rows")
     tmp_path = f"{csv_file}.tmp"
     try:
         with open(tmp_path, "w", newline="") as f:
