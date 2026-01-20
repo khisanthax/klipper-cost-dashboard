@@ -13,6 +13,7 @@ from core import db as db_module
 from core import reports_cache
 from core import profiles
 from core.config import CSV_FILE
+from core.sql_only import is_sql_only
 from core.reports import (
     aggregate_by_material,
     aggregate_by_profile,
@@ -37,6 +38,8 @@ class ReportsRange:
 
 
 def _reports_backend() -> Tuple[str, Optional[str]]:
+    if is_sql_only():
+        return "sql", None
     raw_mode = str(os.getenv("KCD_REPORTS_BACKEND", "csv")).strip().lower()
     mode = raw_mode
     if raw_mode == "auto":

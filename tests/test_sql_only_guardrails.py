@@ -56,6 +56,36 @@ class SqlOnlyGuardrailTests(unittest.TestCase):
                     pass
             sqlite3.connect = orig_connect
 
+    def test_reports_repo_sql_only_override(self):
+        import sqlite3
+        from core.reports_repo import get_reports_data_range
+        from datetime import datetime as _dt
+
+        conns = []
+        orig_connect = sqlite3.connect
+
+        def _patched_connect(*args, **kwargs):
+            conn = orig_connect(*args, **kwargs)
+            conns.append(conn)
+            return conn
+
+        sqlite3.connect = _patched_connect
+        try:
+            data = get_reports_data_range(
+                start_dt=None,
+                end_dt=None,
+                range_label="all",
+                quick_range="all",
+            )
+            self.assertEqual(data.get("backend"), "sql")
+        finally:
+            for c in conns:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+            sqlite3.connect = orig_connect
+
 
 if __name__ == "__main__":
     unittest.main()
