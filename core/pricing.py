@@ -6,7 +6,6 @@ import csv
 from core import db as db_module
 from core.config import DEFAULT_PRICING, CSV_FILE, SETTINGS_FILE, HEADERS, DISPLAY_FILE
 from core.storage import (
-from core.sql_only import is_sql_only
     load_settings,
     save_settings,
     load_rows_raw,
@@ -15,6 +14,7 @@ from core.sql_only import is_sql_only
     load_display_settings,
     save_hidden_printers,
 )
+from core.sql_only import is_sql_only
 from core import profiles
 from core import rates
 

@@ -8,12 +8,12 @@ from datetime import datetime, timezone
 from core import db as db_module
 from core.config import PROFILES_FILE, DATA_DIR
 from core.storage import (
-from core.sql_only import is_sql_only
     load_profiles_data,
     save_profiles_data,
     _load_user_settings_sql,
     _save_user_settings_sql,
 )
+from core.sql_only import is_sql_only
 
 
 def _is_sql_only() -> bool:

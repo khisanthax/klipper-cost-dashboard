@@ -1005,11 +1005,9 @@ def _backup_file(csv_file: str) -> Optional[str]:
 def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_costs_fn) -> int:
     """
     Recalculate pricing fields for selected rows identified by job_uid.
-    """
-    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_recalculate_costs_job_uids")
-
     Returns the count of rows updated.
     """
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_recalculate_costs_job_uids")
     if not os.path.exists(csv_file):
         return 0
 
