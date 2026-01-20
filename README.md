@@ -131,6 +131,9 @@ To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page use
 
 The database is stored at `data/kcd.db`.
 
+In SQL-only mode, exports are generated from SQL on demand (e.g. Download CSV uses a temporary SQL export).
+Backups remain user-triggered exports; runtime does not depend on backup/export files.
+
 Phase 5 installer notes: the installer can initialize the DB and import from CSV, and a
 DB + CSV setup is expected (dual/compat mode). The installer keeps `settings.json`
 moonraker_url mappings in sync until SQL becomes the source of truth. For SQL-capable

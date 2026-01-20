@@ -3272,6 +3272,14 @@ def settings_pause_page():
 def download_csv():
     """Download CSV file."""
     import os
+    if _is_sql_only():
+        try:
+            from core.export_csv import export_csv_from_sql
+            tmp_path = os.path.join(DATA_DIR, "_tmp_print_costs_from_sql.csv")
+            export_csv_from_sql(out_path=tmp_path, overwrite=True)
+            return send_file(tmp_path, as_attachment=True, download_name="print_costs.csv")
+        except Exception as exc:
+            return f"CSV export failed: {exc}", 500
     if not os.path.exists(CSV_FILE):
         return "No data available", 404
     return send_file(CSV_FILE, as_attachment=True, download_name="print_costs.csv")
