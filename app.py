@@ -54,7 +54,7 @@ from core.moonraker import (
     test_moonraker_url,
     find_history_job_for_completion,
 )
-from core.import_moonraker import import_moonraker_history_to_csv
+from core.import_moonraker import import_moonraker_history_to_csv, import_moonraker_history_to_sql
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
     get_canonical_printer_names,
@@ -2847,13 +2847,6 @@ def _settings_view(tab: str):
             )
 
         if action == "import_moonraker_history":
-            if _is_sql_only():
-                return redirect(
-                    url_for(
-                        _settings_endpoint_for_action(action),
-                        error="Moonraker history import is disabled in SQL-only mode. Use CSV/dual mode for imports.",
-                    )
-                )
             printer = (request.form.get("printer") or "").strip()
             if not printer:
                 return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
@@ -2885,15 +2878,24 @@ def _settings_view(tab: str):
             skip_existing = import_mode != "overwrite"
             overwrite_existing = import_mode == "overwrite"
 
-            summary = import_moonraker_history_to_csv(
-                csv_file=CSV_FILE,
-                headers=HEADERS,
-                printer_name=printer,
-                base_url=base_url,
-                limit=limit,
-                skip_existing=skip_existing,
-                overwrite_existing=overwrite_existing,
-            )
+            if _is_sql_only():
+                summary = import_moonraker_history_to_sql(
+                    printer_name=printer,
+                    base_url=base_url,
+                    limit=limit,
+                    skip_existing=skip_existing,
+                    overwrite_existing=overwrite_existing,
+                )
+            else:
+                summary = import_moonraker_history_to_csv(
+                    csv_file=CSV_FILE,
+                    headers=HEADERS,
+                    printer_name=printer,
+                    base_url=base_url,
+                    limit=limit,
+                    skip_existing=skip_existing,
+                    overwrite_existing=overwrite_existing,
+                )
 
             counts = (
                 f"imported={summary.get('imported', 0)}, "

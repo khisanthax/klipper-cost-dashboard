@@ -12,14 +12,45 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+import ipaddress
+import urllib.parse
 from typing import Any, Dict, Optional, Tuple
 
 from core.moonraker import fetch_moonraker_history
+from core import db as db_module
 from core.pricing import compute_costs
 from core.storage import append_row, load_rows_raw, rewrite_csv_all_rows
 
 
 IMPORT_SOURCE_MOONRAKER_HISTORY = "moonraker_history"
+
+
+def _is_moonraker_url_safe(base_url: str) -> Tuple[bool, str]:
+    base_url = str(base_url or "").strip()
+    if not base_url:
+        return False, "Missing Moonraker URL"
+    try:
+        parsed = urllib.parse.urlparse(base_url)
+    except Exception:
+        return False, "Invalid Moonraker URL"
+
+    host = parsed.hostname or ""
+    if not host:
+        return False, "Invalid Moonraker URL (missing host)"
+
+    # Allow hostnames; only apply denylist to IP literals.
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return True, "OK"
+
+    if ip.is_loopback or ip.is_private:
+        return True, "OK"
+    if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+        return False, "Blocked non-private IP for Moonraker URL"
+    # Default: deny public IPs by policy.
+    return False, "Blocked public IP for Moonraker URL"
+
 
 
 def _as_float(value: Any) -> float:
@@ -220,6 +251,119 @@ def _build_row_from_history_job(printer_name: str, job: Dict[str, Any], *, cance
     }
     row.update(cost)
     return row
+
+
+def import_moonraker_history_to_sql(
+    *,
+    printer_name: str,
+    base_url: str,
+    limit: Optional[int] = 200,
+    skip_existing: bool = True,
+    overwrite_existing: bool = False,
+) -> Dict[str, Any]:
+    """
+    Import Moonraker job history rows into KCD's SQL history.
+
+    Returns a summary dict with counts: imported, skipped, updated, errors.
+    """
+    printer_name = str(printer_name or "").strip()
+    base_url = str(base_url or "").strip()
+    if not printer_name or not base_url:
+        return {"imported": 0, "skipped": 0, "updated": 0, "errors": 1, "error": "Missing printer or Moonraker URL."}
+
+    safe_ok, safe_detail = _is_moonraker_url_safe(base_url)
+    if not safe_ok:
+        return {"imported": 0, "skipped": 0, "updated": 0, "errors": 1, "error": f"Moonraker URL blocked: {safe_detail}"}
+
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+    except Exception as exc:
+        return {"imported": 0, "skipped": 0, "updated": 0, "errors": 1, "error": f"SQL unavailable: {exc}"}
+
+    existing_by_key: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    try:
+        rows = conn.execute(
+            """
+            SELECT j.job_uid, j.import_id
+            FROM jobs j
+            JOIN printers p ON j.printer_id = p.id
+            WHERE p.name = ?
+              AND j.import_source = ?
+              AND j.import_id IS NOT NULL
+            """,
+            (printer_name, IMPORT_SOURCE_MOONRAKER_HISTORY),
+        ).fetchall()
+        for r in rows:
+            import_id = r["import_id"] if isinstance(r, dict) or hasattr(r, "__getitem__") else r[1]
+            job_uid = r["job_uid"] if isinstance(r, dict) or hasattr(r, "__getitem__") else r[0]
+            iid = str(import_id or "").strip()
+            if not iid:
+                continue
+            existing_by_key[(IMPORT_SOURCE_MOONRAKER_HISTORY, printer_name, iid)] = {"job_uid": str(job_uid or "").strip()}
+    except Exception:
+        existing_by_key = {}
+
+    ok, detail, jobs = fetch_moonraker_history(base_url, limit=limit)
+    if not ok:
+        return {"imported": 0, "skipped": 0, "updated": 0, "errors": 1, "error": f"Moonraker history fetch failed: {detail}"}
+
+    imported = 0
+    skipped = 0
+    updated = 0
+    errors = 0
+    cancelled_counts: Dict[Tuple[str, str], int] = {}
+
+    try:
+        jobs = sorted(jobs, key=lambda j: _as_float(_get_first(j, ("start_time", "timestamp", "end_time"))))
+    except Exception:
+        pass
+
+    for job in jobs:
+        try:
+            filename = str(_get_first(job, ("filename", "name", "file")) or "").strip()
+            cancelled_attempt_index = 0
+            try:
+                print_time = _as_float(_get_first(job, ("print_time", "print_duration")))
+                estimated_time = _as_float(_get_first(job, ("estimated_time", "estimated_duration")))
+                outcome = _infer_outcome(job, print_time=print_time, estimated_time=estimated_time)
+                if outcome in ("cancelled", "failed"):
+                    key2 = (printer_name, filename)
+                    cancelled_counts[key2] = cancelled_counts.get(key2, 0) + 1
+                    cancelled_attempt_index = cancelled_counts[key2]
+            except Exception:
+                cancelled_attempt_index = 0
+
+            row = _build_row_from_history_job(printer_name, job, cancelled_attempt_index=cancelled_attempt_index)
+            import_id = str(row.get("import_id") or "").strip()
+            key = (IMPORT_SOURCE_MOONRAKER_HISTORY, printer_name, import_id)
+
+            existing = existing_by_key.get(key)
+            if existing:
+                if overwrite_existing:
+                    row["job_uid"] = existing.get("job_uid", row.get("job_uid", ""))
+                    db_module.upsert_job(conn, row)
+                    updated += 1
+                elif skip_existing:
+                    skipped += 1
+                else:
+                    skipped += 1
+                continue
+
+            db_module.upsert_job(conn, row)
+            imported += 1
+        except Exception:
+            errors += 1
+
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+    out: Dict[str, Any] = {"imported": imported, "skipped": skipped, "updated": updated, "errors": errors}
+    if errors:
+        out["error"] = out.get("error") or "One or more rows failed to import."
+    return out
 
 
 def import_moonraker_history_to_csv(
