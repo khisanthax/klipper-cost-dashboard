@@ -9,7 +9,7 @@ from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
 from core.sql_only import is_sql_only
 
-# File for persisting live job state
+# File for persisting live job state (SQL-only uses in-memory only)
 LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
 
 # In-memory job state: printer_name -> job_dict

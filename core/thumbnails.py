@@ -32,8 +32,9 @@ def _is_sql_only() -> bool:
     return is_sql_only()
 
 
-_CACHE_ROOT = os.path.join(DATA_DIR, "thumb_cache")
-_TTL_SECONDS = 24 * 60 * 60
+_CACHE_ROOT = os.getenv("KCD_THUMB_CACHE_DIR") or os.path.join(DATA_DIR, "thumb_cache")
+_TTL_SECONDS = int(os.getenv("KCD_THUMB_CACHE_TTL_SECONDS", str(24 * 60 * 60)))
+_MAX_FILES = int(os.getenv("KCD_THUMB_CACHE_MAX_FILES", "5000"))
 _HTTP_TIMEOUT_SECONDS = 2.5
 
 # Very small in-memory metadata cache (printer+filename) -> (ts, thumbnails_list)
@@ -45,6 +46,29 @@ _log = logging.getLogger(__name__)
 def _safe_dir(name: str) -> str:
     s = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(name or "").strip())
     return s or "unknown"
+
+
+def _evict_cache(printer_dir: str) -> None:
+    if _MAX_FILES <= 0:
+        return
+    try:
+        if not os.path.isdir(printer_dir):
+            return
+        files = [
+            os.path.join(printer_dir, f)
+            for f in os.listdir(printer_dir)
+            if f.endswith(".png")
+        ]
+        if len(files) <= _MAX_FILES:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
+        for p in files[: max(0, len(files) - _MAX_FILES)]:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+    except Exception:
+        return
 
 
 def compute_thumbnail_token(printer_name: str, filename: str, *, base_url: Optional[str] = None) -> str:
@@ -396,6 +420,7 @@ def get_cached_thumbnail_path(
         with open(tmp, "wb") as f:
             f.write(img)
         os.replace(tmp, cache_path)
+        _evict_cache(printer_dir)
         return cache_path
     except Exception:
         try:
