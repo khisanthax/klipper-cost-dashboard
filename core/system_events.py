@@ -17,7 +17,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.config import DATA_DIR
-from core.sql_only import require_file_reads_allowed, require_file_writes_allowed
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed, is_sql_only
+from core import db as db_module
 
 EVENTS_FILE = os.path.join(DATA_DIR, "system_events.jsonl")
 MAX_EVENTS = 1000
@@ -64,6 +65,48 @@ def _enforce_retention(max_events: int = MAX_EVENTS) -> None:
         return
 
 
+def _enforce_retention_sql(max_events: int = MAX_EVENTS) -> None:
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        conn.execute(
+            """
+            DELETE FROM system_events
+             WHERE id NOT IN (
+                 SELECT id FROM system_events ORDER BY ts DESC LIMIT ?
+             )
+            """,
+            (max_events,),
+        )
+        conn.commit()
+    except Exception:
+        return
+
+
+def _emit_event_sql(event: Dict[str, Any]) -> None:
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        conn.execute(
+            """
+            INSERT INTO system_events (ts, category, title, message, severity, meta_json)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.get("ts"),
+                event.get("category"),
+                event.get("title"),
+                event.get("message"),
+                event.get("category"),
+                json.dumps(event.get("meta") or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        _enforce_retention_sql()
+    except Exception:
+        return
+
+
 def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
     """
     Append a single curated event to the event store.
@@ -83,6 +126,10 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
         "meta": _safe_meta(meta),
     }
 
+    if is_sql_only():
+        _emit_event_sql(event)
+        return
+
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(EVENTS_FILE, "a", encoding="utf-8") as f:
@@ -93,6 +140,35 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
 
 
 def _iter_events_newest_first() -> Iterable[Dict[str, Any]]:
+    if is_sql_only():
+        try:
+            conn = db_module.connect_db()
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                "SELECT ts, category, title, message, meta_json FROM system_events ORDER BY ts DESC"
+            ).fetchall()
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                meta_raw = r["meta_json"] if isinstance(r, dict) or hasattr(r, "__getitem__") else None
+                meta = {}
+                if meta_raw:
+                    try:
+                        meta = json.loads(meta_raw)
+                    except Exception:
+                        meta = {}
+                out.append(
+                    {
+                        "ts": r["ts"] if hasattr(r, "__getitem__") else None,
+                        "category": r["category"] if hasattr(r, "__getitem__") else None,
+                        "title": r["title"] if hasattr(r, "__getitem__") else None,
+                        "message": r["message"] if hasattr(r, "__getitem__") else None,
+                        "meta": meta,
+                    }
+                )
+            return out
+        except Exception:
+            return []
+
     require_file_reads_allowed("system_events.jsonl", caller_hint="core.system_events._iter_events_newest_first")
     if not os.path.exists(EVENTS_FILE):
         return []
