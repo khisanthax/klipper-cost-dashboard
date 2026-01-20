@@ -3,6 +3,10 @@ Curated system events / audit trail for Klipper Cost Dashboard.
 
 This is intentionally not a raw log viewer. Events are human-readable summaries of
 meaningful actions and warnings (deletes, failures, manual actions required, etc.).
+
+SQL-only note:
+  The event store is file-backed and is blocked in SQL-only mode to avoid runtime
+  JSON/JSONL reads/writes.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.config import DATA_DIR
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed
 
 EVENTS_FILE = os.path.join(DATA_DIR, "system_events.jsonl")
 MAX_EVENTS = 1000
@@ -43,6 +48,7 @@ def _safe_meta(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _enforce_retention(max_events: int = MAX_EVENTS) -> None:
     try:
+        require_file_writes_allowed("system_events.jsonl", caller_hint="core.system_events._enforce_retention")
         if not os.path.exists(EVENTS_FILE):
             return
         with open(EVENTS_FILE, "r", encoding="utf-8") as f:
@@ -64,6 +70,7 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
 
     Retention is enforced as a best-effort ring buffer.
     """
+    require_file_writes_allowed("system_events.jsonl", caller_hint="core.system_events.emit_event")
     cat = str(category or "").strip().lower()
     if cat not in VALID_CATEGORIES:
         cat = "activity"
@@ -86,6 +93,7 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
 
 
 def _iter_events_newest_first() -> Iterable[Dict[str, Any]]:
+    require_file_reads_allowed("system_events.jsonl", caller_hint="core.system_events._iter_events_newest_first")
     if not os.path.exists(EVENTS_FILE):
         return []
     try:
@@ -144,4 +152,3 @@ def list_events(filter_name: str = "all", limit: int = 200) -> List[Dict[str, An
         if len(results) >= lim:
             break
     return results
-

@@ -6,6 +6,7 @@ import csv
 from core import db as db_module
 from core.config import DEFAULT_PRICING, CSV_FILE, SETTINGS_FILE, HEADERS, DISPLAY_FILE
 from core.storage import (
+from core.sql_only import is_sql_only
     load_settings,
     save_settings,
     load_rows_raw,
@@ -28,7 +29,7 @@ class Cfg:
 
 
 def _is_sql_only() -> bool:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    return is_sql_only()
 
 
 def get_pricing_for_printer_raw(printer_name: str) -> dict:

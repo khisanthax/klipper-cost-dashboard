@@ -1,5 +1,9 @@
 """
 File I/O and data persistence for Print Cost Dashboard.
+
+SQL-only note:
+  File-backed writes are guarded and will raise SqlOnlyViolationError when
+  KCD_STORAGE_BACKEND=sql. Runtime SQL-only mode must not touch CSV/JSON files.
 """
 import os
 import csv
@@ -11,7 +15,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-from core.sql_only import require_file_reads_allowed
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed, is_sql_only
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -21,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def _is_sql_only() -> bool:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    return is_sql_only()
 
 
 def _load_user_settings_sql(key: str):
@@ -76,8 +80,8 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     """
     if _is_sql_only():
         # SQL-only mode must not auto-create runtime files.
-        require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_runtime_files")
-        require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.ensure_runtime_files")
+        require_file_writes_allowed("settings.json", caller_hint="core.storage.ensure_runtime_files")
+        require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.ensure_runtime_files")
         return
     from core.config import (
         DATA_DIR,
@@ -108,7 +112,7 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
     if _is_sql_only():
-        require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
+        require_file_writes_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
         return
     require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
     if not os.path.exists(settings_file):
@@ -145,6 +149,7 @@ def save_settings(settings_file, data_dir, settings):
     if _is_sql_only():
         _save_user_settings_sql("settings", settings)
         return
+    require_file_writes_allowed("settings.json", caller_hint="core.storage.save_settings")
     os.makedirs(data_dir, exist_ok=True)
     with open(settings_file, "w") as f:
         json.dump(settings, f, indent=2)
@@ -153,7 +158,7 @@ def save_settings(settings_file, data_dir, settings):
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
     if _is_sql_only():
-        require_file_reads_allowed("display.json", caller_hint="core.storage.ensure_display_exists")
+        require_file_writes_allowed("display.json", caller_hint="core.storage.ensure_display_exists")
         return
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
@@ -364,8 +369,13 @@ def save_display_settings(display_file, data_dir, display_settings):
     - sanitize visible_columns against the current HEADERS
     - preserve unknown keys already present in the JSON file
     """
+    if _is_sql_only():
+        _save_user_settings_sql("display", display_settings)
+        return
+
     from core.config import HEADERS
 
+    require_file_writes_allowed("display.json", caller_hint="core.storage.save_display_settings")
     os.makedirs(data_dir, exist_ok=True)
 
     existing = {}
@@ -492,6 +502,7 @@ def ensure_api_key(secret_file=None, data_dir=None):
 
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.append_row")
     if _is_sql_only():
         require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.append_row")
         return
@@ -624,6 +635,8 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
     if _is_sql_only():
         require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.ensure_csv_schema")
         return False
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.ensure_csv_schema")
+
     if not os.path.exists(csv_path):
         return False
 
@@ -817,6 +830,8 @@ def load_rows_raw(csv_file):
 def rewrite_csv_all_rows(csv_file: str, headers: list, rows: list[dict]) -> None:
     """
     Rewrite the entire CSV from an in-memory row list (as returned by load_rows_raw).
+    """
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_all_rows")
 
     Uses _row_to_csv_dict to preserve raw timestamps and other persisted fields.
     """
@@ -896,6 +911,7 @@ def _row_to_csv_dict(row: dict, headers: list) -> dict:
 
 def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
     """Rewrite CSV file without specified row indices."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_without_indices")
     if not os.path.exists(csv_file):
         return
     rows, _ = load_rows_raw(csv_file)
@@ -909,6 +925,7 @@ def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
 
 def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
     """Mark specified rows as completed if they are currently printing."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_mark_completed")
     if not os.path.exists(csv_file):
         return
 
@@ -934,6 +951,7 @@ def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
 
 def rewrite_csv_without_job_uids(csv_file, headers, job_uids_to_remove):
     """Rewrite CSV file without rows whose computed job_uid is in job_uids_to_remove."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_without_job_uids")
     if not os.path.exists(csv_file):
         return
     rows, _ = load_rows_raw(csv_file)
@@ -948,6 +966,7 @@ def rewrite_csv_without_job_uids(csv_file, headers, job_uids_to_remove):
 
 def rewrite_csv_mark_completed_job_uids(csv_file, headers, job_uids_to_complete):
     """Mark specified rows as completed if they are currently printing, by job_uid."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_mark_completed_job_uids")
     if not os.path.exists(csv_file):
         return
 
@@ -988,6 +1007,8 @@ def _backup_file(csv_file: str) -> Optional[str]:
 def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_costs_fn) -> int:
     """
     Recalculate pricing fields for selected rows identified by job_uid.
+    """
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_recalculate_costs_job_uids")
 
     Returns the count of rows updated.
     """
@@ -1054,6 +1075,7 @@ def load_state(state_file, key, default=""):
 
 def save_state(state_file, data_dir, key, value):
     """Save a value to install state."""
+    require_file_writes_allowed("install_state.json", caller_hint="core.storage.save_state")
     os.makedirs(data_dir, exist_ok=True)
     data = {}
     if os.path.exists(state_file):
@@ -1123,6 +1145,7 @@ def load_profiles_data(profiles_file):
 
 def save_profiles_data(profiles_file, data_dir, data):
     """Save profiles data to JSON file."""
+    require_file_writes_allowed("profiles.json", caller_hint="core.storage.save_profiles_data")
     os.makedirs(data_dir, exist_ok=True)
     with open(profiles_file, "w") as f:
         json.dump(data, f, indent=2)
@@ -1180,6 +1203,8 @@ def load_json_file(json_file):
 def save_json_file(json_file, data_dir, data):
     """
     Generic JSON file saver.
+    """
+    require_file_writes_allowed(os.path.basename(str(json_file)), caller_hint="core.storage.save_json_file")
     Creates directory if needed.
     """
     os.makedirs(data_dir, exist_ok=True)

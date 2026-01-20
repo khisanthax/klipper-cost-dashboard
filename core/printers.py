@@ -23,6 +23,7 @@ from typing import Optional, Set
 
 from core.config import DATA_DIR, SETTINGS_FILE, DISPLAY_FILE, HEADERS
 from core.storage import load_display_settings, load_settings
+from core.sql_only import is_sql_only
 from core import db as db_module
 
 
@@ -78,7 +79,7 @@ def _load_installer_printers() -> Set[str]:
 
 
 def _is_sql_only() -> bool:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    return is_sql_only()
 
 
 def _load_sql_printers() -> Set[str]:

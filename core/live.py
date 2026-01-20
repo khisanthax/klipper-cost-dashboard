@@ -7,6 +7,7 @@ import time
 import os
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
+from core.sql_only import is_sql_only
 
 # File for persisting live job state
 LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
@@ -16,7 +17,7 @@ _jobs = {}
 
 
 def _is_sql_only() -> bool:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    return is_sql_only()
 
 
 def _load_state():

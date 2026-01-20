@@ -3,6 +3,10 @@ Backup utilities for Klipper Cost Dashboard.
 
 Backups are written under `data/backups/` so they survive container rebuilds
 when `./data:/app/data` is bind-mounted via docker-compose.
+
+SQL-only note:
+  Backups are file-backed and are blocked in SQL-only mode to avoid runtime
+  JSON/CSV reads/writes.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from datetime import datetime
 from typing import Any, Optional, Tuple
 
 from core.config import DATA_DIR, CSV_FILE
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed
 
 
 APP_SETTINGS_FILE = os.path.join(DATA_DIR, "app_settings.json")
@@ -36,6 +41,7 @@ def _ensure_dirs() -> None:
 
 
 def _read_json_file(path: str, default: Any) -> Any:
+    require_file_reads_allowed(os.path.basename(path), caller_hint="core.backup._read_json_file")
     if not os.path.exists(path):
         return default
     try:
@@ -46,6 +52,7 @@ def _read_json_file(path: str, default: Any) -> Any:
 
 
 def _write_json_file(path: str, data: Any) -> None:
+    require_file_writes_allowed(os.path.basename(path), caller_hint="core.backup._write_json_file")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -218,4 +225,3 @@ def maybe_run_auto_backup() -> Tuple[bool, Optional[str], Optional[str]]:
         pass
 
     return True, archive, None
-

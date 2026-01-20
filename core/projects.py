@@ -29,7 +29,8 @@ from core.config import DATA_DIR
 from core.config import DEFAULT_PRICING
 from core import db as db_module
 from core.storage import compute_job_uid
-from core.sql_only import require_file_reads_allowed
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed
+from core.sql_only import is_sql_only
 
 
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
@@ -89,7 +90,7 @@ def _ensure_data_dir() -> None:
 
 
 def _is_sql_only() -> bool:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    return is_sql_only()
 
 
 def _read_json(path: str, default: Any) -> Any:
@@ -106,6 +107,7 @@ def _read_json(path: str, default: Any) -> Any:
 
 
 def _write_json(path: str, data: Any) -> None:
+    require_file_writes_allowed(path, caller_hint="core.projects._write_json")
     _ensure_data_dir()
     try:
         with open(path, "w", encoding="utf-8") as f:

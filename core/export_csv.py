@@ -1,5 +1,9 @@
 """
 Export SQL jobs to legacy CSV format.
+
+SQL-only note:
+  This module is intended for explicit CLI use and should not be called during
+  normal runtime when KCD_STORAGE_BACKEND=sql.
 """
 from __future__ import annotations
 

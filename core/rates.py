@@ -10,13 +10,14 @@ from datetime import datetime, timezone
 from core import db as db_module
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
+from core.sql_only import is_sql_only
 
 # File path for storing rate profiles
 RATE_PROFILES_FILE = os.path.join(DATA_DIR, "rate_profiles.json")
 
 
 def _is_sql_only() -> bool:
-    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+    return is_sql_only()
 
 
 def _utc_now_iso() -> str:

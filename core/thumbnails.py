@@ -5,6 +5,9 @@ Design goals:
 - Best-effort: any failure returns None and must never crash page renders.
 - Local file cache under data/thumb_cache/ to avoid repeated Moonraker fetches.
 - Minimal dependencies: uses urllib from stdlib (no requests).
+
+SQL-only note:
+  The thumbnail cache is intentionally file-backed and allowed in SQL-only mode.
 """
 
 from __future__ import annotations
@@ -22,13 +25,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.config import DATA_DIR, SETTINGS_FILE
 from core.storage import load_settings
+from core.sql_only import is_sql_only
 
 
 def _is_sql_only() -> bool:
-    try:
-        return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
-    except Exception:
-        return False
+    return is_sql_only()
 
 
 _CACHE_ROOT = os.path.join(DATA_DIR, "thumb_cache")
