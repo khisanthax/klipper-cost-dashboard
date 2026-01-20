@@ -5,6 +5,9 @@ Design goals:
 - Best-effort: any failure returns None and must never crash page renders.
 - Local file cache under data/thumb_cache/ to avoid repeated Moonraker fetches.
 - Minimal dependencies: uses urllib from stdlib (no requests).
+
+SQL-only note:
+  The thumbnail cache is intentionally file-backed and allowed in SQL-only mode.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -21,10 +25,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.config import DATA_DIR, SETTINGS_FILE
 from core.storage import load_settings
+from core.sql_only import is_sql_only
 
 
-_CACHE_ROOT = os.path.join(DATA_DIR, "thumb_cache")
-_TTL_SECONDS = 24 * 60 * 60
+def _is_sql_only() -> bool:
+    return is_sql_only()
+
+
+_CACHE_ROOT = os.getenv("KCD_THUMB_CACHE_DIR") or os.path.join(DATA_DIR, "thumb_cache")
+_TTL_SECONDS = int(os.getenv("KCD_THUMB_CACHE_TTL_SECONDS", str(24 * 60 * 60)))
+_MAX_FILES = int(os.getenv("KCD_THUMB_CACHE_MAX_FILES", "5000"))
 _HTTP_TIMEOUT_SECONDS = 2.5
 
 # Very small in-memory metadata cache (printer+filename) -> (ts, thumbnails_list)
@@ -36,6 +46,64 @@ _log = logging.getLogger(__name__)
 def _safe_dir(name: str) -> str:
     s = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(name or "").strip())
     return s or "unknown"
+
+
+def _evict_cache(printer_dir: str) -> None:
+    if _MAX_FILES <= 0:
+        return
+    try:
+        if not os.path.isdir(printer_dir):
+            return
+        files = [
+            os.path.join(printer_dir, f)
+            for f in os.listdir(printer_dir)
+            if f.endswith(".png")
+        ]
+        if len(files) <= _MAX_FILES:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
+        for p in files[: max(0, len(files) - _MAX_FILES)]:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
+    except Exception:
+        return
+
+
+def compute_thumbnail_token(printer_name: str, filename: str, *, base_url: Optional[str] = None) -> str:
+    """
+    Compute the canonical thumbnail token for a printer+filename.
+
+    The token is size-independent and is used for both small/card thumbnails:
+      <token>_small.png / <token>_card.png
+    """
+    printer_key = str(printer_name or "").strip()
+    raw_filename = str(filename or "").strip()
+    filename_norm = _normalize_moonraker_filename(raw_filename)
+    base = str(base_url or "").strip()
+    digest = hashlib.sha1(f"{base}|{printer_key}|{filename_norm}".encode("utf-8")).hexdigest()
+    return digest
+
+
+def compute_legacy_thumbnail_token(printer_name: str, filename: str, size_hint: str, *, base_url: Optional[str] = None) -> str:
+    """
+    Legacy token included size_hint in the hash; kept for backfill compatibility.
+    """
+    return _legacy_thumbnail_token(printer_name, filename, size_hint, base_url=base_url)
+
+
+def _legacy_thumbnail_token(printer_name: str, filename: str, size_hint: str, *, base_url: Optional[str] = None) -> str:
+    """
+    Legacy token included size_hint in the hash; keep for backfill compatibility.
+    """
+    printer_key = str(printer_name or "").strip()
+    raw_filename = str(filename or "").strip()
+    filename_norm = _normalize_moonraker_filename(raw_filename)
+    base = str(base_url or "").strip()
+    hint = str(size_hint or "").strip().lower() or "small"
+    digest = hashlib.sha1(f"{base}|{printer_key}|{filename_norm}|{hint}".encode("utf-8")).hexdigest()
+    return digest
 
 def _is_running_in_docker() -> bool:
     # Best-effort: this code runs both on bare-metal and inside containers.
@@ -87,6 +155,18 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     printer_name = str(printer_name or "").strip()
     if not printer_name:
         return None
+
+    if _is_sql_only():
+        try:
+            from core import db as db_module
+
+            with db_module.connect_db() as conn:
+                db_module.apply_migrations(conn)
+                moonraker_url = db_module.get_printer_moonraker_url(conn, printer_name)
+                if moonraker_url:
+                    return moonraker_url.rstrip("/")
+        except Exception:
+            pass
 
     settings = load_settings(SETTINGS_FILE)
     moonraker_url = None
@@ -205,7 +285,13 @@ def _pick_thumbnail(thumbnails: List[Dict[str, Any]], size_hint: str) -> Optiona
         return candidates[0] if candidates else None
 
 
-def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "") -> List[Dict[str, Any]]:
+def _metadata_thumbnails(
+    printer_name: str,
+    filename: str,
+    *,
+    size_hint: str = "",
+    base_url: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     printer_key = str(printer_name or "").strip()
     raw_filename = str(filename or "").strip()
     filename_norm = _normalize_moonraker_filename(raw_filename)
@@ -220,7 +306,7 @@ def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "
         if now - ts < _TTL_SECONDS:
             return thumbs
 
-    base = resolve_moonraker_base_url(printer_key)
+    base = str(base_url or "").strip() or resolve_moonraker_base_url(printer_key)
     if not base:
         _meta_cache[key] = (now, [])
         return []
@@ -251,7 +337,13 @@ def _metadata_thumbnails(printer_name: str, filename: str, *, size_hint: str = "
     return thumbs
 
 
-def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) -> Optional[str]:
+def get_cached_thumbnail_path(
+    printer_name: str,
+    filename: str,
+    size_hint: str,
+    *,
+    base_url: Optional[str] = None,
+) -> Optional[str]:
     """
     Ensure a thumbnail image is present in the local cache and return its path.
     Returns None if no thumbnail is available or any fetch fails.
@@ -262,12 +354,12 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     if not printer_name or not filename:
         return None
 
-    base = resolve_moonraker_base_url(printer_name)
+    base = str(base_url or "").strip() or resolve_moonraker_base_url(printer_name)
     if not base:
         return None
 
     filename_norm = _normalize_moonraker_filename(filename)
-    cache_key = hashlib.sha1(f"{base}|{printer_name}|{filename_norm}|{size_hint}".encode("utf-8")).hexdigest()
+    cache_key = compute_thumbnail_token(printer_name, filename_norm, base_url=base)
     printer_dir = os.path.join(_CACHE_ROOT, _safe_dir(printer_name))
     os.makedirs(printer_dir, exist_ok=True)
     cache_path = os.path.join(printer_dir, f"{cache_key}_{size_hint}.png")
@@ -280,7 +372,22 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
     except Exception:
         pass
 
-    thumbs = _metadata_thumbnails(printer_name, filename, size_hint=size_hint)
+    # Check for legacy cache filename (size-specific token) before fetching.
+    legacy_key = _legacy_thumbnail_token(printer_name, filename_norm, size_hint, base_url=base)
+    legacy_path = os.path.join(printer_dir, f"{legacy_key}_{size_hint}.png")
+    try:
+        if os.path.exists(legacy_path):
+            age = time.time() - os.path.getmtime(legacy_path)
+            if age < _TTL_SECONDS:
+                try:
+                    shutil.copy2(legacy_path, cache_path)
+                except Exception:
+                    pass
+                return cache_path
+    except Exception:
+        pass
+
+    thumbs = _metadata_thumbnails(printer_name, filename, size_hint=size_hint, base_url=base)
     picked = _pick_thumbnail(thumbs, size_hint=size_hint)
     if not picked:
         return None
@@ -313,6 +420,7 @@ def get_cached_thumbnail_path(printer_name: str, filename: str, size_hint: str) 
         with open(tmp, "wb") as f:
             f.write(img)
         os.replace(tmp, cache_path)
+        _evict_cache(printer_dir)
         return cache_path
     except Exception:
         try:

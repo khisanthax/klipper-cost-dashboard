@@ -1,5 +1,9 @@
 """
 File I/O and data persistence for Print Cost Dashboard.
+
+SQL-only note:
+  File-backed writes are guarded and will raise SqlOnlyViolationError when
+  KCD_STORAGE_BACKEND=sql. Runtime SQL-only mode must not touch CSV/JSON files.
 """
 import os
 import csv
@@ -11,6 +15,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed, is_sql_only
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -19,19 +24,133 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
+def _is_sql_only() -> bool:
+    return is_sql_only()
+
+
+def _load_user_settings_sql(key: str):
+    try:
+        from core import db as db_module
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return None
+        raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _save_user_settings_sql(key: str, value) -> None:
+    try:
+        from core import db as db_module
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now = datetime.now(timezone.utc).isoformat()
+        raw = json.dumps(value, indent=2)
+        row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", (key,)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
+                (raw, now, key),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
+                (key, raw, now),
+            )
+        conn.commit()
+    except Exception:
+        pass
+
+def _copy_if_missing(src: str, dest: str) -> bool:
+    if os.path.exists(dest):
+        return False
+    if not os.path.exists(src):
+        return False
+    os.makedirs(os.path.dirname(dest) or '.', exist_ok=True)
+    shutil.copy2(src, dest)
+    return True
+
+
+def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
+    """
+    Ensure runtime files exist, bootstrapping from examples when missing.
+    """
+    if _is_sql_only():
+        # SQL-only mode must not auto-create runtime files.
+        require_file_writes_allowed("settings.json", caller_hint="core.storage.ensure_runtime_files")
+        require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.ensure_runtime_files")
+        return
+    from core.config import (
+        DATA_DIR,
+        SETTINGS_EXAMPLE_FILE,
+        CSV_EXAMPLE_FILE,
+        DEFAULT_PRICING,
+        HEADERS,
+    )
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    if not os.path.exists(settings_file):
+        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
+            initial = {}
+            for pname in ['SV08', 'SV07', 'Ender5P']:
+                initial[pname] = dict(DEFAULT_PRICING)
+            with open(settings_file, 'w') as f:
+                json.dump(initial, f, indent=2)
+
+    if not os.path.exists(csv_file):
+        if not _copy_if_missing(CSV_EXAMPLE_FILE, csv_file):
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=HEADERS)
+                writer.writeheader()
+
+
+
 def ensure_settings_exists(settings_file, default_pricing):
     """Create a default settings.json if it doesn't exist."""
+    if _is_sql_only():
+        require_file_writes_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
+        return
+    require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
     if not os.path.exists(settings_file):
-        initial = {}
-        for pname in ["SV08", "SV07", "Ender5P"]:
-            initial[pname] = dict(default_pricing)
-        with open(settings_file, "w") as f:
-            json.dump(initial, f, indent=2)
+        from core.config import SETTINGS_EXAMPLE_FILE
+        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
+            initial = {}
+            for pname in ["SV08", "SV07", "Ender5P"]:
+                initial[pname] = dict(default_pricing)
+            with open(settings_file, "w") as f:
+                json.dump(initial, f, indent=2)
 
 
 def load_settings(settings_file):
     """Load printer settings from JSON file."""
-    from core.config import DEFAULT_PRICING
+    if _is_sql_only():
+        data = _load_user_settings_sql("printer_settings")
+        if isinstance(data, dict):
+            return data
+        legacy = _load_user_settings_sql("settings")
+        if isinstance(legacy, dict):
+            _save_user_settings_sql("printer_settings", legacy)
+            return legacy
+        migrated = _load_user_settings_sql("printer_settings_migrated")
+        if not migrated:
+            try:
+                if os.path.exists(settings_file):
+                    with open(settings_file) as f:
+                        legacy = json.load(f)
+                        if isinstance(legacy, dict):
+                            _save_user_settings_sql("printer_settings", legacy)
+                            _save_user_settings_sql("printer_settings_migrated", True)
+                            return legacy
+            except Exception:
+                pass
+        return {}
+    require_file_reads_allowed("settings.json", caller_hint="core.storage.load_settings")
+    from core.config import DEFAULT_PRICING, CSV_FILE
+    ensure_runtime_files(settings_file, CSV_FILE)
     ensure_settings_exists(settings_file, DEFAULT_PRICING)
     try:
         with open(settings_file) as f:
@@ -45,6 +164,10 @@ def load_settings(settings_file):
 
 def save_settings(settings_file, data_dir, settings):
     """Save printer settings to JSON file."""
+    if _is_sql_only():
+        _save_user_settings_sql("printer_settings", settings if isinstance(settings, dict) else {})
+        return
+    require_file_writes_allowed("settings.json", caller_hint="core.storage.save_settings")
     os.makedirs(data_dir, exist_ok=True)
     with open(settings_file, "w") as f:
         json.dump(settings, f, indent=2)
@@ -52,6 +175,9 @@ def save_settings(settings_file, data_dir, settings):
 
 def ensure_display_exists(display_file, headers):
     """Create a default display.json if it doesn't exist."""
+    if _is_sql_only():
+        # SQL-only mode stores display settings in user_settings.
+        return
     if not os.path.exists(display_file):
         # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
         # Keep analytics/internal columns opt-in to avoid surprising users.
@@ -105,7 +231,50 @@ def _coerce_display_tables(value):
 
 def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
-    ensure_display_exists(display_file, headers)
+    if _is_sql_only():
+        data = _load_user_settings_sql("display_settings")
+        if isinstance(data, dict):
+            return data
+        legacy = _load_user_settings_sql("display")
+        if isinstance(legacy, dict):
+            _save_user_settings_sql("display_settings", legacy)
+            return legacy
+        migrated = _load_user_settings_sql("display_settings_migrated")
+        if not migrated:
+            try:
+                if os.path.exists(display_file):
+                    with open(display_file) as f:
+                        legacy = json.load(f)
+                        if isinstance(legacy, dict):
+                            _save_user_settings_sql("display_settings", legacy)
+                            _save_user_settings_sql("display_settings_migrated", True)
+                            return legacy
+            except Exception:
+                pass
+        # Default structure if nothing exists yet.
+        _hidden_defaults = {
+            "job_uid",
+            "thumbnail",
+            "pause_count",
+            "runout_count",
+            "import_source",
+            "import_id",
+            "job_outcome",
+            "duration_seconds_raw",
+            "duration_seconds_est",
+            "duration_seconds_effective",
+            "filament_mm_raw",
+            "filament_mm_est",
+            "filament_mm_effective",
+        }
+        visible = [h for h in headers if h not in _hidden_defaults]
+        return {
+            "visible_columns": visible,
+            "tables": {"history": {"visible_columns": visible}},
+            "hidden_printers": [],
+            "pause_include_paused_time_default": False,
+            "projects_show_cost_totals": True,
+        }
     _hidden_defaults = {
         "job_uid",
         "thumbnail",
@@ -131,6 +300,47 @@ def load_display_settings(display_file, headers):
             "pause_include_paused_time_default": False,
             "projects_show_cost_totals": True,
         }
+
+    if _is_sql_only():
+        data = _load_user_settings_sql("display") or {}
+        if not isinstance(data, dict):
+            return _default_settings()
+        tables = _coerce_display_tables(data.get("tables"))
+        history_cols = None
+        if isinstance(tables.get("history"), dict):
+            history_cols = tables.get("history", {}).get("visible_columns")
+        if not isinstance(history_cols, list):
+            history_cols = data.get("visible_columns", headers)
+
+        cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
+        if not cols:
+            cols = [h for h in headers if h not in _hidden_defaults]
+        tables.setdefault("history", {"visible_columns": cols})
+
+        hidden = data.get("hidden_printers", [])
+        if not isinstance(hidden, list):
+            hidden = []
+        hidden = [str(p) for p in hidden if str(p).strip()]
+
+        if "pause_include_paused_time_default" in data:
+            pause_include = bool(data.get("pause_include_paused_time_default", False))
+        elif "pause_exclude_paused_time_default" in data:
+            pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
+        else:
+            pause_include = False
+
+        show_cost_totals = data.get("projects_show_cost_totals", True)
+        show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
+        return {
+            "visible_columns": cols,
+            "tables": tables,
+            "hidden_printers": hidden,
+            "pause_include_paused_time_default": pause_include,
+            "projects_show_cost_totals": show_cost_totals,
+        }
+
+    require_file_reads_allowed("display.json", caller_hint="core.storage.load_display_settings")
+    ensure_display_exists(display_file, headers)
 
     try:
         with open(display_file) as f:
@@ -221,8 +431,13 @@ def save_display_settings(display_file, data_dir, display_settings):
     - sanitize visible_columns against the current HEADERS
     - preserve unknown keys already present in the JSON file
     """
+    if _is_sql_only():
+        _save_user_settings_sql("display_settings", display_settings if isinstance(display_settings, dict) else {})
+        return
+
     from core.config import HEADERS
 
+    require_file_writes_allowed("display.json", caller_hint="core.storage.save_display_settings")
     os.makedirs(data_dir, exist_ok=True)
 
     existing = {}
@@ -289,6 +504,10 @@ def save_display_settings(display_file, data_dir, display_settings):
     show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
     existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
 
+    if _is_sql_only():
+        _save_user_settings_sql("display", existing)
+        return
+
     with open(display_file, "w") as f:
         json.dump(existing, f, indent=2)
 
@@ -345,6 +564,16 @@ def ensure_api_key(secret_file=None, data_dir=None):
 
 def append_row(csv_file, headers, data):
     """Append a row to the CSV file."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.append_row")
+    if _is_sql_only():
+        require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.append_row")
+        return
+    try:
+        from core.config import CSV_FILE, SETTINGS_FILE
+        if os.path.abspath(csv_file) == os.path.abspath(CSV_FILE):
+            ensure_runtime_files(SETTINGS_FILE, CSV_FILE)
+    except Exception:
+        pass
     if "job_uid" in headers and not str(data.get("job_uid") or "").strip():
         data["job_uid"] = str(uuid.uuid4())
 
@@ -465,6 +694,11 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
       - Atomic replace
     Returns True if a migration occurred, else False.
     """
+    if _is_sql_only():
+        require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.ensure_csv_schema")
+        return False
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.ensure_csv_schema")
+
     if not os.path.exists(csv_path):
         return False
 
@@ -540,7 +774,14 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
 
 def load_rows_raw(csv_file):
     """Load all rows from CSV file with timestamp parsing."""
+    require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.load_rows_raw")
     rows = []
+    try:
+        from core.config import CSV_FILE, SETTINGS_FILE
+        if os.path.abspath(csv_file) == os.path.abspath(CSV_FILE):
+            ensure_runtime_files(SETTINGS_FILE, CSV_FILE)
+    except Exception:
+        pass
     if not os.path.exists(csv_file):
         return rows, "CSV file not found yet. Send at least one print to /log-print."
     try:
@@ -651,9 +892,9 @@ def load_rows_raw(csv_file):
 def rewrite_csv_all_rows(csv_file: str, headers: list, rows: list[dict]) -> None:
     """
     Rewrite the entire CSV from an in-memory row list (as returned by load_rows_raw).
-
     Uses _row_to_csv_dict to preserve raw timestamps and other persisted fields.
     """
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_all_rows")
     tmp_path = f"{csv_file}.tmp"
     try:
         with open(tmp_path, "w", newline="") as f:
@@ -730,6 +971,7 @@ def _row_to_csv_dict(row: dict, headers: list) -> dict:
 
 def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
     """Rewrite CSV file without specified row indices."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_without_indices")
     if not os.path.exists(csv_file):
         return
     rows, _ = load_rows_raw(csv_file)
@@ -743,6 +985,7 @@ def rewrite_csv_without_indices(csv_file, headers, indices_to_remove):
 
 def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
     """Mark specified rows as completed if they are currently printing."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_mark_completed")
     if not os.path.exists(csv_file):
         return
 
@@ -768,6 +1011,7 @@ def rewrite_csv_mark_completed(csv_file, headers, indices_to_complete):
 
 def rewrite_csv_without_job_uids(csv_file, headers, job_uids_to_remove):
     """Rewrite CSV file without rows whose computed job_uid is in job_uids_to_remove."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_without_job_uids")
     if not os.path.exists(csv_file):
         return
     rows, _ = load_rows_raw(csv_file)
@@ -782,6 +1026,7 @@ def rewrite_csv_without_job_uids(csv_file, headers, job_uids_to_remove):
 
 def rewrite_csv_mark_completed_job_uids(csv_file, headers, job_uids_to_complete):
     """Mark specified rows as completed if they are currently printing, by job_uid."""
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_mark_completed_job_uids")
     if not os.path.exists(csv_file):
         return
 
@@ -822,9 +1067,9 @@ def _backup_file(csv_file: str) -> Optional[str]:
 def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_costs_fn) -> int:
     """
     Recalculate pricing fields for selected rows identified by job_uid.
-
     Returns the count of rows updated.
     """
+    require_file_writes_allowed("print_costs.csv", caller_hint="core.storage.rewrite_csv_recalculate_costs_job_uids")
     if not os.path.exists(csv_file):
         return 0
 
@@ -875,6 +1120,7 @@ def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_
 # State management for installer (used by both app and installer)
 def load_state(state_file, key, default=""):
     """Load a value from install state."""
+    require_file_reads_allowed("install_state.json", caller_hint="core.storage.load_state")
     if not os.path.exists(state_file):
         return default
     try:
@@ -887,6 +1133,7 @@ def load_state(state_file, key, default=""):
 
 def save_state(state_file, data_dir, key, value):
     """Save a value to install state."""
+    require_file_writes_allowed("install_state.json", caller_hint="core.storage.save_state")
     os.makedirs(data_dir, exist_ok=True)
     data = {}
     if os.path.exists(state_file):
@@ -905,6 +1152,38 @@ def load_profiles_data(profiles_file):
     Load profiles data (profiles + mappings) from JSON file.
     Returns a dict with 'profiles' and 'mappings' keys.
     """
+    if _is_sql_only():
+        try:
+            from core import db as db_module
+            conn = db_module.connect_db()
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                """
+                SELECT id, profile_uid, name, material, filament_mode, filament_rate, grams_per_meter
+                  FROM filament_profiles
+                """
+            ).fetchall()
+        except Exception:
+            return {"profiles": {}, "mappings": {}}
+
+        profiles = {}
+        for r in rows:
+            if hasattr(r, "__getitem__"):
+                try:
+                    pid = r["profile_uid"] if "profile_uid" in r.keys() else r[1]
+                except Exception:
+                    pid = r[1] if len(r) > 1 else None
+                pid = pid or str(r["id"] if "id" in r.keys() else r[0])
+                profiles[str(pid)] = {
+                    "id": str(pid),
+                    "name": r["name"] if "name" in r.keys() else r[2],
+                    "material": r["material"] if "material" in r.keys() else r[3],
+                    "filament_mode": r["filament_mode"] if "filament_mode" in r.keys() else r[4],
+                    "filament_rate": r["filament_rate"] if "filament_rate" in r.keys() else r[5],
+                    "grams_per_meter": r["grams_per_meter"] if "grams_per_meter" in r.keys() else r[6],
+                }
+        return {"profiles": profiles, "mappings": {}}
+    require_file_reads_allowed("profiles.json", caller_hint="core.storage.load_profiles_data")
     if not os.path.exists(profiles_file):
         return {"profiles": {}, "mappings": {}}
     try:
@@ -924,6 +1203,7 @@ def load_profiles_data(profiles_file):
 
 def save_profiles_data(profiles_file, data_dir, data):
     """Save profiles data to JSON file."""
+    require_file_writes_allowed("profiles.json", caller_hint="core.storage.save_profiles_data")
     os.makedirs(data_dir, exist_ok=True)
     with open(profiles_file, "w") as f:
         json.dump(data, f, indent=2)
@@ -968,6 +1248,7 @@ def load_json_file(json_file):
     Generic JSON file loader.
     Returns the loaded data or None if file doesn't exist or is invalid.
     """
+    require_file_reads_allowed(json_file, caller_hint="core.storage.load_json_file")
     if not os.path.exists(json_file):
         return None
     try:
@@ -982,6 +1263,11 @@ def save_json_file(json_file, data_dir, data):
     Generic JSON file saver.
     Creates directory if needed.
     """
+    require_file_writes_allowed(os.path.basename(str(json_file)), caller_hint="core.storage.save_json_file")
+    if _is_sql_only():
+        _save_user_settings_sql("display_settings", display_settings if isinstance(display_settings, dict) else {})
+        return
+
     os.makedirs(data_dir, exist_ok=True)
     with open(json_file, "w") as f:
         json.dump(data, f, indent=2)

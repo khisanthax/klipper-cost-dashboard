@@ -12,7 +12,8 @@ import hashlib
 import time
 import re
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import flask
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -46,8 +47,14 @@ from core import thumbnails as thumbs
 from core import system_events
 from core import storage_backend
 from core import history_repo
-from core.moonraker import test_moonraker_url, find_history_job_for_completion
-from core.import_moonraker import import_moonraker_history_to_csv
+from core import reports_repo
+from core import db as db_module
+from core.moonraker import (
+    probe_moonraker_server_info,
+    test_moonraker_url,
+    find_history_job_for_completion,
+)
+from core.import_moonraker import import_moonraker_history_to_csv, import_moonraker_history_to_sql
 from core.gcode_metadata import extract_gcode_metadata
 from core.printers import (
     get_canonical_printer_names,
@@ -57,6 +64,10 @@ from core.printers import (
 from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
 
 app = Flask(__name__)
+app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
+
+if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
+    app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
@@ -67,18 +78,49 @@ def _safe_thumb_dir(name: str) -> str:
     return s or "unknown"
 
 
-def get_job_thumbnail_url(printer_name: str, filename: str, size_hint: str) -> str | None:
-    cache_path = thumbs.get_cached_thumbnail_path(printer_name, filename, size_hint=size_hint)
-    if not cache_path:
+def build_thumb_url_from_token(printer_name: str, token: str, size_hint: str) -> str | None:
+    token = str(token or "").strip()
+    if not token:
         return None
+    size = "card" if str(size_hint or "").strip().lower() == "card" else "small"
     return url_for(
         "thumb_cache",
         printer_name=_safe_thumb_dir(printer_name),
-        cache_file=os.path.basename(cache_path),
+        cache_file=f"{token}_{size}.png",
     )
 
 
-@app.get("/thumb/<printer_name>/<cache_file>", endpoint="thumb_cache")
+def get_job_thumbnail_url(
+    printer_name: str,
+    filename: str,
+    size_hint: str,
+    *,
+    job_uid: str | None = None,
+) -> str | None:
+    cache_path = thumbs.get_cached_thumbnail_path(printer_name, filename, size_hint=size_hint)
+    if not cache_path:
+        return None
+    try:
+        url = url_for(
+            "thumb_cache",
+            printer_name=_safe_thumb_dir(printer_name),
+            cache_file=os.path.basename(cache_path),
+        )
+    except Exception:
+        return None
+
+    if job_uid:
+        try:
+            base = thumbs.resolve_moonraker_base_url(printer_name)
+            token = thumbs.compute_thumbnail_token(printer_name, filename, base_url=base)
+            history_repo.set_job_thumbnail(job_uid, token)
+        except Exception:
+            pass
+
+    return url
+
+
+@app.route("/thumb/<printer_name>/<cache_file>", methods=["GET"], endpoint="thumb_cache")
 def thumb_cache(printer_name: str, cache_file: str):
     # Path safety:
     # - serve only cached files for known printers (slugged)
@@ -121,7 +163,7 @@ def thumb_cache(printer_name: str, cache_file: str):
     return resp
 
 
-@app.get("/system-events")
+@app.route("/system-events", methods=["GET"])
 def system_events_page():
     filter_name = (request.args.get("filter") or "all").strip().lower()
     if filter_name not in {"all", "failures", "deleted"}:
@@ -284,6 +326,38 @@ def log_print():
     printer_name_raw = str(payload["printer"])
     filename_raw = str(payload["filename"])
 
+    def _choose_duration_seconds(payload_dur, live_dur, mr_print, mr_total, mr_calc):
+        def _pos(v):
+            try:
+                v = float(v)
+            except Exception:
+                return 0.0
+            return v if v > 0 else 0.0
+
+        payload_dur = _pos(payload_dur)
+        live_dur = _pos(live_dur)
+        mr_print = _pos(mr_print)
+        mr_total = _pos(mr_total)
+        mr_calc = _pos(mr_calc)
+
+        if payload_dur > 0:
+            return payload_dur
+        if mr_print > 0:
+            return mr_print
+        if mr_total > 0:
+            return mr_total
+        if mr_calc > 0:
+            return mr_calc
+        if live_dur > 0:
+            return live_dur
+        return None
+
+    payload_duration_seconds = duration_seconds
+    live_duration_seconds = None
+    mr_print_duration = 0.0
+    mr_total_duration = 0.0
+    mr_calc_duration = 0.0
+
     canonical = get_canonical_printer_names()
     norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
     if not norm.valid_printer:
@@ -349,12 +423,14 @@ def log_print():
         # can reliably exclude paused time later.
         try:
             elapsed_excluding_pauses = float(live_metadata.get("elapsed_seconds") or 0.0)
-            duration_seconds = max(0.0, elapsed_excluding_pauses + float(paused_seconds_total))
+            live_duration_seconds = max(0.0, elapsed_excluding_pauses + float(paused_seconds_total))
         except Exception:
-            pass
+            live_duration_seconds = None
 
     # For completed jobs, attempt to finalize duration/filament using Moonraker history.
     history_job_id = None
+    history_unavailable = False
+    history_detail = ""
     if status == "completed":
         base_url = thumbs.resolve_moonraker_base_url(printer_name)
         app.logger.info("job-finalize: printer=%s moonraker_url=%s", printer_name, base_url or "none")
@@ -372,6 +448,9 @@ def log_print():
                 detail,
                 bool(job),
             )
+            if not ok:
+                history_unavailable = True
+                history_detail = detail
             if ok and job:
                 def _as_float(v):
                     try:
@@ -392,9 +471,11 @@ def log_print():
                 filament_used = _as_float(_get_first(job, ("filament_used", "filament", "filament_mm")))
 
                 if print_time > 0:
-                    duration_seconds = print_time
-                elif total_duration > 0:
-                    duration_seconds = total_duration
+                    mr_print_duration = print_time
+                if total_duration > 0:
+                    mr_total_duration = total_duration
+                if start_ts > 0 and end_ts > 0 and end_ts >= start_ts:
+                    mr_calc_duration = end_ts - start_ts
 
                 if filament_used > 0:
                     filament_mm = filament_used
@@ -407,23 +488,58 @@ def log_print():
                 row_started_at = start_ts if start_ts > 0 else None
                 row_ended_at = end_ts if end_ts > 0 else None
             else:
+                if ok and not job:
+                    history_unavailable = True
+                    history_detail = detail or "No matching history entry found"
                 row_started_at = None
                 row_ended_at = None
         else:
+            history_unavailable = True
+            history_detail = "Missing Moonraker URL"
             row_started_at = None
             row_ended_at = None
     else:
         row_started_at = None
         row_ended_at = None
 
-    cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
+    if history_unavailable:
+        app.logger.warning(
+            "%s: moonraker history unavailable (%s). duration/thumbnail not updated.",
+            printer_name,
+            history_detail or "unknown",
+        )
 
+    duration_seconds = _choose_duration_seconds(
+        payload_duration_seconds,
+        live_duration_seconds,
+        mr_print_duration,
+        mr_total_duration,
+        mr_calc_duration,
+    )
+
+    app.logger.info(
+        "job-finalize: printer=%s file=%s payload_dur=%s live_dur=%s mr_print=%s mr_total=%s mr_calc=%s chosen=%s",
+        printer_name,
+        filename,
+        payload_duration_seconds,
+        live_duration_seconds,
+        mr_print_duration,
+        mr_total_duration,
+        mr_calc_duration,
+        duration_seconds,
+    )
+
+    cost_data = {}
+    if duration_seconds is not None:
+        cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
+
+    row_duration = duration_seconds if duration_seconds is not None else ""
     row = {
         "timestamp": ts,
         "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
-        "duration_seconds": duration_seconds,
+        "duration_seconds": row_duration,
         "paused_seconds_total": paused_seconds_total,
         "pause_count": pause_count,
         "runout_count": runout_count,
@@ -466,25 +582,54 @@ def health():
     """
     import os
     from datetime import datetime
-    
-    status = {
-        "status": "healthy",
-        "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
-        "api_key_configured": bool(API_KEY),
-        "csv_exists": os.path.exists(CSV_FILE),
-    }
-    
-    # Count rows if CSV exists
-    if os.path.exists(CSV_FILE):
-        rows, _ = load_rows_raw(CSV_FILE)
-        status["total_prints"] = len(rows)
-    else:
-        status["total_prints"] = 0
-    
-    # List known printers
-    status["known_printers"] = get_known_printers()
-    
-    return jsonify(status), 200
+    from core.sql_only import SqlOnlyViolationError
+
+    try:
+        if _is_sql_only():
+            db_ok = False
+            printers_count = 0
+            try:
+                with db_module.connect_db() as conn:
+                    db_module.apply_migrations(conn)
+                    row = conn.execute("SELECT COUNT(*) AS c FROM printers").fetchone()
+                    if row is not None:
+                        printers_count = row["c"] if hasattr(row, "__getitem__") else int(row[0])
+                    db_ok = True
+            except Exception as exc:
+                return jsonify({"status": "error", "backend": "sql", "error": str(exc)}), 500
+
+            return (
+                jsonify(
+                    {
+                        "status": "ok",
+                        "backend": "sql",
+                        "db_ok": db_ok,
+                        "printers_count": printers_count,
+                        "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
+                    }
+                ),
+                200,
+            )
+
+        status = {
+            "status": "healthy",
+            "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
+            "api_key_configured": bool(API_KEY),
+            "csv_exists": os.path.exists(CSV_FILE),
+        }
+
+        if os.path.exists(CSV_FILE):
+            rows, _ = load_rows_raw(CSV_FILE)
+            status["total_prints"] = len(rows)
+        else:
+            status["total_prints"] = 0
+
+        status["known_printers"] = get_known_printers()
+        return jsonify(status), 200
+    except SqlOnlyViolationError as exc:
+        return jsonify({"status": "error", "backend": "sql", "error": str(exc)}), 503
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 500
 
 
 # ============================================================================
@@ -890,12 +1035,21 @@ def index():
         if action == "complete_rows":
             selected = request.form.getlist("delete_rows")
             if selected:
-                if all(str(v).strip().isdigit() for v in selected):
-                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
-                    rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+                if _is_sql_only():
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rows_for_map, _ = _load_history_rows_for_recalc()
+                        job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    _mark_completed_jobs_sql(job_uids)
                 else:
-                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                        rewrite_csv_mark_completed_job_uids(CSV_FILE, HEADERS, job_uids)
             return redirect(url_for("index"))
 
         if action == "recalc_costs":
@@ -916,24 +1070,39 @@ def index():
         if action in ("delete_rows", "delete"):
             selected = request.form.getlist("delete_rows")
             if selected:
-                if all(str(v).strip().isdigit() for v in selected):
-                    indices = [int(i) for i in selected if str(i).strip().isdigit()]
-                    rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                if _is_sql_only():
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rows_for_map, _ = _load_history_rows_for_recalc()
+                        job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                    deleted = _delete_jobs_sql(job_uids)
                     system_events.emit_event(
                         "deleted",
                         "Deleted history jobs",
-                        f"Deleted {len(indices)} job(s) from Print History.",
-                        meta={"action": "delete_history_rows", "count": len(indices)},
+                        f"Deleted {deleted} job(s) from Print History (SQL-only).",
+                        meta={"action": "delete_history_rows", "count": deleted},
                     )
                 else:
-                    job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
-                    system_events.emit_event(
-                        "deleted",
-                        "Deleted history jobs",
-                        f"Deleted {len(job_uids)} job(s) from Print History.",
-                        meta={"action": "delete_history_rows", "count": len(job_uids)},
-                    )
+                    if all(str(v).strip().isdigit() for v in selected):
+                        indices = [int(i) for i in selected if str(i).strip().isdigit()]
+                        rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
+                        system_events.emit_event(
+                            "deleted",
+                            "Deleted history jobs",
+                            f"Deleted {len(indices)} job(s) from Print History.",
+                            meta={"action": "delete_history_rows", "count": len(indices)},
+                        )
+                    else:
+                        job_uids = [str(v).strip() for v in selected if str(v).strip()]
+                        rewrite_csv_without_job_uids(CSV_FILE, HEADERS, job_uids)
+                        system_events.emit_event(
+                            "deleted",
+                            "Deleted history jobs",
+                            f"Deleted {len(job_uids)} job(s) from Print History.",
+                            meta={"action": "delete_history_rows", "count": len(job_uids)},
+                        )
             return redirect(url_for("index"))
 
     error = None
@@ -1087,14 +1256,30 @@ def index():
         for row in history_rows_page:
             pname = str(row.get("printer") or "").strip()
             fname = str(row.get("filename") or "").strip()
-            if not pname or not fname:
+            if not pname:
                 row["_thumbs_enabled"] = False
                 row["_thumb_small"] = None
+                row["_thumb_unavailable"] = False
                 continue
             printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
             thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
             row["_thumbs_enabled"] = bool(thumbs_enabled)
-            row["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
+            token = str(row.get("thumbnail") or "").strip()
+            if thumbs_enabled and token:
+                row["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+                row["_thumb_unavailable"] = False
+            elif thumbs_enabled and fname:
+                thumb_url = get_job_thumbnail_url(
+                    pname,
+                    fname,
+                    size_hint="small",
+                    job_uid=str(row.get("job_uid") or "").strip() or None,
+                )
+                row["_thumb_small"] = thumb_url
+                row["_thumb_unavailable"] = bool(not thumb_url)
+            else:
+                row["_thumb_small"] = None
+                row["_thumb_unavailable"] = False
 
     return render_template(
         "index.html",
@@ -1128,60 +1313,21 @@ def index():
 @app.route("/reports")
 def reports_page():
     """Reports page with monthly breakdown and top printers."""
-    rows, error = load_rows_raw(CSV_FILE)
-    
-    # Apply date filtering
-    start_dt, end_dt, range_label, quick_range = get_date_range_from_params(request.args)
-    
-    if start_dt or end_dt:
-        filtered = []
-        for r in rows:
-            ts_raw = r.get("timestamp_raw")
-            if not ts_raw:
-                continue
-            try:
-                row_dt = ts_to_local_dt(float(ts_raw))
-                if start_dt and row_dt < start_dt:
-                    continue
-                if end_dt and row_dt > end_dt:
-                    continue
-                filtered.append(r)
-            except Exception:
-                continue
-        rows = filtered
-
-    monthly = compute_monthly_breakdown(rows)
-    top_printers = compute_top_printers(rows, limit=5)
-    summary = compute_summary(rows) or {}
-    summary.setdefault("total_prints", 0)
-    summary.setdefault("total_hours", 0.0)
-    summary.setdefault("total_meters", 0.0)
-    summary.setdefault("total_cost", 0.0)
-    summary.setdefault("per_day", {})
-    summary.setdefault("per_printer", {})
-
-    pause_analytics = compute_pause_analytics(rows)
-    
-    # Aggregate by material and profile
-    material_summary = aggregate_by_material(rows)
-    
-    # Load profiles for profile aggregation
-    all_profiles = profiles.get_all_profiles()
-    profile_summary = aggregate_by_profile(rows, all_profiles)
+    data = reports_repo.get_reports_data(request.args)
 
     return render_template(
         "reports.html",
-        monthly_breakdown=monthly,
-        top_printers=top_printers,
-        summary=summary,
-        pause_analytics=pause_analytics,
-        material_summary=material_summary,
-        profile_summary=profile_summary,
-        range_label=range_label,
-        quick_range=quick_range,
-        start_date=request.args.get("start_date", ""),
-        end_date=request.args.get("end_date", ""),
-        error=error,
+        monthly_breakdown=data.get("monthly_breakdown", []),
+        top_printers=data.get("top_printers", []),
+        summary=data.get("summary", {}),
+        pause_analytics=data.get("pause_analytics", {}),
+        material_summary=data.get("material_summary", []),
+        profile_summary=data.get("profile_summary", []),
+        range_label=data.get("range_label", ""),
+        quick_range=data.get("quick_range", ""),
+        start_date=data.get("start_date", ""),
+        end_date=data.get("end_date", ""),
+        error=data.get("error"),
     )
 
 
@@ -1249,6 +1395,168 @@ def _parse_int(value, default):
         return default
 
 
+def _is_sql_only() -> bool:
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
+def _load_history_rows_for_recalc() -> tuple[list, str | None]:
+    if _is_sql_only():
+        try:
+            history_query = history_repo.HistoryQuery()
+            history_result = history_repo.list_history_rows_sql(history_query, page=1, per_page=25, error=None)
+            return history_result.rows_all, history_result.error
+        except Exception as exc:
+            return [], f"Error loading history from SQL: {exc}"
+    return load_rows_raw(CSV_FILE)
+
+
+def _sum_total_cost_sql(job_uids: list[str]) -> float:
+    if not job_uids:
+        return 0.0
+    placeholders = ",".join(["?"] * len(job_uids))
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
+            job_uids,
+        ).fetchone()
+        if not row:
+            return 0.0
+        return float(row["total"] or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
+    if not job_uids:
+        return 0
+    placeholders = ",".join(["?"] * len(job_uids))
+    updated = 0
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            f"""
+            SELECT
+                j.job_uid,
+                p.name AS printer,
+                j.duration_seconds,
+                j.filament_mm,
+                j.paused_seconds_total
+            FROM jobs j
+            JOIN printers p ON j.printer_id = p.id
+            WHERE j.job_uid IN ({placeholders})
+            """,
+            job_uids,
+        ).fetchall()
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for row in rows:
+            job_uid = str(row["job_uid"] or "").strip()
+            if not job_uid:
+                continue
+            printer = str(row["printer"] or "").strip()
+            try:
+                duration_seconds = float(row["duration_seconds"] or 0.0)
+            except Exception:
+                duration_seconds = 0.0
+            try:
+                filament_mm = float(row["filament_mm"] or 0.0)
+            except Exception:
+                filament_mm = 0.0
+            try:
+                paused_seconds_total = float(row["paused_seconds_total"] or 0.0)
+            except Exception:
+                paused_seconds_total = 0.0
+
+            computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
+            if not computed:
+                continue
+
+            conn.execute(
+                """
+                UPDATE jobs
+                   SET duration_hours = ?,
+                       filament_meters = ?,
+                       rate_per_hour = ?,
+                       filament_mode = ?,
+                       filament_rate = ?,
+                       grams_per_meter = ?,
+                       time_cost = ?,
+                       material_cost = ?,
+                       total_cost = ?,
+                       filament_profile_id = ?,
+                       filament_material = ?,
+                       updated_at = ?
+                 WHERE job_uid = ?
+                """,
+                (
+                    computed.get("duration_hours"),
+                    computed.get("filament_meters"),
+                    computed.get("rate_per_hour"),
+                    computed.get("filament_mode"),
+                    computed.get("filament_rate"),
+                    computed.get("grams_per_meter"),
+                    computed.get("time_cost"),
+                    computed.get("material_cost"),
+                    computed.get("total_cost"),
+                    computed.get("filament_profile_id"),
+                    computed.get("filament_material"),
+                    now_iso,
+                    job_uid,
+                ),
+            )
+            updated += 1
+
+        conn.commit()
+    except Exception as exc:
+        app.logger.warning("SQL recalc failed: %s", exc)
+    if updated:
+        app.logger.info("SQL recalc updated %s job(s).", updated)
+    return updated
+
+
+def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
+    if not job_uids:
+        return 0
+    placeholders = ",".join(["?"] * len(job_uids))
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            f"UPDATE jobs SET status = 'completed', failure_reason = NULL, updated_at = ? "
+            f"WHERE job_uid IN ({placeholders}) AND status = 'printing'",
+            [now_iso, *job_uids],
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    except Exception:
+        return 0
+
+
+def _delete_jobs_sql(job_uids: list[str]) -> int:
+    if not job_uids:
+        return 0
+    placeholders = ",".join(["?"] * len(job_uids))
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        conn.execute(
+            f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
+            job_uids,
+        )
+        cur = conn.execute(
+            f"DELETE FROM jobs WHERE job_uid IN ({placeholders})",
+            job_uids,
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+    except Exception:
+        return 0
+
+
 @app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
 def recalculate_page():
     """
@@ -1259,7 +1567,7 @@ def recalculate_page():
       - Never changes job_uid / printer / filename / timestamps
       - Only rewrites computed pricing fields (same behavior as existing bulk recalc)
     """
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = _load_history_rows_for_recalc()
     message = request.args.get("msg", "").strip()
 
     filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args)
@@ -1428,7 +1736,7 @@ def recalculate_run():
     rate_per_hour_override_raw = (request.form.get("rate_per_hour_override") or "").strip()
     filament_rate_per_meter_override_raw = (request.form.get("filament_rate_per_meter_override") or "").strip()
 
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = _load_history_rows_for_recalc()
     if error:
         return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
 
@@ -1498,18 +1806,22 @@ def recalculate_run():
                 except Exception:
                     continue
 
-        updated = storage_backend.recalc_jobs(to_update, compute_fn)
+        if _is_sql_only():
+            updated = _recalc_jobs_sql(to_update, compute_fn)
+            after_total = _sum_total_cost_sql(to_update)
+        else:
+            updated = storage_backend.recalc_jobs(to_update, compute_fn)
 
-        after_rows, after_error = load_rows_raw(CSV_FILE)
-        after_total = 0.0
-        if not after_error:
-            for r in (after_rows or []):
-                uid = str(r.get("job_uid") or "").strip()
-                if uid and uid in to_update:
-                    try:
-                        after_total += float(r.get("total_cost") or 0.0)
-                    except Exception:
-                        continue
+            after_rows, after_error = load_rows_raw(CSV_FILE)
+            after_total = 0.0
+            if not after_error:
+                for r in (after_rows or []):
+                    uid = str(r.get("job_uid") or "").strip()
+                    if uid and uid in to_update:
+                        try:
+                            after_total += float(r.get("total_cost") or 0.0)
+                        except Exception:
+                            continue
 
         uids_sorted = sorted(to_update)
         uids_hash = hashlib.sha256(("|".join(uids_sorted)).encode("utf-8")).hexdigest()
@@ -1647,7 +1959,7 @@ def recalculate_preview():
     rate_per_hour_override_raw = (request.form.get("rate_per_hour_override") or "").strip()
     filament_rate_per_meter_override_raw = (request.form.get("filament_rate_per_meter_override") or "").strip()
 
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = _load_history_rows_for_recalc()
     if error:
         return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
 
@@ -1890,7 +2202,10 @@ def projects_page():
 
             elif action == "recalc_costs":
                 job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
-                updated = storage_backend.recalc_jobs(job_ids, compute_costs)
+                if _is_sql_only():
+                    updated = _recalc_jobs_sql(job_ids, compute_costs)
+                else:
+                    updated = storage_backend.recalc_jobs(job_ids, compute_costs)
                 redirect_args = {"msg": f"Recalculated costs for {updated} job(s)."}
 
             elif action == "create_manual_job":
@@ -2092,9 +2407,11 @@ def projects_page():
         return redirect(url_for("projects_page", **redirect_args))
 
     # GET
-    rows, rows_error = load_rows_raw(CSV_FILE)
-    if rows_error:
-        error = rows_error
+    history_query = history_repo.HistoryQuery()
+    history_result = history_repo.list_history_rows(history_query, page=1, per_page=1)
+    rows = history_result.rows_all
+    if history_result.error:
+        error = history_result.error
 
     error = request.args.get("error") or error
     message = request.args.get("msg", "").strip()
@@ -2224,27 +2541,59 @@ def projects_page():
     for j in unassigned_jobs_page:
         pname = str(j.get("printer") or "").strip()
         fname = str(j.get("filename") or "").strip()
-        if not pname or not fname:
+        if not pname:
             j["_thumbs_enabled"] = False
             j["_thumb_small"] = None
+            j["_thumb_unavailable"] = False
             continue
         printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
         thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
         j["_thumbs_enabled"] = bool(thumbs_enabled)
-        j["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
+        token = str(j.get("thumbnail") or "").strip()
+        if thumbs_enabled and token:
+            j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+            j["_thumb_unavailable"] = False
+        elif thumbs_enabled and fname:
+            thumb_url = get_job_thumbnail_url(
+                pname,
+                fname,
+                size_hint="small",
+                job_uid=str(j.get("job_uid") or "").strip() or None,
+            )
+            j["_thumb_small"] = thumb_url
+            j["_thumb_unavailable"] = bool(not thumb_url)
+        else:
+            j["_thumb_small"] = None
+            j["_thumb_unavailable"] = False
 
     for p in project_rows:
         for j in p.get("jobs", []) or []:
             pname = str(j.get("printer") or "").strip()
             fname = str(j.get("filename") or "").strip()
-            if not pname or not fname:
+            if not pname:
                 j["_thumbs_enabled"] = False
                 j["_thumb_small"] = None
+                j["_thumb_unavailable"] = False
                 continue
             printer_cfg = settings.get(pname, {}) if isinstance(settings, dict) else {}
             thumbs_enabled = printer_cfg.get("thumbnails_enabled", True) is not False
             j["_thumbs_enabled"] = bool(thumbs_enabled)
-            j["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if thumbs_enabled else None
+            token = str(j.get("thumbnail") or "").strip()
+            if thumbs_enabled and token:
+                j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+                j["_thumb_unavailable"] = False
+            elif thumbs_enabled and fname:
+                thumb_url = get_job_thumbnail_url(
+                    pname,
+                    fname,
+                    size_hint="small",
+                    job_uid=str(j.get("job_uid") or "").strip() or None,
+                )
+                j["_thumb_small"] = thumb_url
+                j["_thumb_unavailable"] = bool(not thumb_url)
+            else:
+                j["_thumb_small"] = None
+                j["_thumb_unavailable"] = False
 
     # Server-backed per-table column visibility (Settings → Other).
     projects_unassigned_visible_cols = get_visible_columns_for_table(
@@ -2427,7 +2776,7 @@ def _settings_view(tab: str):
                         _settings_endpoint_for_action(action),
                         error=(
                             f"No Moonraker URL configured for {printer}. "
-                            "Set settings.json moonraker_url for this printer, then retry."
+                              "Set a Moonraker URL for this printer, then retry."
                         ),
                     )
                 )
@@ -2436,6 +2785,66 @@ def _settings_view(tab: str):
             if ok:
                 return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker OK for {printer}: {base_url}"))
             return redirect(url_for(_settings_endpoint_for_action(action), error=f"Moonraker test failed for {printer}: {detail} ({base_url})"))
+
+        if action == "save_moonraker_url":
+            printer = (request.form.get("printer") or "").strip()
+            url_raw = (request.form.get("moonraker_url") or "").strip()
+            if not printer:
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+
+            url = url_raw.strip()
+            if url and not (url.startswith("http://") or url.startswith("https://")):
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Moonraker URL must start with http:// or https://"))
+
+            try:
+                if _is_sql_only():
+                    with db_module.connect_db() as conn:
+                        db_module.apply_migrations(conn)
+                        db_module.upsert_printer(conn, printer, url)
+                        conn.commit()
+                else:
+                    settings = load_settings(SETTINGS_FILE)
+                    if printer not in settings:
+                        settings[printer] = {}
+                    settings[printer]["moonraker_url"] = url or ""
+                    save_settings(SETTINGS_FILE, DATA_DIR, settings)
+            except Exception as exc:
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"Failed to save Moonraker URL: {exc}"))
+
+            return redirect(url_for(_settings_endpoint_for_action(action), msg=f"Moonraker URL saved for {printer}."))
+
+        if action == "test_moonraker_url":
+            printer = (request.form.get("printer") or "").strip()
+            url_raw = (request.form.get("moonraker_url") or "").strip()
+            if not printer:
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+
+            url = url_raw.strip()
+            if not url:
+                url = thumbs.resolve_moonraker_base_url(printer) or ""
+            if not url:
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"No Moonraker URL configured for {printer}."))
+            if url and not (url.startswith("http://") or url.startswith("https://")):
+                return redirect(url_for(_settings_endpoint_for_action(action), error="Moonraker URL must start with http:// or https://"))
+
+            probe = probe_moonraker_server_info(url)
+            if probe.get("ok"):
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        msg=f"Moonraker OK for {printer}: {url}",
+                        **{f"moonraker_url_{printer}": url},
+                    )
+                )
+            detail = probe.get("error") or "Probe failed"
+            code = probe.get("status_code")
+            return redirect(
+                url_for(
+                    _settings_endpoint_for_action(action),
+                    error=f"Moonraker test failed for {printer}: {detail} ({code}) {url}",
+                    **{f"moonraker_url_{printer}": url},
+                )
+            )
 
         if action == "import_moonraker_history":
             printer = (request.form.get("printer") or "").strip()
@@ -2449,7 +2858,7 @@ def _settings_view(tab: str):
                         _settings_endpoint_for_action(action),
                         error=(
                             f"No Moonraker URL configured for {printer}. "
-                            "Set settings.json moonraker_url for this printer, then retry."
+                              "Set a Moonraker URL for this printer, then retry."
                         ),
                     )
                 )
@@ -2463,20 +2872,30 @@ def _settings_view(tab: str):
                     limit = 200
                 limit = max(1, min(5000, limit))
 
-            skip_existing = bool(request.form.get("import_skip_existing"))
-            overwrite_existing = bool(request.form.get("import_overwrite_existing"))
-            if overwrite_existing:
-                skip_existing = False
+            import_mode = (request.form.get("import_mode") or "").strip().lower()
+            if import_mode not in ("skip", "overwrite"):
+                import_mode = "overwrite" if request.form.get("import_overwrite_existing") else "skip"
+            skip_existing = import_mode != "overwrite"
+            overwrite_existing = import_mode == "overwrite"
 
-            summary = import_moonraker_history_to_csv(
-                csv_file=CSV_FILE,
-                headers=HEADERS,
-                printer_name=printer,
-                base_url=base_url,
-                limit=limit,
-                skip_existing=skip_existing,
-                overwrite_existing=overwrite_existing,
-            )
+            if _is_sql_only():
+                summary = import_moonraker_history_to_sql(
+                    printer_name=printer,
+                    base_url=base_url,
+                    limit=limit,
+                    skip_existing=skip_existing,
+                    overwrite_existing=overwrite_existing,
+                )
+            else:
+                summary = import_moonraker_history_to_csv(
+                    csv_file=CSV_FILE,
+                    headers=HEADERS,
+                    printer_name=printer,
+                    base_url=base_url,
+                    limit=limit,
+                    skip_existing=skip_existing,
+                    overwrite_existing=overwrite_existing,
+                )
 
             counts = (
                 f"imported={summary.get('imported', 0)}, "
@@ -2698,6 +3117,31 @@ def _settings_view(tab: str):
     for p in printers:
         printer_configs[p] = get_pricing_for_printer_raw(p)
 
+    moonraker_urls = {}
+    try:
+        with db_module.connect_db() as conn:
+            db_module.apply_migrations(conn)
+            for p in printers:
+                moonraker_urls[p] = db_module.get_printer_moonraker_url(conn, p) or ""
+    except Exception:
+        for p in printers:
+            moonraker_urls[p] = ""
+
+    if not isinstance(settings, dict):
+        settings = {}
+    for p in printers:
+        if not moonraker_urls.get(p):
+            moonraker_urls[p] = str(settings.get(p, {}).get("moonraker_url") or "").strip()
+
+    # Preserve any in-form Moonraker URL when returning from a test action.
+    try:
+        for p in printers:
+            arg_key = f"moonraker_url_{p}"
+            if arg_key in request.args:
+                moonraker_urls[p] = (request.args.get(arg_key) or "").strip()
+    except Exception:
+        pass
+
     active_rate_profiles = {}
     for p in printers:
         active_rate_profiles[p] = settings.get(p, {}).get("active_rate_profile_id", "")
@@ -2743,12 +3187,14 @@ def _settings_view(tab: str):
         page_title="Print Cost Settings",
         settings_tab=tab,
         settings_subtitle=subtitle_by_tab[tab],
+        sql_only=_is_sql_only(),
         message=message,
         error=error,
         printers=printers,
         discovered_printers=discovered_printers,
         configs=printer_configs,
         printer_settings=settings,
+        moonraker_urls=moonraker_urls,
         headers=[h for h in HEADERS if h != "job_uid"],
         friendly_headers=FRIENDLY_HEADERS,
         selected_columns=selected_columns,
@@ -2781,6 +3227,42 @@ def settings_other_page():
     return _settings_view(tab="other")
 
 
+@app.route("/printer-diagnostics", methods=["GET"])
+def printer_diagnostics_page():
+    printers = sorted(get_known_printers())
+    results = []
+    for pname in printers:
+        base_url = thumbs.resolve_moonraker_base_url(pname)
+        if base_url:
+            probe = probe_moonraker_server_info(base_url)
+        else:
+            probe = {
+                "ok": False,
+                "status_code": None,
+                "content_type": "",
+                "body_preview": "",
+                "error": "Missing Moonraker URL",
+                "payload": None,
+            }
+        results.append(
+            {
+                "printer": pname,
+                "moonraker_url": base_url or "",
+                "ok": bool(probe.get("ok")),
+                "status_code": probe.get("status_code"),
+                "content_type": probe.get("content_type") or "",
+                "error": probe.get("error") or "",
+                "body_preview": probe.get("body_preview") or "",
+                "api_key_configured": bool(API_KEY),
+            }
+        )
+
+    return render_template(
+        "printer_diagnostics.html",
+        page_title="Printer Diagnostics",
+        results=results,
+    )
+
 @app.route("/settings/pause", methods=["GET", "POST"], endpoint="settings_pause_page")
 def settings_pause_page():
     return _settings_view(tab="pause")
@@ -2790,6 +3272,14 @@ def settings_pause_page():
 def download_csv():
     """Download CSV file."""
     import os
+    if _is_sql_only():
+        try:
+            from core.export_csv import export_csv_from_sql
+            tmp_path = os.path.join(DATA_DIR, "_tmp_print_costs_from_sql.csv")
+            export_csv_from_sql(out_path=tmp_path, overwrite=True)
+            return send_file(tmp_path, as_attachment=True, download_name="print_costs.csv")
+        except Exception as exc:
+            return f"CSV export failed: {exc}", 500
     if not os.path.exists(CSV_FILE):
         return "No data available", 404
     return send_file(CSV_FILE, as_attachment=True, download_name="print_costs.csv")

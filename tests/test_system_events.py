@@ -49,7 +49,31 @@ class SystemEventsTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn(b"System Events", resp.data)
 
+    def test_emit_and_list_sql_only(self):
+        import os as _os
+        import tempfile as _tempfile
+        from core import system_events as se
+        from core import db as db_module
+
+        orig_env = _os.environ.get("KCD_STORAGE_BACKEND")
+        _os.environ["KCD_STORAGE_BACKEND"] = "sql"
+
+        tmpdir = _tempfile.TemporaryDirectory()
+        orig_db_path = db_module._db_path
+        db_module._db_path = lambda: _os.path.join(tmpdir.name, "kcd.db")
+
+        try:
+            se.emit_event("activity", "SQL1", "hello-sql")
+            events = se.list_events("all", limit=10)
+            self.assertTrue(any(e.get("title") == "SQL1" for e in events))
+        finally:
+            db_module._db_path = orig_db_path
+            if orig_env is None:
+                _os.environ.pop("KCD_STORAGE_BACKEND", None)
+            else:
+                _os.environ["KCD_STORAGE_BACKEND"] = orig_env
+            tmpdir.cleanup()
+
 
 if __name__ == "__main__":
     unittest.main()
-

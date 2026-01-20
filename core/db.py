@@ -67,6 +67,36 @@ def _checksum(data: str) -> str:
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        for row in rows:
+            if str(row["name"]) == column:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _check_external_id_duplicates(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT external_id, COUNT(*) AS cnt
+        FROM printers
+        WHERE external_id IS NOT NULL AND TRIM(external_id) != ''
+        GROUP BY external_id
+        HAVING cnt > 1
+        """
+    ).fetchall()
+    if rows:
+        sample = ", ".join(str(r["external_id"]) for r in rows[:5])
+        raise ValueError(
+            "Duplicate printers.external_id values detected; "
+            f"cannot create UNIQUE index (examples: {sample}). "
+            "Resolve duplicates or clear external_id values before migrating."
+        )
+
+
 def apply_migrations(conn: sqlite3.Connection) -> list[str]:
     _ensure_schema_migrations(conn)
     applied = {
@@ -84,7 +114,15 @@ def apply_migrations(conn: sqlite3.Connection) -> list[str]:
             applied_versions.append(version)
             continue
         logger.info("Applying migration %s", version)
-        conn.executescript(sql)
+        if version == "0003_printers_external_id":
+            if not _column_exists(conn, "printers", "external_id"):
+                conn.execute("ALTER TABLE printers ADD COLUMN external_id TEXT NULL")
+            _check_external_id_duplicates(conn)
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_printers_external_id ON printers(external_id)"
+            )
+        else:
+            conn.executescript(sql)
         conn.execute(
             "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
             (version, _utc_now_iso(), checksum),
@@ -111,21 +149,56 @@ def init_db() -> str:
     return version or "none"
 
 
-def upsert_printer(conn: sqlite3.Connection, name: str, moonraker_url: Optional[str] = None) -> int:
+def upsert_printer(
+    conn: sqlite3.Connection,
+    name: str,
+    moonraker_url: Optional[str] = None,
+    external_id: Optional[str] = None,
+) -> int:
     name = str(name or "").strip()
+    external_id = str(external_id or "").strip() or None
     if not name:
         raise ValueError("printer name is required")
     now = _utc_now_iso()
+    url_provided = moonraker_url is not None
+    url_value = None
+    if url_provided:
+        url_value = str(moonraker_url).strip()
+        if url_value == "":
+            url_value = None
+
+    if external_id:
+        row = conn.execute("SELECT id FROM printers WHERE external_id = ?", (external_id,)).fetchone()
+        if row:
+            if url_provided:
+                conn.execute(
+                    "UPDATE printers SET name = ?, moonraker_url = ?, updated_at = ? WHERE external_id = ?",
+                    (name, url_value, now, external_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE printers SET name = ?, updated_at = ? WHERE external_id = ?",
+                    (name, now, external_id),
+                )
+            return int(row["id"])
+
     row = conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()
     if row:
-        conn.execute(
-            "UPDATE printers SET moonraker_url = ?, updated_at = ? WHERE name = ?",
-            (moonraker_url, now, name),
-        )
+        if url_provided:
+            conn.execute(
+                "UPDATE printers SET moonraker_url = ?, updated_at = ? WHERE name = ?",
+                (url_value, now, name),
+            )
+        else:
+            conn.execute(
+                "UPDATE printers SET updated_at = ? WHERE name = ?",
+                (now, name),
+            )
         return int(row["id"])
+
     conn.execute(
-        "INSERT INTO printers (name, moonraker_url, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (name, moonraker_url, now, now),
+        "INSERT INTO printers (name, moonraker_url, external_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (name, url_value, external_id, now, now),
     )
     return int(conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()["id"])
 
@@ -133,6 +206,18 @@ def upsert_printer(conn: sqlite3.Connection, name: str, moonraker_url: Optional[
 def get_printer_id(conn: sqlite3.Connection, name: str) -> Optional[int]:
     row = conn.execute("SELECT id FROM printers WHERE name = ?", (name,)).fetchone()
     return int(row["id"]) if row else None
+
+
+def get_printer_moonraker_url(conn: sqlite3.Connection, name: str) -> Optional[str]:
+    row = conn.execute("SELECT moonraker_url FROM printers WHERE name = ?", (name,)).fetchone()
+    if not row:
+        return None
+    if hasattr(row, "__getitem__"):
+        return str(row["moonraker_url"] or "").strip() or None
+    try:
+        return str(row[0] or "").strip() or None
+    except Exception:
+        return None
 
 
 def job_exists(conn: sqlite3.Connection, job_uid: str) -> bool:

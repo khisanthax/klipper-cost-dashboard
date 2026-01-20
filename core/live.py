@@ -7,23 +7,33 @@ import time
 import os
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
+from core.sql_only import is_sql_only
 
-# File for persisting live job state
+# File for persisting live job state (SQL-only uses in-memory only)
 LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
 
 # In-memory job state: printer_name -> job_dict
 _jobs = {}
 
 
+def _is_sql_only() -> bool:
+    return is_sql_only()
+
+
 def _load_state():
     """Load live job state from disk."""
     global _jobs
+    if _is_sql_only():
+        _jobs = {}
+        return
     data = load_json_file(LIVE_JOBS_FILE)
     _jobs = data.get("jobs", {}) if data else {}
 
 
 def _save_state():
     """Save live job state to disk."""
+    if _is_sql_only():
+        return
     save_json_file(LIVE_JOBS_FILE, DATA_DIR, {"jobs": _jobs})
 
 

@@ -81,6 +81,7 @@ docker compose up -d
 - Update: `docker compose pull && docker compose up -d`
 - Version pin: change `ghcr.io/khisanthax/klipper-cost-dashboard:latest` to `:vX.Y.Z`
 - Data persistence / upgrades: all persistent state is stored in `./data` (mounted to `/app/data`). You can safely upgrade/replace the container image without losing history/settings. Back up the `data/` directory.
+- Runtime files: `data/settings.json` and `data/print_costs.csv` are created on first run from `data/settings.example.json` and `data/print_costs.example.csv`. These runtime files are local-only and not tracked in git.
 - Dev (build from source): copy `docker-compose.dev.yml.example` to `docker-compose.dev.yml` and run `docker compose -f docker-compose.dev.yml up -d --build`
 
 Quick support / troubleshooting (paste into GitHub issues):
@@ -90,6 +91,9 @@ docker compose ps
 docker compose logs --tail=200
 docker image ls | grep -E 'klipper-cost-dashboard|kcd'
 ```
+
+If long UUID fields (e.g., Profile ID / Job UID) make History rows tall, update to the latest version; the UI now truncates those columns with ellipsis and shows full values on hover.
+If duration/thumbnail is missing for a printer, open **Settings → Printers → Diagnostics** and verify Moonraker connectivity (401/URL/HTML responses will show up there).
 
 ## Experimental SQL backend (Phases 0–3)
 
@@ -117,7 +121,75 @@ KCD_READ_BACKEND=sql python app.py
 
 To roll back, set `KCD_READ_BACKEND=csv` (default). Other pages still read CSV in this phase.
 
+Enable SQL reads for Reports (Phase 4):
+
+```bash
+KCD_REPORTS_BACKEND=sql python app.py
+```
+
+To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page uses SQL in this phase.
+
 The database is stored at `data/kcd.db`.
+
+In SQL-only mode, exports are generated from SQL on demand (e.g. Download CSV uses a temporary SQL export).
+Backups remain user-triggered exports; runtime does not depend on backup/export files.
+
+### SQL-only mode guarantees
+When `KCD_STORAGE_BACKEND=sql`:
+- Runtime state comes from SQL only; CSV/JSON files are not read or written.
+- Allowed filesystem usage is limited to caches and explicit exports.
+  - Thumbnail cache (default `data/thumb_cache/`, configurable via `KCD_THUMB_CACHE_DIR`)
+  - Explicit export outputs (Download CSV or `python -m kcd export ...`)
+  - Backup archives under `data/backups/`
+
+SQL-only validation helper:
+```
+PYTHONPATH=. python tools/validate_sql_only.py
+```
+
+Phase 5 installer notes: the installer can initialize the DB and import from CSV, and a
+DB + CSV setup is expected (dual/compat mode). The installer keeps `settings.json`
+moonraker_url mappings in sync until SQL becomes the source of truth. For SQL-capable
+installs, prefer `KCD_REPORTS_BACKEND=auto` to use SQL with CSV fallback.
+
+### SQL/CSV parity after backfill
+
+If you backfilled SQL from Moonraker, SQL can legitimately have more jobs than `data/print_costs.csv`.
+When this happens, reports parity will show mismatches because the datasets differ.
+
+To regenerate a legacy CSV from SQL (same column order as `print_costs.csv`):
+
+```bash
+python -m kcd export csv --from sql --out data/print_costs.csv --overwrite
+```
+
+Reports parity enhancements:
+
+```bash
+# Dump job-set differences to data/parity_sql_only.json and data/parity_csv_only.json
+python -m kcd reports parity --range 90d --dump-job-diff
+
+# Compare SQL against a temporary CSV generated from SQL
+python -m kcd reports parity --range 90d --regen-csv-from-sql
+```
+
+### Reports cache
+
+SQL reports support a DB-backed cache (default TTL 300s):
+
+```bash
+KCD_REPORTS_CACHE_TTL_SECONDS=300 python app.py
+```
+
+Set `KCD_REPORTS_CACHE_TTL_SECONDS=0` to disable caching. You can inspect/clear cache via:
+
+```bash
+python -m kcd cache info
+python -m kcd cache clear
+```
+
+When `KCD_REPORTS_BACKEND=auto` chooses SQL and the CSV appears behind the DB, KCD logs a warning suggesting:
+`python -m kcd export csv --from sql --overwrite`.
 
 ### 1. Install the Master
 

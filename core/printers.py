@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Set
 
 from core.config import DATA_DIR, SETTINGS_FILE, DISPLAY_FILE, HEADERS
 from core.storage import load_display_settings, load_settings
+from core.sql_only import is_sql_only
+from core import db as db_module
 
 
 def looks_like_gcode_filename(value: str) -> bool:
@@ -75,6 +78,32 @@ def _load_installer_printers() -> Set[str]:
     return out
 
 
+def _is_sql_only() -> bool:
+    return is_sql_only()
+
+
+def _load_sql_printers() -> Set[str]:
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute("SELECT name FROM printers").fetchall()
+    except Exception:
+        return set()
+    out: Set[str] = set()
+    for r in rows:
+        if isinstance(r, sqlite3.Row):
+            name = _norm(r["name"])
+        elif isinstance(r, (tuple, list)):
+            name = _norm(r[0])
+        elif isinstance(r, dict):
+            name = _norm(r.get("name"))
+        else:
+            name = _norm(getattr(r, "name", ""))
+        if name:
+            out.add(name)
+    return out
+
+
 def get_canonical_printer_names(include_hidden: bool = False) -> Set[str]:
     """
     Return canonical printer names from persisted registries.
@@ -82,12 +111,16 @@ def get_canonical_printer_names(include_hidden: bool = False) -> Set[str]:
     - By default, soft-hidden printers are excluded (hidden_printers in display.json).
     - Any name that looks like a .gcode filename is excluded.
     """
-    settings = load_settings(SETTINGS_FILE)
-    configured = {_norm(p) for p in settings.keys() if _norm(p)}
-    installed = _load_installer_printers()
+    if _is_sql_only():
+        configured = _load_sql_printers()
+        installed = set()
+    else:
+        settings = load_settings(SETTINGS_FILE)
+        configured = {_norm(p) for p in settings.keys() if _norm(p)}
+        installed = _load_installer_printers()
 
     hidden: Set[str] = set()
-    if not include_hidden:
+    if not include_hidden and not _is_sql_only():
         hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
 
     names = (configured | installed) - hidden
@@ -144,4 +177,3 @@ def normalize_incoming_printer_and_filename(
         )
 
     return NormalizedPrinterAndFilename(printer_name=printer, filename=filename, valid_printer=True)
-

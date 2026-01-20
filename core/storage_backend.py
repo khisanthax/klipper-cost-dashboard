@@ -18,14 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _mode() -> str:
-    mode = str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower()
-    if mode == "sql":
-        logger.warning(
-            "KCD_STORAGE_BACKEND=sql is not supported yet (UI still reads CSV). "
-            "Falling back to dual-write."
-        )
-        return "dual"
-    return mode
+    return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower()
 
 
 def _as_float(value: object) -> float:
@@ -102,17 +95,66 @@ def write_job(row: dict) -> None:
 
 
 def recalc_jobs(job_uids: Iterable[str], compute_costs_fn) -> int:
+    mode = _mode()
+    uid_set = {str(u or "").strip() for u in (job_uids or []) if str(u or "").strip()}
+    if not uid_set:
+        return 0
+
+    if mode == "sql":
+        updated = 0
+        try:
+            with db_module.connect_db() as conn:
+                db_module.apply_migrations(conn)
+                rows = conn.execute(
+                    "SELECT job_uid, printer_id, duration_seconds, filament_mm, paused_seconds_total "
+                    "FROM jobs WHERE job_uid IN (%s)" % (",".join(["?"] * len(uid_set))),
+                    list(uid_set),
+                ).fetchall()
+                for row in rows:
+                    job_uid = row["job_uid"] if hasattr(row, "__getitem__") else row[0]
+                    printer_id = row["printer_id"] if hasattr(row, "__getitem__") else row[1]
+                    printer_row = conn.execute("SELECT name FROM printers WHERE id = ?", (printer_id,)).fetchone()
+                    printer_name = printer_row["name"] if printer_row else ""
+                    duration_seconds = float(row["duration_seconds"] or 0.0) if hasattr(row, "__getitem__") else float(row[2] or 0.0)
+                    filament_mm = float(row["filament_mm"] or 0.0) if hasattr(row, "__getitem__") else float(row[3] or 0.0)
+                    paused_seconds_total = float(row["paused_seconds_total"] or 0.0) if hasattr(row, "__getitem__") else float(row[4] or 0.0)
+
+                    cost_data = compute_costs_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
+                    conn.execute(
+                        "UPDATE jobs SET "
+                        "duration_hours = ?, filament_meters = ?, rate_per_hour = ?, filament_rate = ?, "
+                        "grams_per_meter = ?, time_cost = ?, material_cost = ?, total_cost = ?, updated_at = ? "
+                        "WHERE job_uid = ?",
+                        (
+                            cost_data.get("duration_hours"),
+                            cost_data.get("filament_meters"),
+                            cost_data.get("rate_per_hour"),
+                            cost_data.get("filament_rate"),
+                            cost_data.get("grams_per_meter"),
+                            cost_data.get("time_cost"),
+                            cost_data.get("material_cost"),
+                            cost_data.get("total_cost"),
+                            db_module._utc_now_iso(),
+                            job_uid,
+                        ),
+                    )
+                    updated += 1
+                conn.commit()
+        except Exception as exc:
+            logger.error("SQL recalc failed: %s", exc)
+            raise
+        return updated
+
+    # CSV or dual mode (legacy behavior)
     updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_uids, compute_costs_fn)
     if updated <= 0:
         return updated
 
-    mode = _mode()
-    if mode not in ("sql", "dual"):
+    if mode != "dual":
         return updated
 
     try:
         rows, _ = load_rows_raw(CSV_FILE)
-        uid_set = {str(u or "").strip() for u in (job_uids or []) if str(u or "").strip()}
         with db_module.connect_db() as conn:
             db_module.apply_migrations(conn)
             for row in rows:
@@ -120,9 +162,6 @@ def recalc_jobs(job_uids: Iterable[str], compute_costs_fn) -> int:
                     db_module.upsert_job(conn, row)
             conn.commit()
     except Exception as exc:
-        if mode == "dual":
-            logger.error("SQL recalc sync failed in dual mode: %s", exc)
-        else:
-            raise
+        logger.error("SQL recalc sync failed in dual mode: %s", exc)
 
     return updated

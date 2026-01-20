@@ -14,6 +14,15 @@
     decoding="async"
   >
 {% else %}
-  <span class="kcd-thumb-placeholder kcd-thumb-{{ _size }}" aria-hidden="true"></span>
+  {% set _unavail = thumb_unavailable|default(false) %}
+  <span class="kcd-thumb-wrap kcd-thumb-{{ _size }}">
+    <span
+      class="kcd-thumb-placeholder kcd-thumb-{{ _size }}{% if _unavail %} kcd-thumb-unavailable{% endif %}"
+      {% if _unavail %}title="Thumbnail unavailable (file not found on printer)"{% endif %}
+      aria-hidden="true"
+    ></span>
+    {% if _unavail %}
+      <span class="kcd-thumb-note">Unavailable</span>
+    {% endif %}
+  </span>
 {% endif %}
-

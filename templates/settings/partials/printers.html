@@ -81,7 +81,7 @@
             <div class="d-flex justify-content-between align-items-center mt-3">
                 <div class="d-flex align-items-center gap-3 flex-wrap">
                     <button type="submit" class="btn btn-primary" name="action" value="save_printer_defaults">Save to defaults</button>
-                    <button type="submit" class="btn btn-outline-secondary" name="action" value="test_moonraker">Test Moonraker</button>
+                    <a class="btn btn-outline-info" href="{{ url_for('printer_diagnostics_page') }}">Diagnostics</a>
 
                     {% set _ps = printer_settings.get(p, {}) %}
                     <div class="form-check form-switch ms-2">
@@ -115,6 +115,24 @@
             </div>
 
             <div class="border-top pt-3 mt-3">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label">Moonraker URL</label>
+                        <input type="text"
+                               name="moonraker_url"
+                               value="{{ moonraker_urls.get(p, '') }}"
+                               placeholder="http://192.168.2.123:7125"
+                               class="form-control">
+                        <div class="text-muted small mt-1">Used for thumbnails and duration finalization.</div>
+                    </div>
+                    <div class="col-md-4 d-flex flex-wrap gap-2">
+                        <button type="submit" class="btn btn-outline-primary" name="action" value="save_moonraker_url">Save URL</button>
+                        <button type="submit" class="btn btn-outline-secondary" name="action" value="test_moonraker_url">Test Moonraker</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-top pt-3 mt-3">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                     <span class="text-muted small me-2">Moonraker history import:</span>
                     <select name="import_limit" class="form-select form-select-sm" style="width: auto;">
@@ -124,12 +142,12 @@
                         <option value="all">All (may take a while)</option>
                     </select>
                     <div class="form-check form-check-inline mb-0">
-                        <input class="form-check-input" type="checkbox" id="import_skip_existing_{{ p }}" name="import_skip_existing" checked>
-                        <label class="form-check-label small" for="import_skip_existing_{{ p }}">Skip existing</label>
+                        <input class="form-check-input" type="radio" id="import_mode_skip_{{ p }}" name="import_mode" value="skip" checked>
+                        <label class="form-check-label small" for="import_mode_skip_{{ p }}">Skip existing</label>
                     </div>
                     <div class="form-check form-check-inline mb-0">
-                        <input class="form-check-input" type="checkbox" id="import_overwrite_existing_{{ p }}" name="import_overwrite_existing">
-                        <label class="form-check-label small" for="import_overwrite_existing_{{ p }}">Overwrite existing</label>
+                        <input class="form-check-input" type="radio" id="import_mode_overwrite_{{ p }}" name="import_mode" value="overwrite">
+                        <label class="form-check-label small" for="import_mode_overwrite_{{ p }}">Overwrite existing</label>
                     </div>
                     <button type="submit" class="btn btn-sm btn-outline-success" name="action" value="import_moonraker_history">
                         Import

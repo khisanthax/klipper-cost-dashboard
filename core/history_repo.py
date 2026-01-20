@@ -14,8 +14,10 @@ from core import db as db_module
 from core import pricing
 from core.config import CSV_FILE, HEADERS, TIMEZONE_OBJ
 from core.storage import load_rows_raw, ts_to_local_dt
+from core.sql_only import is_sql_only
 
 logger = logging.getLogger(__name__)
+_PROFILE_ID_WARNED = False
 
 @dataclass(frozen=True)
 class HistoryQuery:
@@ -84,6 +86,8 @@ def _pager_meta(total: int, page: int, per_page: int) -> dict:
 
 
 def _read_backend() -> Tuple[str, Optional[str]]:
+    if is_sql_only():
+        return "sql", None
     mode = str(os.getenv("KCD_READ_BACKEND", "csv")).strip().lower()
     if mode == "auto":
         mode = "sql"
@@ -229,6 +233,8 @@ def list_history_rows_sql(query: HistoryQuery, page: int, per_page: int, error: 
     rows_page = _fetch_sql_rows(conn, where_sql, params, limit=limit, offset=offset)
     rows_all = _fetch_sql_rows(conn, where_sql, params, limit=None, offset=None)
 
+    _warn_if_uniform_profile_id(conn)
+
     for idx, row in enumerate(rows_page[:3]):
         logger.debug(
             "history-sql row[%s] job_uid=%s duration_seconds=%s duration_hours=%s time_cost=%s",
@@ -361,6 +367,45 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
     return rows
 
 
+def _warn_if_uniform_profile_id(conn: sqlite3.Connection) -> None:
+    global _PROFILE_ID_WARNED
+    if _PROFILE_ID_WARNED:
+        return
+    _PROFILE_ID_WARNED = True
+
+    try:
+        since_epoch = int(datetime.now().timestamp()) - (90 * 24 * 3600)
+    except Exception:
+        return
+
+    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
+    try:
+        row = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(DISTINCT j.filament_profile_id) AS distinct_count
+            FROM jobs j
+            WHERE {ts_expr} >= ?
+              AND j.filament_profile_id IS NOT NULL
+              AND TRIM(j.filament_profile_id) != ''
+            """,
+            (since_epoch,),
+        ).fetchone()
+    except Exception:
+        return
+
+    if not row:
+        return
+    total = int(row["total"] or 0)
+    distinct_count = int(row["distinct_count"] or 0)
+    if total >= 10 and distinct_count == 1:
+        logger.warning(
+            "history-sql: filament_profile_id appears uniform across last 90d (%s rows, 1 distinct).",
+            total,
+        )
+
+
 def _as_float(value: object) -> Optional[float]:
     try:
         if value is None:
@@ -449,11 +494,9 @@ def compute_job_cost_fields(row: dict) -> dict:
         "time_cost",
         "material_cost",
         "total_cost",
-        "filament_profile_id",
-        "filament_material",
     ):
         val = cost_data.get(key)
-        if key in ("filament_mode", "filament_profile_id", "filament_material"):
+        if key == "filament_mode":
             if row.get(key) in (None, "") and val:
                 row[key] = val
             continue
@@ -461,3 +504,27 @@ def compute_job_cost_fields(row: dict) -> dict:
             row[key] = val
 
     return row
+
+
+def set_job_thumbnail(job_uid: str, token: str) -> None:
+    """
+    Persist a thumbnail token for a job row in SQL (best-effort).
+
+    The token should be the basename only (no suffix), e.g. "<hash>".
+    """
+    job_uid = str(job_uid or "").strip()
+    token = str(token or "").strip()
+    if not job_uid or not token:
+        return
+
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        conn.execute(
+            "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
+            (token, now, job_uid),
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.debug("history-sql: failed to set thumbnail for job_uid=%s (%s)", job_uid, exc)

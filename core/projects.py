@@ -20,13 +20,17 @@ import json
 import os
 import time
 import uuid
+import sqlite3
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.config import DATA_DIR
 from core.config import DEFAULT_PRICING
+from core import db as db_module
 from core.storage import compute_job_uid
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed
+from core.sql_only import is_sql_only
 
 
 PROJECTS_FILE = os.path.join(DATA_DIR, "projects.json")
@@ -85,7 +89,12 @@ def _ensure_data_dir() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
 
 
+def _is_sql_only() -> bool:
+    return is_sql_only()
+
+
 def _read_json(path: str, default: Any) -> Any:
+    require_file_reads_allowed(path, caller_hint="core.projects._read_json")
     if not os.path.exists(path):
         return default
     try:
@@ -98,6 +107,7 @@ def _read_json(path: str, default: Any) -> Any:
 
 
 def _write_json(path: str, data: Any) -> None:
+    require_file_writes_allowed(path, caller_hint="core.projects._write_json")
     _ensure_data_dir()
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -108,6 +118,8 @@ def _write_json(path: str, data: Any) -> None:
 
 def ensure_projects_files() -> None:
     """Create projects/assignments files if missing."""
+    if _is_sql_only():
+        return
     _ensure_data_dir()
     if not os.path.exists(PROJECTS_FILE):
         _write_json(PROJECTS_FILE, [])
@@ -117,6 +129,437 @@ def ensure_projects_files() -> None:
         _write_json(MANUAL_JOBS_FILE, [])
     if not os.path.exists(PLANS_FILE):
         _write_json(PLANS_FILE, [])
+
+
+def _parse_iso_to_epoch(value: object) -> float:
+    if value is None:
+        return 0.0
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _project_uid_from_row(row: sqlite3.Row) -> str:
+    pid = row["project_uid"] if "project_uid" in row.keys() else None
+    if pid:
+        return str(pid)
+    return str(row["id"])
+
+
+def _load_projects_sql() -> Dict[str, Project]:
+    try:
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                project_uid,
+                name,
+                notes,
+                status,
+                hourly_rate_override,
+                filament_cost_per_kg_override,
+                labor_only,
+                created_at,
+                updated_at
+            FROM projects
+            """
+        ).fetchall()
+    except Exception:
+        return {}
+
+    projects: Dict[str, Project] = {}
+    for row in rows:
+        pid = _project_uid_from_row(row)
+        name = str(row["name"] or "").strip()
+        if not pid or not name:
+            continue
+        projects[pid] = Project(
+            id=pid,
+            name=name,
+            notes=str(row["notes"] or ""),
+            hourly_rate_override=_opt_nonneg_float(row["hourly_rate_override"]),
+            filament_cost_per_kg_override=_opt_nonneg_float(row["filament_cost_per_kg_override"]),
+            labor_only=bool(row["labor_only"] or False),
+            created_at=_parse_iso_to_epoch(row["created_at"]),
+            updated_at=_parse_iso_to_epoch(row["updated_at"]),
+        )
+    return projects
+
+
+def _save_projects_sql(projects: Iterable[Project]) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    now = _iso_now()
+    for p in projects:
+        conn.execute(
+            """
+            INSERT INTO projects (
+                project_uid,
+                name,
+                notes,
+                status,
+                hourly_rate_override,
+                filament_cost_per_kg_override,
+                labor_only,
+                created_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_uid) DO UPDATE SET
+                name=excluded.name,
+                notes=excluded.notes,
+                status=excluded.status,
+                hourly_rate_override=excluded.hourly_rate_override,
+                filament_cost_per_kg_override=excluded.filament_cost_per_kg_override,
+                labor_only=excluded.labor_only,
+                updated_at=excluded.updated_at
+            """,
+            (
+                p.id,
+                p.name,
+                p.notes,
+                "active",
+                p.hourly_rate_override,
+                p.filament_cost_per_kg_override,
+                1 if p.labor_only else 0,
+                now,
+                now,
+            ),
+        )
+    conn.commit()
+
+
+def _load_assignments_sql() -> Dict[str, str]:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    assignments: Dict[str, str] = {}
+    for row in conn.execute(
+        """
+        SELECT pa.job_uid, p.id AS project_id, p.project_uid
+        FROM project_assignments pa
+        JOIN projects p ON pa.project_id = p.id
+        """
+    ):
+        job_uid = str(row["job_uid"] or "").strip()
+        if not job_uid:
+            continue
+        pid = str(row["project_uid"] or row["project_id"] or "").strip()
+        if not pid:
+            continue
+        assignments[job_uid] = pid
+    return assignments
+
+
+def _save_assignments_sql(assignments: Dict[str, str]) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    conn.execute("DELETE FROM project_assignments")
+    now = _iso_now()
+    for job_uid, project_uid in (assignments or {}).items():
+        job_uid = str(job_uid or "").strip()
+        project_uid = str(project_uid or "").strip()
+        if not job_uid or not project_uid:
+            continue
+        row = conn.execute(
+            "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+            (project_uid, project_uid),
+        ).fetchone()
+        if not row:
+            continue
+        project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+        conn.execute(
+            "INSERT OR REPLACE INTO project_assignments (project_id, job_uid, created_at) VALUES (?, ?, ?)",
+            (project_id, job_uid, now),
+        )
+    conn.commit()
+
+
+def _resolve_project_db_id(conn: sqlite3.Connection, project_uid: str) -> Optional[int]:
+    if not project_uid:
+        return None
+    row = conn.execute(
+        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+        (project_uid, project_uid),
+    ).fetchone()
+    if not row:
+        return None
+    if isinstance(row, sqlite3.Row):
+        return int(row["id"])
+    return int(row[0])
+
+
+def _load_manual_jobs_sql() -> Dict[str, List[ManualJob]]:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    jobs_by_project: Dict[str, List[ManualJob]] = {}
+    rows = conn.execute(
+        """
+        SELECT
+            mj.manual_job_id,
+            mj.title,
+            mj.hours,
+            mj.filament_g,
+            mj.cost_override,
+            mj.notes,
+            mj.created_at,
+            mj.updated_at,
+            p.project_uid,
+            p.id AS project_id
+        FROM manual_jobs mj
+        JOIN projects p ON mj.project_id = p.id
+        """
+    ).fetchall()
+    for row in rows:
+        pid = str(row["project_uid"] or row["project_id"] or "").strip()
+        if not pid:
+            continue
+        try:
+            hours = float(row["hours"] or 0.0)
+        except (TypeError, ValueError):
+            hours = 0.0
+        try:
+            filament_g = float(row["filament_g"] or 0.0)
+        except (TypeError, ValueError):
+            filament_g = 0.0
+        cost_override = row["cost_override"]
+        if cost_override is not None:
+            try:
+                cost_override = float(cost_override)
+            except (TypeError, ValueError):
+                cost_override = None
+
+        mj = ManualJob(
+            manual_job_id=str(row["manual_job_id"] or "").strip(),
+            project_id=pid,
+            title=str(row["title"] or "").strip(),
+            hours=hours,
+            filament_g=filament_g,
+            cost_override=cost_override,
+            created_at=str(row["created_at"] or ""),
+            updated_at=str(row["updated_at"] or ""),
+            notes=str(row["notes"] or ""),
+        )
+        if mj.manual_job_id and mj.title:
+            jobs_by_project.setdefault(pid, []).append(mj)
+    return jobs_by_project
+
+
+def _save_manual_jobs_sql(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    conn.execute("DELETE FROM manual_jobs")
+    for pid, jobs in jobs_by_project.items():
+        project_id = _resolve_project_db_id(conn, pid)
+        if project_id is None:
+            continue
+        for j in jobs:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO manual_jobs (
+                    manual_job_id,
+                    project_id,
+                    title,
+                    hours,
+                    filament_g,
+                    cost_override,
+                    notes,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    j.manual_job_id,
+                    project_id,
+                    j.title,
+                    float(j.hours or 0.0),
+                    float(j.filament_g or 0.0),
+                    j.cost_override,
+                    j.notes,
+                    j.created_at,
+                    j.updated_at,
+                ),
+            )
+    conn.commit()
+
+
+def _load_plans_sql() -> Dict[str, List[PlannedItem]]:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    by_project: Dict[str, List[PlannedItem]] = {}
+    rows = conn.execute(
+        """
+        SELECT
+            pi.plan_id,
+            pi.filename,
+            pi.est_time_s,
+            pi.est_filament_g,
+            pi.est_cost,
+            pi.est_cost_is_override,
+            pi.status,
+            pi.source,
+            pi.notes,
+            pi.converted_to_manual_job_id,
+            pi.created_at,
+            pi.updated_at,
+            p.project_uid,
+            p.id AS project_id
+        FROM planned_items pi
+        JOIN projects p ON pi.project_id = p.id
+        """
+    ).fetchall()
+    for row in rows:
+        pid = str(row["project_uid"] or row["project_id"] or "").strip()
+        if not pid:
+            continue
+        try:
+            est_time_s = int(float(row["est_time_s"] or 0))
+        except (TypeError, ValueError):
+            est_time_s = 0
+        est_filament_g = row["est_filament_g"]
+        if est_filament_g is not None:
+            try:
+                est_filament_g = float(est_filament_g)
+            except (TypeError, ValueError):
+                est_filament_g = None
+        est_cost = 0.0
+        try:
+            est_cost = float(row["est_cost"] or 0.0)
+        except (TypeError, ValueError):
+            est_cost = 0.0
+        status = str(row["status"] or "active").strip().lower()
+        if status not in ("active", "fulfilled"):
+            status = "active"
+        plan = PlannedItem(
+            plan_id=str(row["plan_id"] or "").strip(),
+            project_id=pid,
+            filename=str(row["filename"] or "").strip(),
+            created_at=str(row["created_at"] or ""),
+            est_time_s=est_time_s,
+            est_filament_g=est_filament_g,
+            est_cost=est_cost,
+            est_cost_is_override=bool(row["est_cost_is_override"] or False),
+            status=status,
+            source=str(row["source"] or ""),
+            notes=str(row["notes"] or ""),
+            converted_to_manual_job_id=str(row["converted_to_manual_job_id"] or "").strip() or None,
+        )
+        if plan.plan_id and plan.filename and plan.est_time_s > 0:
+            by_project.setdefault(pid, []).append(plan)
+    return by_project
+
+
+def _save_plans_sql(by_project: Dict[str, List[PlannedItem]]) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    conn.execute("DELETE FROM planned_items")
+    for pid, items in by_project.items():
+        project_id = _resolve_project_db_id(conn, pid)
+        if project_id is None:
+            continue
+        for p in items:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO planned_items (
+                    plan_id,
+                    project_id,
+                    filename,
+                    est_time_s,
+                    est_filament_g,
+                    est_cost,
+                    est_cost_is_override,
+                    status,
+                    source,
+                    notes,
+                    converted_to_manual_job_id,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    p.plan_id,
+                    project_id,
+                    p.filename,
+                    int(p.est_time_s or 0),
+                    p.est_filament_g,
+                    float(p.est_cost or 0.0),
+                    1 if p.est_cost_is_override else 0,
+                    p.status,
+                    p.source,
+                    p.notes,
+                    p.converted_to_manual_job_id,
+                    p.created_at,
+                    p.created_at,
+                ),
+            )
+    conn.commit()
+
+
+def _upsert_project_sql(project: Project) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    now = _iso_now()
+    conn.execute(
+        """
+        INSERT INTO projects (
+            project_uid,
+            name,
+            notes,
+            status,
+            hourly_rate_override,
+            filament_cost_per_kg_override,
+            labor_only,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_uid) DO UPDATE SET
+            name=excluded.name,
+            notes=excluded.notes,
+            status=excluded.status,
+            hourly_rate_override=excluded.hourly_rate_override,
+            filament_cost_per_kg_override=excluded.filament_cost_per_kg_override,
+            labor_only=excluded.labor_only,
+            updated_at=excluded.updated_at
+        """,
+        (
+            project.id,
+            project.name,
+            project.notes,
+            "active",
+            project.hourly_rate_override,
+            project.filament_cost_per_kg_override,
+            1 if project.labor_only else 0,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def _create_project_sql(project: Project) -> None:
+    _upsert_project_sql(project)
+
+
+def _update_project_sql(project: Project) -> None:
+    _upsert_project_sql(project)
+
+
+def _delete_project_sql(project_uid: str) -> None:
+    conn = db_module.connect_db()
+    db_module.apply_migrations(conn)
+    row = conn.execute(
+        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+        (project_uid, project_uid),
+    ).fetchone()
+    if not row:
+        return
+    project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
 
 
 def _safe_read_orphaned_assignments() -> Optional[List[Dict[str, Any]]]:
@@ -159,6 +602,8 @@ def _safe_write_orphaned_assignments(items: List[Dict[str, Any]]) -> bool:
 
 
 def load_projects() -> Dict[str, Project]:
+    if _is_sql_only():
+        return _load_projects_sql()
     ensure_projects_files()
     raw = _read_json(PROJECTS_FILE, [])
     if not isinstance(raw, list):
@@ -203,6 +648,9 @@ def load_projects() -> Dict[str, Project]:
 
 
 def save_projects(projects: Iterable[Project]) -> None:
+    if _is_sql_only():
+        _save_projects_sql(projects)
+        return
     payload: List[Dict[str, Any]] = []
     for p in projects:
         payload.append(
@@ -221,6 +669,8 @@ def save_projects(projects: Iterable[Project]) -> None:
 
 
 def load_assignments() -> Dict[str, str]:
+    if _is_sql_only():
+        return _load_assignments_sql()
     ensure_projects_files()
     raw = _read_json(ASSIGNMENTS_FILE, {})
     if not isinstance(raw, dict):
@@ -235,6 +685,9 @@ def load_assignments() -> Dict[str, str]:
 
 
 def save_assignments(assignments: Dict[str, str]) -> None:
+    if _is_sql_only():
+        _save_assignments_sql(assignments)
+        return
     _write_json(ASSIGNMENTS_FILE, dict(assignments))
 
 
@@ -244,6 +697,8 @@ def load_manual_jobs() -> Dict[str, List[ManualJob]]:
 
     Storage is a list of dicts in `data/project_manual_jobs.json`.
     """
+    if _is_sql_only():
+        return _load_manual_jobs_sql()
     ensure_projects_files()
     raw = _read_json(MANUAL_JOBS_FILE, [])
     if not isinstance(raw, list):
@@ -298,6 +753,9 @@ def load_manual_jobs() -> Dict[str, List[ManualJob]]:
 
 
 def _save_manual_jobs(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
+    if _is_sql_only():
+        _save_manual_jobs_sql(jobs_by_project)
+        return
     payload: List[Dict[str, Any]] = []
     for pid, jobs in jobs_by_project.items():
         for j in jobs:
@@ -626,6 +1084,8 @@ def compute_manual_job_cost(
 
 def load_plans() -> Dict[str, List[PlannedItem]]:
     """Load planned items grouped by project_id."""
+    if _is_sql_only():
+        return _load_plans_sql()
     ensure_projects_files()
     raw = _read_json(PLANS_FILE, [])
     if not isinstance(raw, list):
@@ -693,6 +1153,9 @@ def load_plans() -> Dict[str, List[PlannedItem]]:
 
 
 def _save_plans(by_project: Dict[str, List[PlannedItem]]) -> None:
+    if _is_sql_only():
+        _save_plans_sql(by_project)
+        return
     payload: List[Dict[str, Any]] = []
     for pid, items in by_project.items():
         for p in items:
@@ -1081,6 +1544,9 @@ def create_project(
         created_at=now,
         updated_at=now,
     )
+    if _is_sql_only():
+        _create_project_sql(project)
+        return project
     projects = load_projects()
     projects[pid] = project
     save_projects(projects.values())
@@ -1102,6 +1568,23 @@ def update_project(
     name = str(name or "").strip()
     if not name:
         raise ValueError("Project name is required")
+
+    if _is_sql_only():
+        existing = load_projects().get(pid)
+        if not existing:
+            raise ValueError("Project not found")
+        updated = Project(
+            id=pid,
+            name=name,
+            notes=str(notes or ""),
+            hourly_rate_override=_opt_nonneg_float(hourly_rate_override) if hourly_rate_override is not None else existing.hourly_rate_override,
+            filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override) if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+            labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
+            created_at=existing.created_at,
+            updated_at=time.time(),
+        )
+        _update_project_sql(updated)
+        return updated
 
     projects = load_projects()
     existing = projects.get(pid)
@@ -1128,6 +1611,10 @@ def delete_project(project_id: str) -> None:
     """Delete a project and unassign any jobs mapped to it."""
     pid = str(project_id or "").strip()
     if not pid:
+        return
+
+    if _is_sql_only():
+        _delete_project_sql(pid)
         return
 
     projects = load_projects()
@@ -1223,6 +1710,8 @@ def migrate_assignments_to_job_uid(rows: List[Dict[str, Any]]) -> Tuple[Dict[str
     Returns (assignments, orphans_added) where orphans_added counts newly recorded orphan
     entries written during this run (useful for a one-time banner on /projects).
     """
+    if _is_sql_only():
+        return load_assignments(), 0
     assignments = load_assignments()
     if not assignments:
         return assignments, 0
@@ -1439,3 +1928,223 @@ def compute_project_totals(
         except (TypeError, ValueError):
             continue
     return totals
+
+
+def import_json_to_sql(apply: bool = False) -> Dict[str, Any]:
+    """
+    One-time import: copy legacy JSON-backed projects data into SQL tables.
+
+    This function reads legacy JSON files directly and should only be invoked
+    explicitly via the CLI import command. It never flips KCD_STORAGE_BACKEND.
+    """
+    status = "ok"
+    errors: List[str] = []
+
+    def _read_json_direct(path: str, default: Any) -> Any:
+        if not os.path.exists(path):
+            return default
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            errors.append(f"failed to read {path}: {exc}")
+            return default
+
+    raw_projects = _read_json_direct(PROJECTS_FILE, [])
+    raw_assignments = _read_json_direct(ASSIGNMENTS_FILE, {})
+    raw_manual_jobs = _read_json_direct(MANUAL_JOBS_FILE, [])
+    raw_plans = _read_json_direct(PLANS_FILE, [])
+
+    projects_map: Dict[str, Project] = {}
+    if isinstance(raw_projects, list):
+        for item in raw_projects:
+            if not isinstance(item, dict):
+                continue
+            pid = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if not pid or not name:
+                continue
+            notes = str(item.get("notes") or "")
+            created_at = float(item.get("created_at") or 0.0)
+            updated_at = float(item.get("updated_at") or 0.0)
+
+            def _opt_nonneg_float(value) -> Optional[float]:
+                if value is None or str(value).strip() == "":
+                    return None
+                try:
+                    fval = float(value)
+                except (TypeError, ValueError):
+                    return None
+                return fval if fval >= 0 else None
+
+            hourly_rate_override = _opt_nonneg_float(item.get("hourly_rate_override"))
+            filament_cost_per_kg_override = _opt_nonneg_float(item.get("filament_cost_per_kg_override"))
+            labor_only = bool(item.get("labor_only") or False)
+            projects_map[pid] = Project(
+                id=pid,
+                name=name,
+                notes=notes,
+                hourly_rate_override=hourly_rate_override,
+                filament_cost_per_kg_override=filament_cost_per_kg_override,
+                labor_only=labor_only,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+    else:
+        errors.append(f"{PROJECTS_FILE} must contain a JSON list")
+
+    assignments: Dict[str, str] = {}
+    if isinstance(raw_assignments, dict):
+        for k, v in raw_assignments.items():
+            key = str(k or "").strip()
+            pid = str(v or "").strip()
+            if key and pid:
+                assignments[key] = pid
+    else:
+        errors.append(f"{ASSIGNMENTS_FILE} must contain a JSON object")
+
+    manual_jobs: Dict[str, List[ManualJob]] = {}
+    if isinstance(raw_manual_jobs, list):
+        for item in raw_manual_jobs:
+            if not isinstance(item, dict):
+                continue
+            mid = str(item.get("manual_job_id") or "").strip()
+            pid = str(item.get("project_id") or "").strip()
+            title = str(item.get("title") or item.get("description") or "").strip()
+            if not mid or not pid or not title:
+                continue
+            try:
+                hours = float(item.get("hours") or 0.0)
+            except (TypeError, ValueError):
+                hours = 0.0
+            try:
+                filament_g = float(item.get("filament_g") or 0.0)
+            except (TypeError, ValueError):
+                filament_g = 0.0
+            cost_override_raw = item.get("cost_override", None)
+            cost_override: Optional[float]
+            if cost_override_raw is None or str(cost_override_raw).strip() == "":
+                cost_override = None
+            else:
+                try:
+                    cost_override = float(cost_override_raw)
+                except (TypeError, ValueError):
+                    cost_override = None
+            created_at = str(item.get("created_at") or "")
+            updated_at = str(item.get("updated_at") or "")
+            job = ManualJob(
+                manual_job_id=mid,
+                project_id=pid,
+                title=title,
+                hours=hours,
+                filament_g=filament_g,
+                cost_override=cost_override,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+            manual_jobs.setdefault(pid, []).append(job)
+    else:
+        errors.append(f"{MANUAL_JOBS_FILE} must contain a JSON list")
+
+    plans: Dict[str, List[PlannedItem]] = {}
+    if isinstance(raw_plans, list):
+        for item in raw_plans:
+            if not isinstance(item, dict):
+                continue
+            plan_id = str(item.get("plan_id") or "").strip()
+            pid = str(item.get("project_id") or "").strip()
+            filename = str(item.get("filename") or "").strip()
+            created_at = str(item.get("created_at") or "").strip()
+            status = str(item.get("status") or "active").strip().lower()
+            source = str(item.get("source") or "").strip()
+            notes = str(item.get("notes") or "")
+            converted_to_manual_job_id = item.get("converted_to_manual_job_id", None)
+            converted_to_manual_job_id = str(converted_to_manual_job_id).strip() if converted_to_manual_job_id else None
+            if status not in ("active", "fulfilled"):
+                status = "active"
+
+            try:
+                est_time_s = int(float(item.get("est_time_s") or 0))
+            except (TypeError, ValueError):
+                est_time_s = 0
+
+            est_filament_g_raw = item.get("est_filament_g", None)
+            est_filament_g: Optional[float]
+            if est_filament_g_raw is None or str(est_filament_g_raw).strip() == "":
+                est_filament_g = None
+            else:
+                try:
+                    est_filament_g = float(est_filament_g_raw)
+                except (TypeError, ValueError):
+                    est_filament_g = None
+
+            est_cost_raw = item.get("est_cost", None)
+            est_cost: Optional[float]
+            if est_cost_raw is None or str(est_cost_raw).strip() == "":
+                est_cost = None
+            else:
+                try:
+                    est_cost = float(est_cost_raw)
+                except (TypeError, ValueError):
+                    est_cost = None
+
+            est_cost_is_override = bool(item.get("est_cost_is_override") or False)
+            status = str(status or "active")
+            if not plan_id or not pid or not filename:
+                continue
+            plan = PlannedItem(
+                plan_id=plan_id,
+                project_id=pid,
+                filename=filename,
+                created_at=created_at,
+                status=status,
+                source=source,
+                notes=notes,
+                converted_to_manual_job_id=converted_to_manual_job_id,
+                est_time_s=est_time_s,
+                est_filament_g=est_filament_g,
+                est_cost=est_cost,
+                est_cost_is_override=est_cost_is_override,
+            )
+            plans.setdefault(pid, []).append(plan)
+    else:
+        errors.append(f"{PLANS_FILE} must contain a JSON list")
+
+    manual_count = sum(len(v) for v in manual_jobs.values())
+    plan_count = sum(len(v) for v in plans.values())
+
+    report = {
+        "status": status,
+        "apply": bool(apply),
+        "scanned": {
+            "projects": len(projects_map),
+            "assignments": len(assignments),
+            "manual_jobs": manual_count,
+            "planned_items": plan_count,
+        },
+        "imported": {
+            "projects": 0,
+            "assignments": 0,
+            "manual_jobs": 0,
+            "planned_items": 0,
+        },
+        "skipped": 0,
+        "duplicates": 0,
+        "errors": errors,
+    }
+
+    if not apply:
+        return report
+
+    _save_projects_sql(projects_map.values())
+    _save_assignments_sql(assignments)
+    _save_manual_jobs_sql(manual_jobs)
+    _save_plans_sql(plans)
+
+    report["imported"] = {
+        "projects": len(projects_map),
+        "assignments": len(assignments),
+        "manual_jobs": manual_count,
+        "planned_items": plan_count,
+    }
+    return report

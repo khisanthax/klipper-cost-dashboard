@@ -408,12 +408,12 @@ def run_import(skip_existing: bool = True, overwrite: bool = False) -> Dict[str,
     counts["assignments_inserted"] = assignments_inserted
     counts["assignments_skipped"] = assignments_skipped
 
-    settings_inserted, settings_updated = _upsert_user_setting(conn, "settings", settings)
+    settings_inserted, settings_updated = _upsert_user_setting(conn, "printer_settings", settings)
     counts["settings_inserted"] += settings_inserted
     counts["settings_updated"] += settings_updated
 
     display_raw = load_json_file(DISPLAY_FILE) or {}
-    ins, upd = _upsert_user_setting(conn, "display", display_raw)
+    ins, upd = _upsert_user_setting(conn, "display_settings", display_raw)
     counts["settings_inserted"] += ins
     counts["settings_updated"] += upd
 
