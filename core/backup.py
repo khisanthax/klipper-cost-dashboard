@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any, Optional, Tuple
 
 from core.config import DATA_DIR, CSV_FILE
-from core.sql_only import require_file_reads_allowed, require_file_writes_allowed
+from core.sql_only import require_file_reads_allowed, require_file_writes_allowed, is_sql_only
 
 
 APP_SETTINGS_FILE = os.path.join(DATA_DIR, "app_settings.json")
@@ -38,6 +38,48 @@ class BackupSettings:
 def _ensure_dirs() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(BACKUPS_DIR, exist_ok=True)
+
+
+def _is_sql_only() -> bool:
+    return is_sql_only()
+
+
+def _load_backup_settings_sql() -> dict:
+    try:
+        from core import db as db_module
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
+        if not row:
+            return {}
+        raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
+        data = json.loads(raw) if raw else {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_backup_settings_sql(settings_dict: dict) -> None:
+    try:
+        from core import db as db_module
+        conn = db_module.connect_db()
+        db_module.apply_migrations(conn)
+        now = datetime.now().isoformat()
+        payload = json.dumps(settings_dict if isinstance(settings_dict, dict) else {}, indent=2)
+        row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
+                (payload, now, "backup_settings"),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
+                ("backup_settings", payload, now),
+            )
+        conn.commit()
+    except Exception:
+        pass
 
 
 def _read_json_file(path: str, default: Any) -> Any:
@@ -59,10 +101,13 @@ def _write_json_file(path: str, data: Any) -> None:
 
 
 def load_backup_settings() -> BackupSettings:
-    raw = _read_json_file(APP_SETTINGS_FILE, {})
-    if not isinstance(raw, dict):
-        raw = {}
-    b = raw.get("backups", {})
+    if _is_sql_only():
+        b = _load_backup_settings_sql()
+    else:
+        raw = _read_json_file(APP_SETTINGS_FILE, {})
+        if not isinstance(raw, dict):
+            raw = {}
+        b = raw.get("backups", {})
     if not isinstance(b, dict):
         b = {}
 
@@ -98,10 +143,15 @@ def save_backup_settings(
     auto_backup_frequency: str,
     auto_backup_keep: int,
 ) -> BackupSettings:
-    current = _read_json_file(APP_SETTINGS_FILE, {})
-    if not isinstance(current, dict):
-        current = {}
-    b = current.get("backups", {})
+    if _is_sql_only():
+        b = _load_backup_settings_sql()
+        if not isinstance(b, dict):
+            b = {}
+    else:
+        current = _read_json_file(APP_SETTINGS_FILE, {})
+        if not isinstance(current, dict):
+            current = {}
+        b = current.get("backups", {})
     if not isinstance(b, dict):
         b = {}
 
@@ -115,8 +165,11 @@ def save_backup_settings(
     b["auto_backup_keep"] = keep_i
     b.setdefault("last_auto_backup_ts", 0.0)
 
-    current["backups"] = b
-    _write_json_file(APP_SETTINGS_FILE, current)
+    if _is_sql_only():
+        _save_backup_settings_sql(b)
+    else:
+        current["backups"] = b
+        _write_json_file(APP_SETTINGS_FILE, current)
     return load_backup_settings()
 
 
@@ -211,15 +264,22 @@ def maybe_run_auto_backup() -> Tuple[bool, Optional[str], Optional[str]]:
 
     # Persist last run timestamp
     try:
-        current = _read_json_file(APP_SETTINGS_FILE, {})
-        if not isinstance(current, dict):
-            current = {}
-        b = current.get("backups", {})
-        if not isinstance(b, dict):
-            b = {}
-        b["last_auto_backup_ts"] = float(now)
-        current["backups"] = b
-        _write_json_file(APP_SETTINGS_FILE, current)
+        if _is_sql_only():
+            b = _load_backup_settings_sql()
+            if not isinstance(b, dict):
+                b = {}
+            b["last_auto_backup_ts"] = float(now)
+            _save_backup_settings_sql(b)
+        else:
+            current = _read_json_file(APP_SETTINGS_FILE, {})
+            if not isinstance(current, dict):
+                current = {}
+            b = current.get("backups", {})
+            if not isinstance(b, dict):
+                b = {}
+            b["last_auto_backup_ts"] = float(now)
+            current["backups"] = b
+            _write_json_file(APP_SETTINGS_FILE, current)
     except Exception:
         # Backup succeeded; failure to persist timestamp is non-fatal.
         pass
