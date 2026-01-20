@@ -134,6 +134,19 @@ The database is stored at `data/kcd.db`.
 In SQL-only mode, exports are generated from SQL on demand (e.g. Download CSV uses a temporary SQL export).
 Backups remain user-triggered exports; runtime does not depend on backup/export files.
 
+### SQL-only mode guarantees
+When `KCD_STORAGE_BACKEND=sql`:
+- Runtime state comes from SQL only; CSV/JSON files are not read or written.
+- Allowed filesystem usage is limited to caches and explicit exports.
+  - Thumbnail cache (default `data/thumb_cache/`, configurable via `KCD_THUMB_CACHE_DIR`)
+  - Explicit export outputs (Download CSV or `python -m kcd export ...`)
+  - Backup archives under `data/backups/`
+
+SQL-only validation helper:
+```
+PYTHONPATH=. python tools/validate_sql_only.py
+```
+
 Phase 5 installer notes: the installer can initialize the DB and import from CSV, and a
 DB + CSV setup is expected (dual/compat mode). The installer keeps `settings.json`
 moonraker_url mappings in sync until SQL becomes the source of truth. For SQL-capable
