@@ -14,6 +14,7 @@ from core import db as db_module
 from core import pricing
 from core.config import CSV_FILE, HEADERS, TIMEZONE_OBJ
 from core.storage import load_rows_raw, ts_to_local_dt
+from core.sql_only import is_sql_only
 
 logger = logging.getLogger(__name__)
 _PROFILE_ID_WARNED = False
@@ -85,6 +86,8 @@ def _pager_meta(total: int, page: int, per_page: int) -> dict:
 
 
 def _read_backend() -> Tuple[str, Optional[str]]:
+    if is_sql_only():
+        return "sql", None
     mode = str(os.getenv("KCD_READ_BACKEND", "csv")).strip().lower()
     if mode == "auto":
         mode = "sql"

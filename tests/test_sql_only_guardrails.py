@@ -1,5 +1,6 @@
 import os
 import unittest
+from pathlib import Path
 
 from core.sql_only import SqlOnlyViolationError
 
@@ -31,6 +32,29 @@ class SqlOnlyGuardrailTests(unittest.TestCase):
         events_src = (base / "core" / "system_events.py").read_text(encoding="utf-8")
         self.assertIn("require_file_writes_allowed", storage_src)
         self.assertIn("require_file_writes_allowed", events_src)
+
+    def test_history_repo_sql_only_override(self):
+        import sqlite3
+        from core.history_repo import HistoryQuery, list_history_rows
+        conns = []
+        orig_connect = sqlite3.connect
+
+        def _patched_connect(*args, **kwargs):
+            conn = orig_connect(*args, **kwargs)
+            conns.append(conn)
+            return conn
+
+        sqlite3.connect = _patched_connect
+        try:
+            result = list_history_rows(HistoryQuery(), page=1, per_page=25)
+            self.assertEqual(result.backend, "sql")
+        finally:
+            for c in conns:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+            sqlite3.connect = orig_connect
 
 
 if __name__ == "__main__":
