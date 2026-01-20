@@ -1203,10 +1203,9 @@ def load_json_file(json_file):
 def save_json_file(json_file, data_dir, data):
     """
     Generic JSON file saver.
-    """
-    require_file_writes_allowed(os.path.basename(str(json_file)), caller_hint="core.storage.save_json_file")
     Creates directory if needed.
     """
+    require_file_writes_allowed(os.path.basename(str(json_file)), caller_hint="core.storage.save_json_file")
     os.makedirs(data_dir, exist_ok=True)
     with open(json_file, "w") as f:
         json.dump(data, f, indent=2)
