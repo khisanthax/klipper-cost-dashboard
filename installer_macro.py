@@ -287,6 +287,7 @@ def insert_run_shell_command(macro_name, path, printer_name):
         f"{indent}# KCD: send cost data to dashboard\n",
         f'{indent}{{% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}}\n',
         f'{indent}{{% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}}\n',
+        f'{indent}{{% set fname = fname|replace(\'\\\\\', \'\\\\\\\\\')|replace(\'"\', \'\\\\"\') %}}\n',
         f"{indent}{{% set dur = printer.print_stats.print_duration|int %}}\n",
         f"{indent}{{% set filament = printer.print_stats.filament_used|default(0)|int %}}\n",
         f"{indent}{{% set params = printer_name ~ '|' ~ fname ~ '|' ~ dur ~ '|' ~ filament %}}\n",
@@ -329,6 +330,7 @@ gcode:
     # KCD: send cost data to dashboard
     {{% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}}
     {{% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}}
+    {{% set fname = fname|replace('\\\\', '\\\\\\\\')|replace('\"', '\\\\\"') %}}
     {{% set dur = printer.print_stats.print_duration|int %}}
     {{% set filament = printer.print_stats.filament_used|default(0)|int %}}
     {{% set params = printer_name ~ '|' ~ fname ~ '|' ~ dur ~ '|' ~ filament %}}
@@ -439,6 +441,7 @@ def prompt_macro_insertion(printer_name, config_dir, default_macro=None, default
         print('    # KCD: send cost data to dashboard')
         print('    {% set printer_name = printer["gcode_macro _KCD_VARS"].printer_name|string %}')
         print('    {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}')
+        print('    {% set fname = fname|replace(\'\\\\\', \'\\\\\\\\\')|replace(\'"\', \'\\\\"\') %}')
         print('    {% set dur = printer.print_stats.print_duration|int %}')
         print('    {% set filament = printer.print_stats.filament_used|default(0)|int %}')
         print('    {% set params = printer_name ~ \'|\' ~ fname ~ \'|\' ~ dur ~ \'|\' ~ filament %}')
