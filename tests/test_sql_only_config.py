@@ -374,6 +374,77 @@ class SqlOnlyConfigTests(unittest.TestCase):
         self.assertEqual(self._redirect_error(response), "Missing hourly rate.")
         self.assertEqual(rates.list_rate_profiles(), {})
 
+    def test_update_filament_profile_sql_only_rejects_invalid_required_pricing_fields(self):
+        import app as kcd_app
+        from core import profiles
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO filament_profiles
+                    (profile_uid, name, material, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("pla-red", "PLA Red", "PLA", "per_meter", 2.5, None, 3.0, now, now),
+            )
+            conn.commit()
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "update_filament_profile",
+                "profile_id": "pla-red",
+                "profile_name": "PLA Red",
+                "material": "PLA",
+                "brand": "Brand",
+                "color": "Red",
+                "filament_mode": "per_meter",
+                "filament_rate": "bad",
+                "grams_per_meter": "3.5",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Invalid filament rate (must be a non-negative number).")
+        profile = profiles.get_profile("pla-red")
+        self.assertAlmostEqual(float(profile.get("filament_rate") or 0.0), 2.5, places=6)
+        self.assertAlmostEqual(float(profile.get("grams_per_meter") or 0.0), 3.0, places=6)
+
+    def test_update_rate_profile_sql_only_rejects_missing_required_rate(self):
+        import app as kcd_app
+        from core import rates
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("rate-fast", "Fast", "", 12.0, now, now),
+            )
+            conn.commit()
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "update_rate_profile",
+                "rate_profile_id": "rate-fast",
+                "rate_profile_name": "Fast",
+                "rate_profile_description": "Updated",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Missing hourly rate.")
+        profile = rates.get_rate_profile("rate-fast")
+        self.assertAlmostEqual(float(profile.get("rate_per_hour") or 0.0), 12.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

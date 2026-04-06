@@ -3036,6 +3036,21 @@ def _settings_view(tab: str):
                 brand = request.form.get("brand", "").strip()
                 color = request.form.get("color", "").strip()
                 mode = request.form.get("filament_mode", "").strip()
+                if _is_sql_only():
+                    if mode not in {"per_meter", "per_gram", "per_kg"}:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
+                    filament_rate, err = _parse_required_nonneg_float(
+                        request.form.get("filament_rate"),
+                        "filament rate",
+                    )
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                    grams_per_meter, err = _parse_required_nonneg_float(
+                        request.form.get("grams_per_meter"),
+                        "grams per meter",
+                    )
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
                 if name:
                     updates["name"] = name
                 updates["material"] = material
@@ -3043,14 +3058,18 @@ def _settings_view(tab: str):
                 updates["color"] = color
                 if mode:
                     updates["filament_mode"] = mode
-                try:
-                    updates["filament_rate"] = float(request.form.get("filament_rate"))
-                except (TypeError, ValueError):
-                    updates["filament_rate"] = None
-                try:
-                    updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
-                except (TypeError, ValueError):
-                    updates["grams_per_meter"] = None
+                if _is_sql_only():
+                    updates["filament_rate"] = filament_rate
+                    updates["grams_per_meter"] = grams_per_meter
+                else:
+                    try:
+                        updates["filament_rate"] = float(request.form.get("filament_rate"))
+                    except (TypeError, ValueError):
+                        updates["filament_rate"] = None
+                    try:
+                        updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
+                    except (TypeError, ValueError):
+                        updates["grams_per_meter"] = None
                 profiles.update_profile(profile_id, updates)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -3114,13 +3133,23 @@ def _settings_view(tab: str):
                 updates = {}
                 name = request.form.get("rate_profile_name", "").strip()
                 description = request.form.get("rate_profile_description", "").strip()
+                if _is_sql_only():
+                    rate_per_hour, err = _parse_required_nonneg_float(
+                        request.form.get("rate_profile_rate"),
+                        "hourly rate",
+                    )
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
                 if name:
                     updates["name"] = name
                 updates["description"] = description
-                try:
-                    updates["rate_per_hour"] = float(request.form.get("rate_profile_rate"))
-                except (TypeError, ValueError):
-                    updates["rate_per_hour"] = None
+                if _is_sql_only():
+                    updates["rate_per_hour"] = rate_per_hour
+                else:
+                    try:
+                        updates["rate_per_hour"] = float(request.form.get("rate_profile_rate"))
+                    except (TypeError, ValueError):
+                        updates["rate_per_hour"] = None
                 rates.update_rate_profile(profile_id, updates)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
