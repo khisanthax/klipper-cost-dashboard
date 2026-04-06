@@ -233,6 +233,42 @@ class SqlOnlyConfigTests(unittest.TestCase):
 
         self.assertEqual(discovered, ["Discovered"])
 
+    def test_resolve_moonraker_base_url_sql_only_avoids_install_state_json(self):
+        from core import thumbnails
+
+        install_state_path = os.path.join(os.getcwd(), "data", "install_state.json")
+        orig_exists = thumbnails.os.path.exists
+
+        def guarded_exists(path):
+            if os.path.abspath(path) == os.path.abspath(install_state_path):
+                raise AssertionError("SQL-only thumbnails should not probe install_state.json")
+            return orig_exists(path)
+
+        with patch.object(thumbnails.os.path, "exists", side_effect=guarded_exists):
+            resolved = thumbnails.resolve_moonraker_base_url("SV08")
+
+        self.assertIsNone(resolved)
+
+    def test_maybe_run_auto_backup_sql_only_skips_file_backed_archive_runtime(self):
+        from core import backup
+
+        self._upsert_user_setting(
+            "backup_settings",
+            {
+                "auto_backup_enabled": True,
+                "auto_backup_frequency": "daily",
+                "auto_backup_keep": 3,
+                "last_auto_backup_ts": 0.0,
+            },
+        )
+
+        with patch.object(backup, "create_backup_archive", side_effect=AssertionError("should not archive in SQL-only runtime")):
+            ran, archive, error = backup.maybe_run_auto_backup()
+
+        self.assertFalse(ran)
+        self.assertIsNone(archive)
+        self.assertEqual(error, "Automatic backups are disabled in SQL-only mode.")
+
 
 if __name__ == "__main__":
     unittest.main()

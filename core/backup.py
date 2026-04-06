@@ -244,6 +244,10 @@ def maybe_run_auto_backup() -> Tuple[bool, Optional[str], Optional[str]]:
 
     Returns (ran, archive_path, error_message).
     """
+    if _is_sql_only():
+        # Automatic backup is a normal runtime hook; keep SQL-only runtime off file-backed archive paths.
+        return False, None, "Automatic backups are disabled in SQL-only mode."
+
     try:
         settings = load_backup_settings()
     except Exception:

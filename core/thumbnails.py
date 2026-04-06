@@ -184,6 +184,10 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     if moonraker_url:
         return moonraker_url.rstrip("/")
 
+    if _is_sql_only():
+        # SQL-only runtime must not fall back to installer JSON or localhost heuristics.
+        return None
+
     for entry in _read_install_state_clients():
         if str(entry.get("printer_name") or "").strip() != printer_name:
             continue
