@@ -151,6 +151,57 @@ class SqlOnlyConfigTests(unittest.TestCase):
         self.assertEqual(out.get("filament_profile_id"), "pla-red")
         self.assertEqual(out.get("filament_material"), "PLA")
 
+    def test_compute_costs_sql_only_raises_when_required_pricing_config_missing(self):
+        from core import pricing
+
+        with self.assertRaises(pricing.SqlOnlyPricingConfigError):
+            pricing.compute_costs("SV08", 3600.0, 1000.0)
+
+    def test_compute_costs_with_overrides_supports_sql_only_profile_overrides(self):
+        from core import pricing
+
+        self._upsert_user_setting(
+            "display_settings",
+            {
+                "visible_columns": ["printer"],
+                "pause_include_paused_time_default": False,
+            },
+        )
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("rate-override", "Override Rate", "", 15.0, now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO filament_profiles
+                    (profile_uid, name, material, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("petg-blue", "PETG Blue", "PETG", "per_meter", 3.25, None, 4.5, now, now),
+            )
+            conn.commit()
+
+        out = pricing.compute_costs_with_overrides(
+            "SV08",
+            7200.0,
+            1000.0,
+            rate_profile_id="rate-override",
+            filament_profile_id="petg-blue",
+        )
+
+        self.assertAlmostEqual(float(out.get("rate_per_hour") or 0.0), 15.0, places=6)
+        self.assertEqual(out.get("filament_mode"), "per_meter")
+        self.assertAlmostEqual(float(out.get("filament_rate") or 0.0), 3.25, places=6)
+        self.assertAlmostEqual(float(out.get("grams_per_meter") or 0.0), 4.5, places=6)
+        self.assertEqual(out.get("filament_profile_id"), "petg-blue")
+        self.assertEqual(out.get("filament_material"), "PETG")
+
     def test_get_discovered_printers_sql_only_avoids_csv_reads(self):
         from core import pricing
         from core.config import CSV_FILE

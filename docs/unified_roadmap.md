@@ -88,8 +88,8 @@ This is the live execution phase.
   - SQL-only blocks many file-backed reads and writes.
   - auto-create/runtime bootstrap behavior is blocked in SQL-only.
   - history and reports are forced to SQL in SQL-only mode.
+  - runtime file-read migration behavior has been removed from `core/storage.py` for `load_settings()` and `load_display_settings()`.
 - what remains:
-  - remove remaining runtime file-read migration behavior from `core/storage.py`, especially `load_settings()` and `load_display_settings()`.
   - verify no hidden config/bootstrap paths still touch CSV/JSON during normal SQL-only runtime.
 - why it matters:
   - SQL-only is not fully pure until runtime behavior is independent of legacy files.
@@ -114,10 +114,10 @@ This is the live execution phase.
   - Moonraker URL can be edited in the UI and stored in the DB.
   - some SQL-only settings paths already use `user_settings`.
   - backup settings can persist in SQL-only.
+  - SQL-only pricing now resolves from DB-backed settings and profile state instead of falling back to CSV or implicit default pricing during normal runtime.
 - what remains:
-  - finish moving runtime configuration away from file-backed settings/display fallbacks.
-  - make SQL-only pricing/config behavior fully DB-backed.
-  - remove remaining cases where SQL-only falls back to defaults instead of persisted SQL configuration.
+  - finish moving any remaining runtime configuration away from file-backed settings/display fallbacks.
+  - decide where SQL-only should use explicit SQL-safe defaults versus fail loudly when required DB-backed config is missing.
 - why it matters:
   - SQL-only cannot be considered canonical while runtime config still depends on legacy files or non-persisted defaults.
 
@@ -155,7 +155,7 @@ KCD is no longer a CSV-first app with experimental SQL on the side. SQL is alrea
 
 ## Current Active Work
 
-Finish SQL-only configuration migration and remove the remaining runtime file reads from `core/storage.py` and related pricing/config paths.
+Finish SQL-only configuration migration by removing any remaining normal-path runtime file reads and tightening the last SQL-only pricing/config cases that should fail loudly when DB-backed config is missing.
 
 This is the strongest next task because it closes the clearest contradiction between the current architecture claims and the actual runtime behavior.
 

@@ -18,6 +18,10 @@ from core import profiles
 from core import rates
 
 
+class SqlOnlyPricingConfigError(RuntimeError):
+    """Raised when SQL-only runtime pricing is missing required DB-backed config."""
+
+
 class Cfg:
     """Pricing configuration wrapper."""
     def __init__(self, d):
@@ -37,8 +41,86 @@ def _get_printer_settings(printer_name: str) -> dict:
     return printer_settings if isinstance(printer_settings, dict) else {}
 
 
+def _raise_sql_only_pricing_config(printer_name: str, detail: str) -> None:
+    raise SqlOnlyPricingConfigError(
+        f"SQL-only pricing config missing or invalid for printer {printer_name!r}: {detail}"
+    )
+
+
+def _get_sql_only_printer_float(printer_name: str, key: str) -> float:
+    printer_settings = _get_printer_settings(printer_name)
+    try:
+        value = printer_settings.get(key)
+        if value is None or str(value).strip() == "":
+            raise ValueError(key)
+        return float(value)
+    except (TypeError, ValueError):
+        _raise_sql_only_pricing_config(printer_name, f"missing {key} in user_settings.printer_settings")
+
+
+def _get_sql_only_printer_filament_config(printer_name: str) -> dict:
+    printer_settings = _get_printer_settings(printer_name)
+    mode = str(printer_settings.get("filament_mode") or "").strip()
+    rate_raw = printer_settings.get("filament_rate")
+    grams_raw = printer_settings.get("grams_per_meter")
+
+    if mode not in ("per_meter", "per_gram", "per_kg"):
+        _raise_sql_only_pricing_config(printer_name, "missing filament_mode in user_settings.printer_settings")
+    try:
+        rate = float(rate_raw)
+    except (TypeError, ValueError):
+        _raise_sql_only_pricing_config(printer_name, "missing filament_rate in user_settings.printer_settings")
+    try:
+        grams_per_meter = float(grams_raw)
+    except (TypeError, ValueError):
+        _raise_sql_only_pricing_config(printer_name, "missing grams_per_meter in user_settings.printer_settings")
+    return {
+        "filament_mode": mode,
+        "filament_rate": rate,
+        "grams_per_meter": grams_per_meter,
+    }
+
+
+def _coerce_profile_rate(printer_name: str, profile_id: str, profile: dict) -> float | None:
+    if not profile:
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"rate profile {profile_id!r} not found")
+        return None
+    try:
+        return float(profile.get("rate_per_hour"))
+    except (TypeError, ValueError):
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"rate profile {profile_id!r} is missing rate_per_hour")
+        return None
+
+
+def _coerce_profile_filament(printer_name: str, profile_id: str, profile_data: dict) -> dict | None:
+    if not profile_data:
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"filament profile {profile_id!r} not found")
+        return None
+    has_mode = "filament_mode" in profile_data
+    has_rate = "filament_rate" in profile_data
+    has_grams = "grams_per_meter" in profile_data
+    if not (has_mode and has_rate and has_grams):
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(
+                printer_name,
+                f"filament profile {profile_id!r} is missing pricing fields",
+            )
+        return None
+    return {
+        "filament_mode": profile_data["filament_mode"],
+        "filament_rate": profile_data["filament_rate"],
+        "grams_per_meter": profile_data["grams_per_meter"],
+        "profile_material": profile_data.get("material", "") or "",
+    }
+
+
 def get_pricing_for_printer_raw(printer_name: str) -> dict:
     """Get pricing configuration for a printer as a dictionary."""
+    if _is_sql_only():
+        return _get_printer_settings(printer_name)
     base = dict(DEFAULT_PRICING)
     base.update(_get_printer_settings(printer_name))
     return base
@@ -58,13 +140,13 @@ def get_effective_rate_per_hour(printer_name: str) -> float:
 
     if active_rate_profile_id:
         profile = rates.get_rate_profile(active_rate_profile_id)
-        if profile:
-            try:
-                return float(profile.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"]))
-            except (TypeError, ValueError):
-                pass
+        rate = _coerce_profile_rate(printer_name, str(active_rate_profile_id), profile)
+        if rate is not None:
+            return rate
 
     # Fallback to printer's own rate
+    if _is_sql_only():
+        return _get_sql_only_printer_float(printer_name, "rate_per_hour")
     cfg = get_pricing_for_printer(printer_name)
     try:
         return float(cfg.rate_per_hour)
@@ -86,22 +168,17 @@ def _get_effective_filament_pricing(printer_name: str) -> dict:
     
     if profile_id:
         profile_data = profiles.get_profile(profile_id)
-        
-        # Check if profile exists and has complete filament pricing data
-        if profile_data:
-            has_mode = "filament_mode" in profile_data
-            has_rate = "filament_rate" in profile_data
-            has_grams = "grams_per_meter" in profile_data
-            
-            if has_mode and has_rate and has_grams:
-                # Profile has complete data, use it
-                return {
-                    "filament_mode": profile_data["filament_mode"],
-                    "filament_rate": profile_data["filament_rate"],
-                    "grams_per_meter": profile_data["grams_per_meter"],
-                }
+        filament_cfg = _coerce_profile_filament(printer_name, str(profile_id), profile_data)
+        if filament_cfg is not None:
+            return {
+                "filament_mode": filament_cfg["filament_mode"],
+                "filament_rate": filament_cfg["filament_rate"],
+                "grams_per_meter": filament_cfg["grams_per_meter"],
+            }
     
     # No profile or incomplete data, fall back to printer settings
+    if _is_sql_only():
+        return _get_sql_only_printer_filament_config(printer_name)
     printer_cfg = get_pricing_for_printer_raw(printer_name)
     return {
         "filament_mode": printer_cfg["filament_mode"],
@@ -249,13 +326,8 @@ def compute_costs_with_overrides(
         except (TypeError, ValueError):
             rate_per_hour = None
     if rate_profile_id:
-        if not _is_sql_only():
-            profile = rates.get_rate_profile(rate_profile_id)
-            if profile:
-                try:
-                    rate_per_hour = float(profile.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"]))
-                except (TypeError, ValueError):
-                    rate_per_hour = None
+        profile = rates.get_rate_profile(rate_profile_id)
+        rate_per_hour = _coerce_profile_rate(printer_name, str(rate_profile_id), profile)
     if rate_per_hour is None:
         rate_per_hour = float(get_effective_rate_per_hour(printer_name))
 
@@ -275,18 +347,14 @@ def compute_costs_with_overrides(
             filament_rate = None
 
     if filament_profile_id:
-        if not _is_sql_only():
-            profile_data = profiles.get_profile(filament_profile_id)
-            if profile_data:
-                has_mode = "filament_mode" in profile_data
-                has_rate = "filament_rate" in profile_data
-                has_grams = "grams_per_meter" in profile_data
-                if has_mode and has_rate and has_grams:
-                    profile_id = filament_profile_id
-                    profile_material = profile_data.get("material", "") or ""
-                    filament_mode = profile_data["filament_mode"]
-                    filament_rate = profile_data["filament_rate"]
-                    grams_per_meter = profile_data["grams_per_meter"]
+        profile_data = profiles.get_profile(filament_profile_id)
+        filament_cfg = _coerce_profile_filament(printer_name, str(filament_profile_id), profile_data)
+        if filament_cfg is not None:
+            profile_id = filament_profile_id
+            profile_material = filament_cfg["profile_material"]
+            filament_mode = filament_cfg["filament_mode"]
+            filament_rate = filament_cfg["filament_rate"]
+            grams_per_meter = filament_cfg["grams_per_meter"]
 
     if filament_mode is None or filament_rate is None or grams_per_meter is None:
         filament_pricing = _get_effective_filament_pricing(printer_name)
