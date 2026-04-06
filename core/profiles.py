@@ -172,11 +172,14 @@ def set_printer_mapping(printer_name, profile_id):
     If profile_id is None, removes the mapping.
     """
     if _is_sql_only():
+        normalized_profile_id = str(profile_id).strip() if profile_id is not None else None
         mappings = _load_filament_mappings_sql()
-        if profile_id is None:
+        if normalized_profile_id in {None, "", "none"}:
             mappings.pop(printer_name, None)
         else:
-            mappings[printer_name] = profile_id
+            if not get_profile(normalized_profile_id):
+                return False
+            mappings[printer_name] = normalized_profile_id
         _save_filament_mappings_sql(mappings)
         return True
 
@@ -209,6 +212,11 @@ def get_all_printer_mappings():
 
     data = load_profiles_data(PROFILES_FILE)
     return data.get("mappings", {})
+
+
+def set_printer_active_profile(printer_name, profile_id):
+    """Compatibility alias for settings UI profile selection."""
+    return set_printer_mapping(printer_name, profile_id)
 
 
 def _load_sql_profiles():

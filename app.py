@@ -3099,7 +3099,15 @@ def _settings_view(tab: str):
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("profile_id", "").strip()
             if printer:
-                profiles.set_printer_active_profile(printer, profile_id)
+                normalized_profile_id = None if profile_id in {"", "none"} else profile_id
+                saved = profiles.set_printer_mapping(printer, normalized_profile_id)
+                if _is_sql_only() and normalized_profile_id and not saved:
+                    return redirect(
+                        url_for(
+                            _settings_endpoint_for_action(action),
+                            error=f"Filament profile not found: {normalized_profile_id}",
+                        )
+                    )
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "add_rate_profile":
@@ -3182,10 +3190,18 @@ def _settings_view(tab: str):
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
-                if profile_id == "" or profile_id == "none":
+                normalized_profile_id = None if profile_id in {"", "none"} else profile_id
+                if _is_sql_only() and normalized_profile_id and not rates.get_rate_profile(normalized_profile_id):
+                    return redirect(
+                        url_for(
+                            _settings_endpoint_for_action(action),
+                            error=f"Rate profile not found: {normalized_profile_id}",
+                        )
+                    )
+                if normalized_profile_id is None:
                     settings[printer].pop("active_rate_profile_id", None)
                 else:
-                    settings[printer]["active_rate_profile_id"] = profile_id
+                    settings[printer]["active_rate_profile_id"] = normalized_profile_id
                 save_settings(SETTINGS_FILE, DATA_DIR, settings)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 

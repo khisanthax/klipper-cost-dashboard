@@ -445,6 +445,132 @@ class SqlOnlyConfigTests(unittest.TestCase):
         profile = rates.get_rate_profile("rate-fast")
         self.assertAlmostEqual(float(profile.get("rate_per_hour") or 0.0), 12.0, places=6)
 
+    def test_set_active_filament_profile_sql_only_rejects_unknown_profile(self):
+        import app as kcd_app
+        from core import profiles
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO filament_profiles
+                    (profile_uid, name, material, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("pla-red", "PLA Red", "PLA", "per_meter", 2.5, None, 3.0, now, now),
+            )
+            conn.commit()
+        self._upsert_user_setting("filament_mappings", {"SV08": "pla-red"})
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "set_active_filament_profile",
+                "printer": "SV08",
+                "profile_id": "missing-profile",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Filament profile not found: missing-profile")
+        self.assertEqual(profiles.get_printer_mapping("SV08"), "pla-red")
+
+    def test_set_active_filament_profile_sql_only_allows_explicit_clear(self):
+        import app as kcd_app
+        from core import profiles
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO filament_profiles
+                    (profile_uid, name, material, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("pla-red", "PLA Red", "PLA", "per_meter", 2.5, None, 3.0, now, now),
+            )
+            conn.commit()
+        self._upsert_user_setting("filament_mappings", {"SV08": "pla-red"})
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "set_active_filament_profile",
+                "printer": "SV08",
+                "profile_id": "none",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "")
+        self.assertIsNone(profiles.get_printer_mapping("SV08"))
+
+    def test_set_active_rate_profile_sql_only_rejects_unknown_profile(self):
+        import app as kcd_app
+        from core import storage
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("rate-fast", "Fast", "", 12.0, now, now),
+            )
+            conn.commit()
+        self._upsert_user_setting("printer_settings", {"SV08": {"active_rate_profile_id": "rate-fast"}})
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "set_active_rate_profile",
+                "printer": "SV08",
+                "rate_profile_id": "missing-rate",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Rate profile not found: missing-rate")
+        self.assertEqual(storage.load_settings("ignored").get("SV08", {}).get("active_rate_profile_id"), "rate-fast")
+
+    def test_set_active_rate_profile_sql_only_allows_explicit_clear(self):
+        import app as kcd_app
+        from core import storage
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("rate-fast", "Fast", "", 12.0, now, now),
+            )
+            conn.commit()
+        self._upsert_user_setting("printer_settings", {"SV08": {"active_rate_profile_id": "rate-fast"}})
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "set_active_rate_profile",
+                "printer": "SV08",
+                "rate_profile_id": "none",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "")
+        self.assertIsNone(storage.load_settings("ignored").get("SV08", {}).get("active_rate_profile_id"))
+
 
 if __name__ == "__main__":
     unittest.main()
