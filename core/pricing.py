@@ -524,7 +524,13 @@ def get_configured_printers():
 
     settings = load_settings(SETTINGS_FILE)
     hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
-    return sorted([p for p in settings.keys() if _norm(p) and _norm(p) not in hidden])
+    configured = {_norm(p) for p in settings.keys() if _norm(p)}
+    if _is_sql_only():
+        from core.printers import get_canonical_printer_names
+
+        canonical = {_norm(p) for p in get_canonical_printer_names(include_hidden=True) if _norm(p)}
+        configured = configured & canonical
+    return sorted([p for p in configured if p not in hidden])
 
 
 def get_discovered_printers():

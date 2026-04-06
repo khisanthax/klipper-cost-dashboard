@@ -278,6 +278,23 @@ class SqlOnlyConfigTests(unittest.TestCase):
 
         self.assertEqual(discovered, ["Discovered"])
 
+    def test_get_configured_printers_sql_only_filters_unknown_settings_keys(self):
+        from core import pricing
+
+        self._upsert_user_setting(
+            "printer_settings",
+            {
+                "Configured": {"rate_per_hour": 1.0},
+                "Unknown": {"rate_per_hour": 2.0},
+            },
+        )
+
+        with self._connect() as conn:
+            self._db_module.upsert_printer(conn, "Configured")
+            conn.commit()
+
+        self.assertEqual(pricing.get_configured_printers(), ["Configured"])
+
     def test_resolve_moonraker_base_url_sql_only_avoids_install_state_json(self):
         from core import thumbnails
 
@@ -318,6 +335,10 @@ class SqlOnlyConfigTests(unittest.TestCase):
         import app as kcd_app
         from core import storage
 
+        with self._connect() as conn:
+            self._db_module.upsert_printer(conn, "SV08")
+            conn.commit()
+
         client = kcd_app.app.test_client()
         response = client.post(
             "/settings/printers",
@@ -334,6 +355,28 @@ class SqlOnlyConfigTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self._redirect_error(response), "Missing hourly rate.")
         self.assertEqual(storage.load_settings("ignored").get("SV08"), None)
+
+    def test_save_printer_defaults_sql_only_rejects_unknown_printer(self):
+        import app as kcd_app
+        from core import storage
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/printers",
+            data={
+                "action": "save_printer_defaults",
+                "printer": "Unknown",
+                "rate_per_hour": "7.0",
+                "filament_mode": "per_meter",
+                "filament_rate": "2.5",
+                "grams_per_meter": "3.0",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Printer not found: Unknown")
+        self.assertEqual(storage.load_settings("ignored"), {})
 
     def test_add_filament_profile_sql_only_rejects_missing_required_pricing_fields(self):
         import app as kcd_app
@@ -451,6 +494,7 @@ class SqlOnlyConfigTests(unittest.TestCase):
 
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
+            self._db_module.upsert_printer(conn, "SV08")
             conn.execute(
                 """
                 INSERT INTO filament_profiles
@@ -483,6 +527,7 @@ class SqlOnlyConfigTests(unittest.TestCase):
 
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
+            self._db_module.upsert_printer(conn, "SV08")
             conn.execute(
                 """
                 INSERT INTO filament_profiles
@@ -509,12 +554,44 @@ class SqlOnlyConfigTests(unittest.TestCase):
         self.assertEqual(self._redirect_error(response), "")
         self.assertIsNone(profiles.get_printer_mapping("SV08"))
 
+    def test_set_active_filament_profile_sql_only_rejects_unknown_printer(self):
+        import app as kcd_app
+        from core import profiles
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO filament_profiles
+                    (profile_uid, name, material, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("pla-red", "PLA Red", "PLA", "per_meter", 2.5, None, 3.0, now, now),
+            )
+            conn.commit()
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "set_active_filament_profile",
+                "printer": "Unknown",
+                "profile_id": "pla-red",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Printer not found: Unknown")
+        self.assertIsNone(profiles.get_printer_mapping("Unknown"))
+
     def test_set_active_rate_profile_sql_only_rejects_unknown_profile(self):
         import app as kcd_app
         from core import storage
 
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
+            self._db_module.upsert_printer(conn, "SV08")
             conn.execute(
                 """
                 INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
@@ -546,6 +623,7 @@ class SqlOnlyConfigTests(unittest.TestCase):
 
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
+            self._db_module.upsert_printer(conn, "SV08")
             conn.execute(
                 """
                 INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
@@ -570,6 +648,56 @@ class SqlOnlyConfigTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self._redirect_error(response), "")
         self.assertIsNone(storage.load_settings("ignored").get("SV08", {}).get("active_rate_profile_id"))
+
+    def test_set_active_rate_profile_sql_only_rejects_unknown_printer(self):
+        import app as kcd_app
+        from core import storage
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO hourly_rate_profiles (profile_uid, name, description, rate_per_hour, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("rate-fast", "Fast", "", 12.0, now, now),
+            )
+            conn.commit()
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "set_active_rate_profile",
+                "printer": "Unknown",
+                "rate_profile_id": "rate-fast",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Printer not found: Unknown")
+        self.assertEqual(storage.load_settings("ignored"), {})
+
+    def test_save_moonraker_url_sql_only_rejects_unknown_printer(self):
+        import app as kcd_app
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/printers",
+            data={
+                "action": "save_moonraker_url",
+                "printer": "Unknown",
+                "moonraker_url": "http://moonraker.local",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Printer not found: Unknown")
+
+        with self._connect() as conn:
+            self.assertIsNone(self._db_module.get_printer_id(conn, "Unknown"))
 
 
 if __name__ == "__main__":

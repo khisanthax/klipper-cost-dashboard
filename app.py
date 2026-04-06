@@ -1412,6 +1412,15 @@ def _is_sql_only() -> bool:
     return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
 
 
+def _sql_only_printer_exists(printer: str) -> bool:
+    if not _is_sql_only():
+        return True
+    try:
+        return str(printer or "").strip() in get_canonical_printer_names(include_hidden=True)
+    except Exception:
+        return False
+
+
 def _load_history_rows_for_recalc() -> tuple[list, str | None]:
     if _is_sql_only():
         try:
@@ -2755,6 +2764,8 @@ def _settings_view(tab: str):
         if action == "save_printer_defaults":
             printer = (request.form.get("printer") or "").strip()
             if printer:
+                if _is_sql_only() and not _sql_only_printer_exists(printer):
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
                 rate_raw = request.form.get("rate_per_hour")
                 mode = (request.form.get("filament_mode") or "").strip()
                 filament_rate_raw = request.form.get("filament_rate")
@@ -2828,6 +2839,8 @@ def _settings_view(tab: str):
             url_raw = (request.form.get("moonraker_url") or "").strip()
             if not printer:
                 return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+            if _is_sql_only() and not _sql_only_printer_exists(printer):
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
 
             url = url_raw.strip()
             if url and not (url.startswith("http://") or url.startswith("https://")):
@@ -3099,6 +3112,8 @@ def _settings_view(tab: str):
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("profile_id", "").strip()
             if printer:
+                if _is_sql_only() and not _sql_only_printer_exists(printer):
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
                 normalized_profile_id = None if profile_id in {"", "none"} else profile_id
                 saved = profiles.set_printer_mapping(printer, normalized_profile_id)
                 if _is_sql_only() and normalized_profile_id and not saved:
@@ -3187,6 +3202,8 @@ def _settings_view(tab: str):
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("rate_profile_id", "").strip()
             if printer:
+                if _is_sql_only() and not _sql_only_printer_exists(printer):
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
