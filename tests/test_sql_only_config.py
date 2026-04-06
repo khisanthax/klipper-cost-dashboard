@@ -157,6 +157,45 @@ class SqlOnlyConfigTests(unittest.TestCase):
         with self.assertRaises(pricing.SqlOnlyPricingConfigError):
             pricing.compute_costs("SV08", 3600.0, 1000.0)
 
+    def test_compute_costs_sql_only_raises_when_pause_policy_missing(self):
+        from core import pricing
+
+        self._upsert_user_setting(
+            "printer_settings",
+            {
+                "SV08": {
+                    "rate_per_hour": 7.0,
+                    "filament_mode": "per_meter",
+                    "filament_rate": 2.5,
+                    "grams_per_meter": 3.0,
+                }
+            },
+        )
+
+        with self.assertRaises(pricing.SqlOnlyPricingConfigError):
+            pricing.compute_costs("SV08", 3600.0, 1000.0)
+
+    def test_compute_costs_sql_only_override_bypasses_missing_global_pause_policy(self):
+        from core import pricing
+
+        self._upsert_user_setting(
+            "printer_settings",
+            {
+                "SV08": {
+                    "rate_per_hour": 7.0,
+                    "filament_mode": "per_meter",
+                    "filament_rate": 2.5,
+                    "grams_per_meter": 3.0,
+                    "pause_include_paused_time_override_enabled": True,
+                    "pause_include_paused_time_override_value": True,
+                }
+            },
+        )
+
+        out = pricing.compute_costs("SV08", 7200.0, 1000.0, paused_seconds_total=3600.0)
+
+        self.assertAlmostEqual(float(out.get("time_cost") or 0.0), 14.0, places=6)
+
     def test_compute_costs_with_overrides_supports_sql_only_profile_overrides(self):
         from core import pricing
 

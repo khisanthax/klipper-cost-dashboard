@@ -81,6 +81,29 @@ def _get_sql_only_printer_filament_config(printer_name: str) -> dict:
     }
 
 
+def _get_sql_only_pause_include_default(printer_name: str) -> bool:
+    from core.storage import _load_user_settings_sql
+
+    display = _load_user_settings_sql("display_settings")
+    if not isinstance(display, dict):
+        display = _load_user_settings_sql("display")
+    if not isinstance(display, dict):
+        _raise_sql_only_pricing_config(
+            printer_name,
+            "missing pause billing default in user_settings.display_settings",
+        )
+
+    if "pause_include_paused_time_default" in display:
+        return bool(display.get("pause_include_paused_time_default", False))
+    if "pause_exclude_paused_time_default" in display:
+        return not bool(display.get("pause_exclude_paused_time_default", False))
+
+    _raise_sql_only_pricing_config(
+        printer_name,
+        "missing pause billing default in user_settings.display_settings",
+    )
+
+
 def _coerce_profile_rate(printer_name: str, profile_id: str, profile: dict) -> float | None:
     if not profile:
         if _is_sql_only():
@@ -204,6 +227,9 @@ def _include_paused_time_for_printer(printer_name: str) -> bool:
             return not bool(printer_settings.get("pause_exclude_paused_time_override_value", False))
     except Exception:
         pass
+
+    if _is_sql_only():
+        return _get_sql_only_pause_include_default(printer_name)
 
     try:
         display = load_display_settings(DISPLAY_FILE, HEADERS)
