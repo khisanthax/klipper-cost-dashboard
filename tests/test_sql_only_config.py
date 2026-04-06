@@ -3,6 +3,7 @@ import os
 import unittest
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 
@@ -49,6 +50,11 @@ class SqlOnlyConfigTests(unittest.TestCase):
                 (key, json.dumps(value), now),
             )
             conn.commit()
+
+    def _redirect_error(self, response):
+        location = response.headers.get("Location", "")
+        query = parse_qs(urlparse(location).query)
+        return (query.get("error") or [""])[0]
 
     def test_load_settings_sql_only_uses_user_settings_without_disk_probe(self):
         from core import storage
@@ -307,6 +313,66 @@ class SqlOnlyConfigTests(unittest.TestCase):
         self.assertFalse(ran)
         self.assertIsNone(archive)
         self.assertEqual(error, "Automatic backups are disabled in SQL-only mode.")
+
+    def test_save_printer_defaults_sql_only_rejects_missing_required_pricing_fields(self):
+        import app as kcd_app
+        from core import storage
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/printers",
+            data={
+                "action": "save_printer_defaults",
+                "printer": "SV08",
+                "filament_mode": "per_meter",
+                "filament_rate": "0.25",
+                "grams_per_meter": "3.0",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Missing hourly rate.")
+        self.assertEqual(storage.load_settings("ignored").get("SV08"), None)
+
+    def test_add_filament_profile_sql_only_rejects_missing_required_pricing_fields(self):
+        import app as kcd_app
+        from core import profiles
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "add_filament_profile",
+                "profile_name": "PLA Red",
+                "material": "PLA",
+                "filament_mode": "per_meter",
+                "grams_per_meter": "3.0",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Missing filament rate.")
+        self.assertEqual(profiles.get_all_profiles(), {})
+
+    def test_add_rate_profile_sql_only_rejects_missing_required_rate(self):
+        import app as kcd_app
+        from core import rates
+
+        client = kcd_app.app.test_client()
+        response = client.post(
+            "/settings/profiles",
+            data={
+                "action": "add_rate_profile",
+                "rate_profile_name": "Fast",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self._redirect_error(response), "Missing hourly rate.")
+        self.assertEqual(rates.list_rate_profiles(), {})
 
 
 if __name__ == "__main__":

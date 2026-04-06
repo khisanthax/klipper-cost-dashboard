@@ -1395,6 +1395,19 @@ def _parse_int(value, default):
         return default
 
 
+def _parse_required_nonneg_float(raw, field_label):
+    raw = (raw or "").strip()
+    if not raw:
+        return None, f"Missing {field_label}."
+    try:
+        value = float(raw)
+    except Exception:
+        return None, f"Invalid {field_label} (must be a non-negative number)."
+    if value < 0:
+        return None, f"Invalid {field_label} (must be a non-negative number)."
+    return value, None
+
+
 def _is_sql_only() -> bool:
     return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
 
@@ -2740,17 +2753,41 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action), msg="Pause accounting settings saved."))
 
         if action == "save_printer_defaults":
-            printer = request.form.get("printer")
+            printer = (request.form.get("printer") or "").strip()
             if printer:
+                rate_raw = request.form.get("rate_per_hour")
+                mode = (request.form.get("filament_mode") or "").strip()
+                filament_rate_raw = request.form.get("filament_rate")
+                grams_raw = request.form.get("grams_per_meter")
+
+                if _is_sql_only():
+                    rate_per_hour, err = _parse_required_nonneg_float(rate_raw, "hourly rate")
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                    if mode not in {"per_meter", "per_gram", "per_kg"}:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
+                    filament_rate, err = _parse_required_nonneg_float(filament_rate_raw, "filament rate")
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                    grams_per_meter, err = _parse_required_nonneg_float(grams_raw, "grams per meter")
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                else:
+                    rate_per_hour = float(request.form.get("rate_per_hour", 1.0))
+                    if not mode:
+                        mode = "per_meter"
+                    filament_rate = float(request.form.get("filament_rate", 0.25))
+                    grams_per_meter = float(request.form.get("grams_per_meter", 3.0))
+
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
 
                 try:
-                    settings[printer]["rate_per_hour"] = float(request.form.get("rate_per_hour", 1.0))
-                    settings[printer]["filament_mode"] = request.form.get("filament_mode", "per_meter")
-                    settings[printer]["filament_rate"] = float(request.form.get("filament_rate", 0.25))
-                    settings[printer]["grams_per_meter"] = float(request.form.get("grams_per_meter", 3.0))
+                    settings[printer]["rate_per_hour"] = rate_per_hour
+                    settings[printer]["filament_mode"] = mode
+                    settings[printer]["filament_rate"] = filament_rate
+                    settings[printer]["grams_per_meter"] = grams_per_meter
                 except (TypeError, ValueError):
                     pass
 
@@ -2954,16 +2991,28 @@ def _settings_view(tab: str):
             material = request.form.get("material", "").strip()
             brand = request.form.get("brand", "").strip()
             color = request.form.get("color", "").strip()
-            mode = request.form.get("filament_mode", "per_meter").strip()
+            mode = request.form.get("filament_mode", "").strip()
             description = request.form.get("description", "").strip()
-            try:
-                rate = float(request.form.get("filament_rate", 0.25))
-            except (TypeError, ValueError):
-                rate = None
-            try:
-                gpm = float(request.form.get("grams_per_meter", 3.0))
-            except (TypeError, ValueError):
-                gpm = None
+            if _is_sql_only():
+                if mode not in {"per_meter", "per_gram", "per_kg"}:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
+                rate, err = _parse_required_nonneg_float(request.form.get("filament_rate"), "filament rate")
+                if err:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                gpm, err = _parse_required_nonneg_float(request.form.get("grams_per_meter"), "grams per meter")
+                if err:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+            else:
+                if not mode:
+                    mode = "per_meter"
+                try:
+                    rate = float(request.form.get("filament_rate", 0.25))
+                except (TypeError, ValueError):
+                    rate = None
+                try:
+                    gpm = float(request.form.get("grams_per_meter", 3.0))
+                except (TypeError, ValueError):
+                    gpm = None
             if name and rate is not None:
                 profile = {
                     "name": name,
@@ -3037,10 +3086,18 @@ def _settings_view(tab: str):
         if action == "add_rate_profile":
             name = request.form.get("rate_profile_name", "").strip()
             description = request.form.get("rate_profile_description", "").strip()
-            try:
-                rate_per_hour = float(request.form.get("rate_profile_rate", 1.0))
-            except (TypeError, ValueError):
-                rate_per_hour = None
+            if _is_sql_only():
+                rate_per_hour, err = _parse_required_nonneg_float(
+                    request.form.get("rate_profile_rate"),
+                    "hourly rate",
+                )
+                if err:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+            else:
+                try:
+                    rate_per_hour = float(request.form.get("rate_profile_rate", 1.0))
+                except (TypeError, ValueError):
+                    rate_per_hour = None
 
             if name and rate_per_hour is not None:
                 rate_profile = {
