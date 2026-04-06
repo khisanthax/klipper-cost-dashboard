@@ -3,7 +3,6 @@ Cost calculations and printer management for Print Cost Dashboard.
 """
 import os
 import csv
-from core import db as db_module
 from core.config import DEFAULT_PRICING, CSV_FILE, SETTINGS_FILE, HEADERS, DISPLAY_FILE
 from core.storage import (
     load_settings,
@@ -32,13 +31,16 @@ def _is_sql_only() -> bool:
     return is_sql_only()
 
 
+def _get_printer_settings(printer_name: str) -> dict:
+    settings = load_settings(SETTINGS_FILE)
+    printer_settings = settings.get(printer_name, {}) if isinstance(settings, dict) else {}
+    return printer_settings if isinstance(printer_settings, dict) else {}
+
+
 def get_pricing_for_printer_raw(printer_name: str) -> dict:
     """Get pricing configuration for a printer as a dictionary."""
-    settings = load_settings(SETTINGS_FILE)
     base = dict(DEFAULT_PRICING)
-    override = settings.get(printer_name, {})
-    if isinstance(override, dict):
-        base.update(override)
+    base.update(_get_printer_settings(printer_name))
     return base
 
 
@@ -51,70 +53,7 @@ def get_effective_rate_per_hour(printer_name: str) -> float:
     """
     Resolve the hourly rate for a printer, honoring an active rate profile if set.
     """
-    if _is_sql_only():
-        try:
-            conn = db_module.connect_db()
-            db_module.apply_migrations(conn)
-            row = conn.execute("SELECT id FROM printers WHERE name = ?", (printer_name,)).fetchone()
-            if not row:
-                return 0.0
-            printer_id = row[0] if isinstance(row, (tuple, list)) else row["id"]
-
-            # Prefer explicit override if present on any recent job.
-            row = conn.execute(
-                """
-                SELECT j.override_rate_per_hour
-                  FROM jobs j
-                 WHERE j.printer_id = ?
-                   AND j.override_rate_per_hour IS NOT NULL
-                 ORDER BY COALESCE(j.ended_at, j.created_at) DESC
-                 LIMIT 1
-                """,
-                (printer_id,),
-            ).fetchone()
-            if row and row[0] is not None:
-                return float(row[0])
-
-            # Prefer a rate profile if the job references one.
-            row = conn.execute(
-                """
-                SELECT hr.rate_per_hour
-                  FROM jobs j
-                  JOIN hourly_rate_profiles hr
-                    ON (hr.profile_uid = j.hourly_rate_profile_id OR hr.id = j.hourly_rate_profile_id)
-                 WHERE j.printer_id = ?
-                   AND j.hourly_rate_profile_id IS NOT NULL
-                   AND TRIM(j.hourly_rate_profile_id) != ''
-                 ORDER BY COALESCE(j.ended_at, j.created_at) DESC
-                 LIMIT 1
-                """,
-                (printer_id,),
-            ).fetchone()
-            if row and row[0] is not None:
-                return float(row[0])
-
-            # Fallback: most recent stored rate_per_hour for this printer.
-            row = conn.execute(
-                """
-                SELECT j.rate_per_hour
-                  FROM jobs j
-                 WHERE j.printer_id = ?
-                   AND j.rate_per_hour IS NOT NULL
-                   AND j.rate_per_hour > 0
-                 ORDER BY COALESCE(j.ended_at, j.created_at) DESC
-                 LIMIT 1
-                """,
-                (printer_id,),
-            ).fetchone()
-            if row and row[0] is not None:
-                return float(row[0])
-        except Exception:
-            return 0.0
-
-        return 0.0
-
-    settings = load_settings(SETTINGS_FILE)
-    printer_settings = settings.get(printer_name, {})
+    printer_settings = _get_printer_settings(printer_name)
     active_rate_profile_id = printer_settings.get("active_rate_profile_id")
 
     if active_rate_profile_id:
@@ -142,12 +81,6 @@ def _get_effective_filament_pricing(printer_name: str) -> dict:
     
     Returns dict with: filament_mode, filament_rate, grams_per_meter
     """
-    if _is_sql_only():
-        return {
-            "filament_mode": DEFAULT_PRICING["filament_mode"],
-            "filament_rate": DEFAULT_PRICING["filament_rate"],
-            "grams_per_meter": DEFAULT_PRICING["grams_per_meter"],
-        }
     # Try to get active profile for this printer
     profile_id = profiles.get_printer_mapping(printer_name)
     
@@ -185,11 +118,8 @@ def _include_paused_time_for_printer(printer_name: str) -> bool:
     1) Per-printer override (settings.json) when enabled.
     2) Global default (display.json).
     """
-    if _is_sql_only():
-        return False
     try:
-        settings = load_settings(SETTINGS_FILE)
-        printer_settings = settings.get(printer_name, {}) if isinstance(settings, dict) else {}
+        printer_settings = _get_printer_settings(printer_name)
         if printer_settings.get("pause_include_paused_time_override_enabled", False):
             return bool(printer_settings.get("pause_include_paused_time_override_value", False))
         # Backwards compatibility: old "exclude paused" semantics.
@@ -514,6 +444,13 @@ def get_discovered_printers():
     settings = load_settings(SETTINGS_FILE)
     configured = {_norm(p) for p in settings.keys() if _norm(p)}
     hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
+    if _is_sql_only():
+        from core.printers import get_canonical_printer_names
+
+        discovered = {_norm(p) for p in get_canonical_printer_names(include_hidden=True) if _norm(p)}
+        discovered = discovered - configured - hidden
+        return sorted(discovered)
+
     discovered = set()
     if os.path.exists(CSV_FILE):
         try:

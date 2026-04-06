@@ -23,6 +23,22 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
+_DISPLAY_HIDDEN_DEFAULTS = {
+    "job_uid",
+    "thumbnail",
+    "pause_count",
+    "runout_count",
+    "import_source",
+    "import_id",
+    "job_outcome",
+    "duration_seconds_raw",
+    "duration_seconds_est",
+    "duration_seconds_effective",
+    "filament_mm_raw",
+    "filament_mm_est",
+    "filament_mm_effective",
+}
+
 
 def _is_sql_only() -> bool:
     return is_sql_only()
@@ -63,6 +79,57 @@ def _save_user_settings_sql(key: str, value) -> None:
         conn.commit()
     except Exception:
         pass
+
+
+def _default_display_settings(headers):
+    visible = [h for h in headers if h not in _DISPLAY_HIDDEN_DEFAULTS]
+    return {
+        "visible_columns": visible,
+        "tables": {"history": {"visible_columns": visible}},
+        "hidden_printers": [],
+        "pause_include_paused_time_default": False,
+        "projects_show_cost_totals": True,
+    }
+
+
+def _normalize_display_settings(data, headers):
+    default_settings = _default_display_settings(headers)
+    if not isinstance(data, dict):
+        return default_settings
+
+    tables = _coerce_display_tables(data.get("tables"))
+    history_cols = None
+    if isinstance(tables.get("history"), dict):
+        history_cols = tables.get("history", {}).get("visible_columns")
+    if not isinstance(history_cols, list):
+        history_cols = data.get("visible_columns", headers)
+
+    cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
+    if not cols:
+        cols = list(default_settings["visible_columns"])
+    tables.setdefault("history", {"visible_columns": cols})
+
+    hidden = data.get("hidden_printers", [])
+    if not isinstance(hidden, list):
+        hidden = []
+    hidden = [str(p) for p in hidden if str(p).strip()]
+
+    if "pause_include_paused_time_default" in data:
+        pause_include = bool(data.get("pause_include_paused_time_default", False))
+    elif "pause_exclude_paused_time_default" in data:
+        pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
+    else:
+        pause_include = False
+
+    show_cost_totals = data.get("projects_show_cost_totals", True)
+    show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
+    return {
+        "visible_columns": cols,
+        "tables": tables,
+        "hidden_printers": hidden,
+        "pause_include_paused_time_default": pause_include,
+        "projects_show_cost_totals": show_cost_totals,
+    }
 
 def _copy_if_missing(src: str, dest: str) -> bool:
     if os.path.exists(dest):
@@ -135,18 +202,6 @@ def load_settings(settings_file):
         if isinstance(legacy, dict):
             _save_user_settings_sql("printer_settings", legacy)
             return legacy
-        migrated = _load_user_settings_sql("printer_settings_migrated")
-        if not migrated:
-            try:
-                if os.path.exists(settings_file):
-                    with open(settings_file) as f:
-                        legacy = json.load(f)
-                        if isinstance(legacy, dict):
-                            _save_user_settings_sql("printer_settings", legacy)
-                            _save_user_settings_sql("printer_settings_migrated", True)
-                            return legacy
-            except Exception:
-                pass
         return {}
     require_file_reads_allowed("settings.json", caller_hint="core.storage.load_settings")
     from core.config import DEFAULT_PRICING, CSV_FILE
@@ -179,35 +234,7 @@ def ensure_display_exists(display_file, headers):
         # SQL-only mode stores display settings in user_settings.
         return
     if not os.path.exists(display_file):
-        # Default: hide Job UID and Thumbnail (thumbnail is opt-in).
-        # Keep analytics/internal columns opt-in to avoid surprising users.
-        _hidden_defaults = {
-            "job_uid",
-            "thumbnail",
-            "pause_count",
-            "runout_count",
-            # Moonraker import fields are opt-in (auditing/debug).
-            "import_source",
-            "import_id",
-            "job_outcome",
-            "duration_seconds_raw",
-            "duration_seconds_est",
-            "duration_seconds_effective",
-            "filament_mm_raw",
-            "filament_mm_est",
-            "filament_mm_effective",
-        }
-        visible = [h for h in headers if h not in _hidden_defaults]
-        data = {
-            "visible_columns": visible,
-            "tables": {
-                "history": {"visible_columns": visible},
-            },
-            "hidden_printers": [],
-            # When false, hourly cost excludes paused time by default.
-            "pause_include_paused_time_default": False,
-            "projects_show_cost_totals": True,
-        }
+        data = _default_display_settings(headers)
         with open(display_file, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -233,111 +260,9 @@ def load_display_settings(display_file, headers):
     """Load display settings from JSON file."""
     if _is_sql_only():
         data = _load_user_settings_sql("display_settings")
-        if isinstance(data, dict):
-            return data
-        legacy = _load_user_settings_sql("display")
-        if isinstance(legacy, dict):
-            _save_user_settings_sql("display_settings", legacy)
-            return legacy
-        migrated = _load_user_settings_sql("display_settings_migrated")
-        if not migrated:
-            try:
-                if os.path.exists(display_file):
-                    with open(display_file) as f:
-                        legacy = json.load(f)
-                        if isinstance(legacy, dict):
-                            _save_user_settings_sql("display_settings", legacy)
-                            _save_user_settings_sql("display_settings_migrated", True)
-                            return legacy
-            except Exception:
-                pass
-        # Default structure if nothing exists yet.
-        _hidden_defaults = {
-            "job_uid",
-            "thumbnail",
-            "pause_count",
-            "runout_count",
-            "import_source",
-            "import_id",
-            "job_outcome",
-            "duration_seconds_raw",
-            "duration_seconds_est",
-            "duration_seconds_effective",
-            "filament_mm_raw",
-            "filament_mm_est",
-            "filament_mm_effective",
-        }
-        visible = [h for h in headers if h not in _hidden_defaults]
-        return {
-            "visible_columns": visible,
-            "tables": {"history": {"visible_columns": visible}},
-            "hidden_printers": [],
-            "pause_include_paused_time_default": False,
-            "projects_show_cost_totals": True,
-        }
-    _hidden_defaults = {
-        "job_uid",
-        "thumbnail",
-        "pause_count",
-        "runout_count",
-        "import_source",
-        "import_id",
-        "job_outcome",
-        "duration_seconds_raw",
-        "duration_seconds_est",
-        "duration_seconds_effective",
-        "filament_mm_raw",
-        "filament_mm_est",
-        "filament_mm_effective",
-    }
-
-    def _default_settings():
-        visible = [h for h in headers if h not in _hidden_defaults]
-        return {
-            "visible_columns": visible,
-            "tables": {"history": {"visible_columns": visible}},
-            "hidden_printers": [],
-            "pause_include_paused_time_default": False,
-            "projects_show_cost_totals": True,
-        }
-
-    if _is_sql_only():
-        data = _load_user_settings_sql("display") or {}
         if not isinstance(data, dict):
-            return _default_settings()
-        tables = _coerce_display_tables(data.get("tables"))
-        history_cols = None
-        if isinstance(tables.get("history"), dict):
-            history_cols = tables.get("history", {}).get("visible_columns")
-        if not isinstance(history_cols, list):
-            history_cols = data.get("visible_columns", headers)
-
-        cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
-        if not cols:
-            cols = [h for h in headers if h not in _hidden_defaults]
-        tables.setdefault("history", {"visible_columns": cols})
-
-        hidden = data.get("hidden_printers", [])
-        if not isinstance(hidden, list):
-            hidden = []
-        hidden = [str(p) for p in hidden if str(p).strip()]
-
-        if "pause_include_paused_time_default" in data:
-            pause_include = bool(data.get("pause_include_paused_time_default", False))
-        elif "pause_exclude_paused_time_default" in data:
-            pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
-        else:
-            pause_include = False
-
-        show_cost_totals = data.get("projects_show_cost_totals", True)
-        show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
-        return {
-            "visible_columns": cols,
-            "tables": tables,
-            "hidden_printers": hidden,
-            "pause_include_paused_time_default": pause_include,
-            "projects_show_cost_totals": show_cost_totals,
-        }
+            data = _load_user_settings_sql("display")
+        return _normalize_display_settings(data, headers)
 
     require_file_reads_allowed("display.json", caller_hint="core.storage.load_display_settings")
     ensure_display_exists(display_file, headers)
@@ -345,47 +270,9 @@ def load_display_settings(display_file, headers):
     try:
         with open(display_file) as f:
             data = json.load(f)
-        if not isinstance(data, dict):
-            return _default_settings()
-
-        tables = _coerce_display_tables(data.get("tables"))
-
-        history_cols = None
-        if isinstance(tables.get("history"), dict):
-            history_cols = tables.get("history", {}).get("visible_columns")
-        if not isinstance(history_cols, list):
-            history_cols = data.get("visible_columns", headers)
-
-        cols = [c for c in (history_cols or []) if c in headers and c != "job_uid"]
-        if not cols:
-            cols = [h for h in headers if h not in _hidden_defaults]
-
-        tables.setdefault("history", {"visible_columns": cols})
-
-        hidden = data.get("hidden_printers", [])
-        if not isinstance(hidden, list):
-            hidden = []
-        hidden = [str(p) for p in hidden if str(p).strip()]
-
-        if "pause_include_paused_time_default" in data:
-            pause_include = bool(data.get("pause_include_paused_time_default", False))
-        elif "pause_exclude_paused_time_default" in data:
-            pause_include = not bool(data.get("pause_exclude_paused_time_default", False))
-        else:
-            pause_include = False
-
-        show_cost_totals = data.get("projects_show_cost_totals", True)
-        show_cost_totals = True if show_cost_totals is None else bool(show_cost_totals)
-
-        return {
-            "visible_columns": cols,
-            "tables": tables,
-            "hidden_printers": hidden,
-            "pause_include_paused_time_default": pause_include,
-            "projects_show_cost_totals": show_cost_totals,
-        }
+        return _normalize_display_settings(data, headers)
     except Exception:
-        return _default_settings()
+        return _default_display_settings(headers)
 
 def get_visible_columns_for_table(display_settings, table_id, allowed_columns):
     """
@@ -431,24 +318,26 @@ def save_display_settings(display_file, data_dir, display_settings):
     - sanitize visible_columns against the current HEADERS
     - preserve unknown keys already present in the JSON file
     """
-    if _is_sql_only():
-        _save_user_settings_sql("display_settings", display_settings if isinstance(display_settings, dict) else {})
-        return
-
     from core.config import HEADERS
 
-    require_file_writes_allowed("display.json", caller_hint="core.storage.save_display_settings")
-    os.makedirs(data_dir, exist_ok=True)
-
     existing = {}
-    try:
-        if os.path.exists(display_file):
-            with open(display_file) as f:
-                existing = json.load(f)
+    if _is_sql_only():
+        existing = _load_user_settings_sql("display_settings")
+        if not isinstance(existing, dict):
+            existing = _load_user_settings_sql("display")
         if not isinstance(existing, dict):
             existing = {}
-    except Exception:
-        existing = {}
+    else:
+        require_file_writes_allowed("display.json", caller_hint="core.storage.save_display_settings")
+        os.makedirs(data_dir, exist_ok=True)
+        try:
+            if os.path.exists(display_file):
+                with open(display_file) as f:
+                    existing = json.load(f)
+            if not isinstance(existing, dict):
+                existing = {}
+        except Exception:
+            existing = {}
 
     existing_tables = _coerce_display_tables(existing.get("tables"))
     incoming_tables = _coerce_display_tables(display_settings.get("tables") if isinstance(display_settings, dict) else {})
@@ -505,7 +394,7 @@ def save_display_settings(display_file, data_dir, display_settings):
     existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
 
     if _is_sql_only():
-        _save_user_settings_sql("display", existing)
+        _save_user_settings_sql("display_settings", existing)
         return
 
     with open(display_file, "w") as f:
