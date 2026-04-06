@@ -62,6 +62,7 @@ from core.printers import (
     looks_like_gcode_filename,
 )
 from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
+from core.readiness import check_sql_only_readiness
 
 app = Flask(__name__)
 app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
@@ -586,29 +587,27 @@ def health():
 
     try:
         if _is_sql_only():
-            db_ok = False
-            printers_count = 0
-            try:
-                with db_module.connect_db() as conn:
-                    db_module.apply_migrations(conn)
-                    row = conn.execute("SELECT COUNT(*) AS c FROM printers").fetchone()
-                    if row is not None:
-                        printers_count = row["c"] if hasattr(row, "__getitem__") else int(row[0])
-                    db_ok = True
-            except Exception as exc:
-                return jsonify({"status": "error", "backend": "sql", "error": str(exc)}), 500
-
+            readiness = check_sql_only_readiness()
+            db_ok = any(
+                check.get("name") == "db_connection" and bool(check.get("ok"))
+                for check in readiness.get("checks", [])
+            )
+            ready = bool(readiness.get("ready"))
             return (
                 jsonify(
                     {
-                        "status": "ok",
+                        "status": "ok" if ready else "error",
                         "backend": "sql",
+                        "ready": ready,
                         "db_ok": db_ok,
-                        "printers_count": printers_count,
+                        "schema_version": readiness.get("schema_version"),
+                        "printers_count": readiness.get("printers_count", 0),
+                        "checks": readiness.get("checks", []),
+                        "errors": readiness.get("errors", []),
                         "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
                     }
                 ),
-                200,
+                200 if ready else 503,
             )
 
         status = {
