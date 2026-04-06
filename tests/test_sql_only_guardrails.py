@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -21,10 +22,20 @@ class SqlOnlyGuardrailTests(unittest.TestCase):
         with self.assertRaises(SqlOnlyViolationError):
             append_row("/tmp/print_costs.csv", ["printer"], {"printer": "TEST"})
 
-    def test_system_events_blocked(self):
-        from core.system_events import emit_event
-        with self.assertRaises(SqlOnlyViolationError):
-            emit_event("warning", "test", "blocked")
+    def test_system_events_use_sql_persistence(self):
+        from core import system_events as se
+        from core import db as db_module
+
+        tmpdir = tempfile.TemporaryDirectory()
+        orig_db_path = db_module._db_path
+        db_module._db_path = lambda: os.path.join(tmpdir.name, "kcd.db")
+        try:
+            se.emit_event("warning", "test", "written")
+            events = se.list_events("all", limit=10)
+            self.assertTrue(any(e.get("title") == "test" for e in events))
+        finally:
+            db_module._db_path = orig_db_path
+            tmpdir.cleanup()
 
     def test_guardrails_present_in_sources(self):
         base = Path(__file__).resolve().parents[1]

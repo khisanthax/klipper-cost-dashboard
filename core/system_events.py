@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -67,25 +68,24 @@ def _enforce_retention(max_events: int = MAX_EVENTS) -> None:
 
 def _enforce_retention_sql(max_events: int = MAX_EVENTS) -> None:
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        conn.execute(
-            """
-            DELETE FROM system_events
-             WHERE id NOT IN (
-                 SELECT id FROM system_events ORDER BY ts DESC LIMIT ?
-             )
-            """,
-            (max_events,),
-        )
-        conn.commit()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            conn.execute(
+                """
+                DELETE FROM system_events
+                 WHERE id NOT IN (
+                     SELECT id FROM system_events ORDER BY ts DESC LIMIT ?
+                 )
+                """,
+                (max_events,),
+            )
+            conn.commit()
     except Exception:
         return
 
 
 def _emit_event_sql(event: Dict[str, Any]) -> None:
-    try:
-        conn = db_module.connect_db()
+    with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         conn.execute(
             """
@@ -102,6 +102,7 @@ def _emit_event_sql(event: Dict[str, Any]) -> None:
             ),
         )
         conn.commit()
+    try:
         _enforce_retention_sql()
     except Exception:
         return
@@ -113,7 +114,6 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
 
     Retention is enforced as a best-effort ring buffer.
     """
-    require_file_writes_allowed("system_events.jsonl", caller_hint="core.system_events.emit_event")
     cat = str(category or "").strip().lower()
     if cat not in VALID_CATEGORIES:
         cat = "activity"
@@ -130,6 +130,8 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
         _emit_event_sql(event)
         return
 
+    require_file_writes_allowed("system_events.jsonl", caller_hint="core.system_events.emit_event")
+
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(EVENTS_FILE, "a", encoding="utf-8") as f:
@@ -142,11 +144,11 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
 def _iter_events_newest_first() -> Iterable[Dict[str, Any]]:
     if is_sql_only():
         try:
-            conn = db_module.connect_db()
-            db_module.apply_migrations(conn)
-            rows = conn.execute(
-                "SELECT ts, category, title, message, meta_json FROM system_events ORDER BY ts DESC"
-            ).fetchall()
+            with closing(db_module.connect_db()) as conn:
+                db_module.apply_migrations(conn)
+                rows = conn.execute(
+                    "SELECT ts, category, title, message, meta_json FROM system_events ORDER BY ts DESC"
+                ).fetchall()
             out: List[Dict[str, Any]] = []
             for r in rows:
                 meta_raw = r["meta_json"] if isinstance(r, dict) or hasattr(r, "__getitem__") else None

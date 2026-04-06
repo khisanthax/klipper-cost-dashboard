@@ -151,7 +151,7 @@ This is the live execution phase.
 
 ## Current Position
 
-KCD is no longer a CSV-first app with experimental SQL on the side. SQL is already first-class for major read paths, migration tooling, installer behavior, and SQL-only enforcement. At the same time, the project is still in a transitional hardening phase: SQL-only is not fully pure, configuration migration is incomplete, system events are inconsistent in SQL-only, docs are stale in places, and recalculation still contains an intentionally unfinished mode.
+KCD is no longer a CSV-first app with experimental SQL on the side. SQL is already first-class for major read paths, migration tooling, installer behavior, and SQL-only enforcement. At the same time, the project is still in a transitional hardening phase: SQL-only is not fully pure, configuration migration is incomplete, docs are stale in places, and recalculation still contains an intentionally unfinished mode.
 
 ## Current Active Work
 
@@ -161,12 +161,11 @@ This is the strongest next task because it closes the clearest contradiction bet
 
 ## Next Planned Work
 
-1. Fix SQL-only system events behavior so the current SQL schema/read path is matched by a working SQL-only write path.
-2. Complete SQL-only pricing and configuration persistence so runtime behavior does not fall back to defaults where DB-backed settings are expected.
-3. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture.
-4. Tighten SQL-only validation and certification so startup/runtime guarantees are easier to prove.
-5. Decide and document the long-term role of CSV: compatibility mode vs import/export only.
-6. Revisit recalculation scope and either complete "full" recompute or explicitly de-scope it.
+1. Complete SQL-only pricing and configuration persistence so runtime behavior does not fall back to defaults where DB-backed settings are expected.
+2. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture.
+3. Tighten SQL-only validation and certification so startup/runtime guarantees are easier to prove.
+4. Decide and document the long-term role of CSV: compatibility mode vs import/export only.
+5. Revisit recalculation scope and either complete "full" recompute or explicitly de-scope it.
 
 ## Deferred Feature Track
 
@@ -188,7 +187,6 @@ This is the strongest next task because it closes the clearest contradiction bet
 
 - SQL-only is not yet fully pure; some runtime file reads still remain in SQL-only-related paths.
 - SQL-only pricing/config migration is incomplete.
-- system events SQL-only behavior is inconsistent with the intended architecture.
 - README and some module comments still describe earlier or conflicting architectural states.
 - recalculation is intentionally incomplete because "full" recompute is still marked as coming soon.
 - the repo still carries both compatibility and canonicalization goals at the same time, which creates ambiguity around CSV's final role.
