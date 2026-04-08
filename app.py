@@ -62,13 +62,22 @@ from core.printers import (
     looks_like_gcode_filename,
 )
 from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
-from core.readiness import check_sql_only_readiness
+from core.readiness import (
+    check_sql_only_readiness,
+    enforce_sql_only_startup_readiness,
+    SqlOnlyStartupReadinessError,
+)
 
 app = Flask(__name__)
 app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
 
 if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
     app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
+try:
+    enforce_sql_only_startup_readiness()
+except SqlOnlyStartupReadinessError as exc:
+    app.logger.error(str(exc))
+    raise
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50

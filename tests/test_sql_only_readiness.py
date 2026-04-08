@@ -1,5 +1,7 @@
 import json
 import os
+import importlib
+import sys
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -11,7 +13,9 @@ class SqlOnlyReadinessTests(unittest.TestCase):
 
         self._db_module = db_module
         self._prev_backend = os.environ.get("KCD_STORAGE_BACKEND")
+        self._prev_fail_fast = os.environ.get("KCD_SQL_ONLY_FAIL_FAST")
         os.environ["KCD_STORAGE_BACKEND"] = "sql"
+        os.environ.pop("KCD_SQL_ONLY_FAIL_FAST", None)
         data_root = os.path.join(os.getcwd(), "data")
         os.makedirs(data_root, exist_ok=True)
         self._test_id = uuid.uuid4().hex
@@ -25,6 +29,11 @@ class SqlOnlyReadinessTests(unittest.TestCase):
             os.environ.pop("KCD_STORAGE_BACKEND", None)
         else:
             os.environ["KCD_STORAGE_BACKEND"] = self._prev_backend
+        if self._prev_fail_fast is None:
+            os.environ.pop("KCD_SQL_ONLY_FAIL_FAST", None)
+        else:
+            os.environ["KCD_SQL_ONLY_FAIL_FAST"] = self._prev_fail_fast
+        sys.modules.pop("app", None)
         for suffix in ("", "-wal", "-shm"):
             try:
                 os.remove(self._db_file + suffix)
@@ -48,6 +57,10 @@ class SqlOnlyReadinessTests(unittest.TestCase):
                 (key, json.dumps(value), now),
             )
             conn.commit()
+
+    def _import_app_fresh(self):
+        sys.modules.pop("app", None)
+        return importlib.import_module("app")
 
     def test_check_sql_only_readiness_fails_without_pause_billing_default(self):
         from core.readiness import check_sql_only_readiness
@@ -76,8 +89,44 @@ class SqlOnlyReadinessTests(unittest.TestCase):
         self.assertEqual(readiness.get("backend"), "sql")
         self.assertTrue(any(check.get("name") == "pause_billing_default" and check.get("ok") for check in readiness.get("checks", [])))
 
+    def test_enforce_sql_only_startup_readiness_raises_when_enabled_and_not_ready(self):
+        from core.readiness import (
+            enforce_sql_only_startup_readiness,
+            SqlOnlyStartupReadinessError,
+        )
+
+        os.environ["KCD_SQL_ONLY_FAIL_FAST"] = "1"
+
+        with self.assertRaises(SqlOnlyStartupReadinessError) as ctx:
+            enforce_sql_only_startup_readiness()
+
+        self.assertIn("KCD_SQL_ONLY_FAIL_FAST=1", str(ctx.exception))
+        self.assertIn("missing_pause_billing_default", str(ctx.exception))
+
+    def test_app_import_fails_fast_when_enabled_and_not_ready(self):
+        from core.readiness import SqlOnlyStartupReadinessError
+
+        os.environ["KCD_SQL_ONLY_FAIL_FAST"] = "1"
+
+        with self.assertRaises(SqlOnlyStartupReadinessError):
+            self._import_app_fresh()
+
+    def test_app_import_succeeds_when_enabled_and_ready(self):
+        os.environ["KCD_SQL_ONLY_FAIL_FAST"] = "1"
+        self._upsert_user_setting(
+            "display_settings",
+            {
+                "visible_columns": ["printer"],
+                "pause_include_paused_time_default": False,
+            },
+        )
+
+        module = self._import_app_fresh()
+
+        self.assertIsNotNone(module.app)
+
     def test_health_sql_only_reports_readiness_failure(self):
-        import app as kcd_app
+        kcd_app = self._import_app_fresh()
 
         client = kcd_app.app.test_client()
         response = client.get("/health")
@@ -90,7 +139,7 @@ class SqlOnlyReadinessTests(unittest.TestCase):
         self.assertTrue(any(err.get("code") == "missing_pause_billing_default" for err in payload.get("errors", [])))
 
     def test_health_sql_only_reports_ready_when_validator_passes(self):
-        import app as kcd_app
+        kcd_app = self._import_app_fresh()
 
         self._upsert_user_setting(
             "display_settings",

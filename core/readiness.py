@@ -4,12 +4,24 @@ SQL-only runtime readiness checks.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from core import db as db_module
+from core.sql_only import is_sql_only
 
 
 REQUIRED_SQL_TABLES = ("printers", "jobs", "user_settings", "system_events")
+SQL_ONLY_FAIL_FAST_ENV = "KCD_SQL_ONLY_FAIL_FAST"
+
+
+class SqlOnlyStartupReadinessError(RuntimeError):
+    """Raised when opt-in SQL-only startup readiness validation fails."""
+
+
+def _env_truthy(name: str) -> bool:
+    value = str(os.getenv(name, "") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 def _check_pause_billing_default(conn) -> tuple[bool, dict[str, Any]]:
@@ -91,3 +103,44 @@ def check_sql_only_readiness() -> dict[str, Any]:
 
     result["ready"] = not result["errors"]
     return result
+
+
+def sql_only_fail_fast_enabled() -> bool:
+    """Return whether strict SQL-only startup readiness is enabled."""
+    return _env_truthy(SQL_ONLY_FAIL_FAST_ENV)
+
+
+def format_sql_only_readiness_failure(readiness: dict[str, Any]) -> str:
+    """Render a compact startup failure message from a readiness result."""
+    errors = readiness.get("errors") or []
+    if not errors:
+        return (
+            "SQL-only startup readiness failed "
+            f"({SQL_ONLY_FAIL_FAST_ENV}=1)."
+        )
+
+    parts: list[str] = []
+    for err in errors:
+        code = str(err.get("code") or "readiness_error").strip()
+        message = str(err.get("message") or "").strip()
+        parts.append(f"{code}: {message}" if message else code)
+
+    return (
+        "SQL-only startup readiness failed "
+        f"({SQL_ONLY_FAIL_FAST_ENV}=1): "
+        + "; ".join(parts)
+    )
+
+
+def enforce_sql_only_startup_readiness() -> dict[str, Any] | None:
+    """
+    Fail fast during startup when strict SQL-only readiness is enabled.
+    """
+    if not is_sql_only() or not sql_only_fail_fast_enabled():
+        return None
+
+    readiness = check_sql_only_readiness()
+    if readiness.get("ready"):
+        return readiness
+
+    raise SqlOnlyStartupReadinessError(format_sql_only_readiness_failure(readiness))

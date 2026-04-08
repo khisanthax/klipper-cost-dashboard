@@ -100,10 +100,11 @@ This is the live execution phase.
 - what is already done:
   - `/health` has a SQL-safe path.
   - `/health` now reports SQL-only readiness through a reusable validator instead of DB connectivity alone.
+  - SQL-only can now fail fast at startup through a small opt-in hook that uses the readiness validator.
   - Moonraker diagnostics exist.
   - a lightweight SQL-only validation helper exists.
 - what remains:
-  - decide whether startup should fail fast when SQL-only readiness fails.
+  - decide whether SQL-only fail-fast startup should remain opt-in or become the default policy.
   - broaden the readiness contract and certification path beyond the current minimal validator checks.
 - why it matters:
   - SQL-only needs an explicit verification story, not just best-effort route hardening.
@@ -156,9 +157,9 @@ KCD is no longer a CSV-first app with experimental SQL on the side. SQL is alrea
 
 ## Current Active Work
 
-Strengthen SQL-only startup verification by expanding the new readiness validator and deciding whether startup should fail fast when readiness fails.
+Strengthen SQL-only startup verification by expanding the readiness validator and deciding whether fail-fast startup should remain opt-in or become the default policy.
 
-This is the strongest next task because Phase 6.3 now has a concrete readiness contract, but not yet a full certification or startup policy.
+This is the strongest next task because Phase 6.3 now has a concrete readiness contract and an opt-in startup hook, but not yet a final startup policy or full certification path.
 
 ## Next Planned Work
 
