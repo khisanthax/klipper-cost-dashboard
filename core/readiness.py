@@ -16,12 +16,17 @@ SQL_ONLY_FAIL_FAST_ENV = "KCD_SQL_ONLY_FAIL_FAST"
 
 
 class SqlOnlyStartupReadinessError(RuntimeError):
-    """Raised when opt-in SQL-only startup readiness validation fails."""
+    """Raised when strict SQL-only startup readiness validation fails."""
 
 
 def _env_truthy(name: str) -> bool:
     value = str(os.getenv(name, "") or "").strip().lower()
     return value in {"1", "true", "yes", "on"}
+
+
+def _env_falsey(name: str) -> bool:
+    value = str(os.getenv(name, "") or "").strip().lower()
+    return value in {"0", "false", "no", "off"}
 
 
 def _check_pause_billing_default(conn) -> tuple[bool, dict[str, Any]]:
@@ -77,7 +82,15 @@ def check_sql_only_readiness() -> dict[str, Any]:
             add_check("db_connection", True)
             db_module.apply_migrations(conn)
             result["schema_version"] = db_module.current_schema_version(conn)
-            add_check("schema_migrations", True, schema_version=result["schema_version"])
+            schema_ok = bool(result["schema_version"])
+            add_check("schema_migrations", schema_ok, schema_version=result["schema_version"])
+            if not schema_ok:
+                result["errors"].append(
+                    {
+                        "code": "missing_schema_version",
+                        "message": "No schema migration version recorded after applying migrations.",
+                    }
+                )
 
             table_counts: dict[str, int] = {}
             for table_name in REQUIRED_SQL_TABLES:
@@ -107,17 +120,18 @@ def check_sql_only_readiness() -> dict[str, Any]:
 
 def sql_only_fail_fast_enabled() -> bool:
     """Return whether strict SQL-only startup readiness is enabled."""
-    return _env_truthy(SQL_ONLY_FAIL_FAST_ENV)
+    if not is_sql_only():
+        return False
+    if _env_falsey(SQL_ONLY_FAIL_FAST_ENV):
+        return False
+    return True
 
 
 def format_sql_only_readiness_failure(readiness: dict[str, Any]) -> str:
     """Render a compact startup failure message from a readiness result."""
     errors = readiness.get("errors") or []
     if not errors:
-        return (
-            "SQL-only startup readiness failed "
-            f"({SQL_ONLY_FAIL_FAST_ENV}=1)."
-        )
+        return "SQL-only startup readiness failed."
 
     parts: list[str] = []
     for err in errors:
@@ -126,9 +140,9 @@ def format_sql_only_readiness_failure(readiness: dict[str, Any]) -> str:
         parts.append(f"{code}: {message}" if message else code)
 
     return (
-        "SQL-only startup readiness failed "
-        f"({SQL_ONLY_FAIL_FAST_ENV}=1): "
+        "SQL-only startup readiness failed: "
         + "; ".join(parts)
+        + f". Set {SQL_ONLY_FAIL_FAST_ENV}=0 to bypass strict startup."
     )
 
 

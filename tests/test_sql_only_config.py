@@ -13,7 +13,9 @@ class SqlOnlyConfigTests(unittest.TestCase):
 
         self._db_module = db_module
         self._prev_backend = os.environ.get("KCD_STORAGE_BACKEND")
+        self._prev_fail_fast = os.environ.get("KCD_SQL_ONLY_FAIL_FAST")
         os.environ["KCD_STORAGE_BACKEND"] = "sql"
+        os.environ["KCD_SQL_ONLY_FAIL_FAST"] = "0"
         data_root = os.path.join(os.getcwd(), "data")
         os.makedirs(data_root, exist_ok=True)
         self._test_id = uuid.uuid4().hex
@@ -27,6 +29,10 @@ class SqlOnlyConfigTests(unittest.TestCase):
             os.environ.pop("KCD_STORAGE_BACKEND", None)
         else:
             os.environ["KCD_STORAGE_BACKEND"] = self._prev_backend
+        if self._prev_fail_fast is None:
+            os.environ.pop("KCD_SQL_ONLY_FAIL_FAST", None)
+        else:
+            os.environ["KCD_SQL_ONLY_FAIL_FAST"] = self._prev_fail_fast
         for suffix in ("", "-wal", "-shm"):
             try:
                 os.remove(self._db_file + suffix)
