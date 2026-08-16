@@ -111,15 +111,16 @@ This is the live execution phase.
 
 ### 6.4 DB as Canonical Config
 
-- status: in progress
+- status: complete
 - what is already done:
   - Moonraker URL can be edited in the UI and stored in the DB.
-  - some SQL-only settings paths already use `user_settings`.
+  - SQL-only printer settings, pause accounting policy, display state, and filament mappings use `user_settings`.
+  - filament and hourly rate profiles use their SQL tables, and active profile references are validated before use.
   - backup settings can persist in SQL-only.
   - SQL-only pricing now resolves from DB-backed settings and profile state instead of falling back to CSV or implicit default pricing during normal runtime.
+  - required pricing and pause-accounting state fail loudly through runtime validation and startup readiness, while presentation and disabled-feature defaults remain intentionally SQL-safe.
 - what remains:
-  - tighten the remaining SQL-only configuration behavior that still uses explicit SQL-safe defaults instead of failing loudly when required DB-backed config is missing.
-  - decide where SQL-only should use explicit SQL-safe defaults versus fail loudly when required DB-backed config is missing.
+  - future hardening can improve persistence error reporting, but no remaining default or fallback blocks DB-canonical SQL-only runtime configuration.
 - why it matters:
   - SQL-only cannot be considered canonical while runtime config still depends on legacy files or non-persisted defaults.
 
@@ -157,21 +158,19 @@ This is the live execution phase.
 
 ## Current Position
 
-KCD is no longer a CSV-first app with experimental SQL on the side. SQL is already first-class for major read paths, migration tooling, installer behavior, and SQL-only enforcement. At the same time, the project is still in a transitional hardening phase: SQL-only isolation still needs continued verification, configuration migration is incomplete, docs are stale in places, and recalculation still contains an intentionally unfinished mode.
+KCD is no longer a CSV-first app with experimental SQL on the side. SQL is already first-class for major read paths, migration tooling, installer behavior, SQL-only enforcement, and canonical runtime configuration. At the same time, the project is still in a transitional hardening phase: SQL-only isolation still needs continued verification, docs are stale in places, and recalculation still contains an intentionally unfinished mode.
 
 ## Current Active Work
 
-Complete Phase 6.4 DB canonical configuration by resolving the remaining SQL-only settings that still rely on explicit defaults rather than required persisted configuration.
+Perform Phase 6.6 release hardening without expanding product scope.
 
-This is now the strongest next task because startup and representative route isolation are covered, while canonical SQL-only configuration still needs a clear boundary between valid defaults and missing required state.
+This is now the strongest next task because startup readiness, canonical SQL-only configuration, and the CSV compatibility policy are established, while documentation, validation breadth, and intentionally incomplete areas still need release-level reconciliation.
 
 ## Next Planned Work
 
-1. Complete SQL-only pricing and configuration persistence so runtime behavior does not fall back to defaults where DB-backed settings are expected.
-2. Add or tighten focused SQL-only validation around CSV/JSON isolation while preserving CSV and dual compatibility modes.
-3. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture.
-4. Tighten SQL-only validation and certification where useful so startup/runtime guarantees are easier to prove.
-5. Revisit recalculation scope and either complete "full" recompute or explicitly de-scope it.
+1. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture.
+2. Tighten SQL-only validation and certification where useful so startup/runtime guarantees are easier to prove.
+3. Revisit recalculation scope and either complete "full" recompute or explicitly de-scope it.
 
 ## Deferred Feature Track
 
@@ -192,7 +191,6 @@ This is now the strongest next task because startup and representative route iso
 ## Current Risks / Contradictions
 
 - SQL-only is not yet fully pure; some runtime file reads still remain in SQL-only-related paths.
-- SQL-only pricing/config migration is incomplete.
 - README and some module comments still describe earlier or conflicting architectural states.
 - recalculation is intentionally incomplete because "full" recompute is still marked as coming soon.
 - compatibility CSV runtime paths remain supported for this release line, so SQL-only guardrails must keep that compatibility surface from becoming a strict-mode dependency.
