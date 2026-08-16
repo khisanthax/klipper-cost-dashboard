@@ -96,15 +96,16 @@ This is the live execution phase.
 
 ### 6.3 Startup Verification
 
-- status: partial
+- status: mostly complete
 - what is already done:
   - `/health` has a SQL-safe path.
   - `/health` now reports SQL-only readiness through a reusable validator instead of DB connectivity alone.
   - SQL-only now fails fast at startup by default through a small hook that uses the readiness validator.
+  - readiness verifies minimum load-bearing SQL-only runtime state: DB connectivity, migrations/schema version, required SQL tables, persisted pause billing default, and configured-printer pricing/profile calculation readiness.
   - Moonraker diagnostics exist.
   - a lightweight SQL-only validation helper exists.
 - what remains:
-  - broaden the readiness contract and certification path beyond the current minimal validator checks.
+  - future hardening can broaden certification coverage where useful, but the practical startup readiness contract is now in place.
 - why it matters:
   - SQL-only needs an explicit verification story, not just best-effort route hardening.
 

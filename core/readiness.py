@@ -5,14 +5,23 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import closing
 from typing import Any
 
 from core import db as db_module
 from core.sql_only import is_sql_only
 
 
-REQUIRED_SQL_TABLES = ("printers", "jobs", "user_settings", "system_events")
+REQUIRED_SQL_TABLES = (
+    "printers",
+    "jobs",
+    "user_settings",
+    "filament_profiles",
+    "hourly_rate_profiles",
+    "system_events",
+)
 SQL_ONLY_FAIL_FAST_ENV = "KCD_SQL_ONLY_FAIL_FAST"
+VALID_FILAMENT_MODES = {"per_meter", "per_gram", "per_kg"}
 
 
 class SqlOnlyStartupReadinessError(RuntimeError):
@@ -59,6 +68,125 @@ def _check_pause_billing_default(conn) -> tuple[bool, dict[str, Any]]:
     }
 
 
+def _load_user_setting(conn, key: str):
+    row = conn.execute(
+        "SELECT value_json FROM user_settings WHERE key = ?",
+        (key,),
+    ).fetchone()
+    if not row:
+        return None
+    raw = row["value_json"] if hasattr(row, "__getitem__") else row[0]
+    return json.loads(raw) if raw else None
+
+
+def _load_user_setting_dict(conn, *keys: str) -> dict[str, Any]:
+    for key in keys:
+        try:
+            data = _load_user_setting(conn, key)
+        except Exception:
+            return {}
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        if value is None or str(value).strip() == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_valid_rate_profile(conn, profile_uid: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT rate_per_hour
+          FROM hourly_rate_profiles
+         WHERE profile_uid = ? OR CAST(id AS TEXT) = ?
+        """,
+        (profile_uid, profile_uid),
+    ).fetchone()
+    if not row:
+        return False
+    value = row["rate_per_hour"] if hasattr(row, "__getitem__") else row[0]
+    return _as_float(value) is not None
+
+
+def _has_valid_filament_profile(conn, profile_uid: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT filament_mode, filament_rate, grams_per_meter
+          FROM filament_profiles
+         WHERE profile_uid = ? OR CAST(id AS TEXT) = ?
+        """,
+        (profile_uid, profile_uid),
+    ).fetchone()
+    if not row:
+        return False
+    mode = str(row["filament_mode"] if hasattr(row, "__getitem__") else row[0] or "").strip()
+    rate = row["filament_rate"] if hasattr(row, "__getitem__") else row[1]
+    grams = row["grams_per_meter"] if hasattr(row, "__getitem__") else row[2]
+    return mode in VALID_FILAMENT_MODES and _as_float(rate) is not None and _as_float(grams) is not None
+
+
+def _has_valid_printer_rate_config(conn, printer_name: str, printer_settings: dict[str, Any]) -> bool:
+    active_rate_profile_id = str(printer_settings.get("active_rate_profile_id") or "").strip()
+    if active_rate_profile_id:
+        return _has_valid_rate_profile(conn, active_rate_profile_id)
+    return _as_float(printer_settings.get("rate_per_hour")) is not None
+
+
+def _has_valid_printer_filament_config(conn, printer_name: str, printer_settings: dict[str, Any], mappings: dict[str, Any]) -> bool:
+    profile_id = str(mappings.get(printer_name) or "").strip()
+    if profile_id:
+        return _has_valid_filament_profile(conn, profile_id)
+    mode = str(printer_settings.get("filament_mode") or "").strip()
+    return (
+        mode in VALID_FILAMENT_MODES
+        and _as_float(printer_settings.get("filament_rate")) is not None
+        and _as_float(printer_settings.get("grams_per_meter")) is not None
+    )
+
+
+def _check_configured_printer_pricing(conn) -> tuple[bool, dict[str, Any]]:
+    rows = conn.execute("SELECT name FROM printers ORDER BY name").fetchall()
+    printer_names = [
+        str(row["name"] if hasattr(row, "__getitem__") else row[0] or "").strip()
+        for row in rows
+    ]
+    printer_names = [name for name in printer_names if name]
+    if not printer_names:
+        return True, {"printers_checked": 0}
+
+    settings = _load_user_setting_dict(conn, "printer_settings", "settings")
+    mappings = _load_user_setting_dict(conn, "filament_mappings")
+    missing_rate: list[str] = []
+    missing_filament: list[str] = []
+
+    for printer_name in printer_names:
+        printer_settings = settings.get(printer_name)
+        if not isinstance(printer_settings, dict):
+            printer_settings = {}
+        if not _has_valid_printer_rate_config(conn, printer_name, printer_settings):
+            missing_rate.append(printer_name)
+        if not _has_valid_printer_filament_config(conn, printer_name, printer_settings, mappings):
+            missing_filament.append(printer_name)
+
+    if not missing_rate and not missing_filament:
+        return True, {"printers_checked": len(printer_names)}
+
+    detail = {
+        "code": "invalid_printer_pricing_config",
+        "message": "Configured SQL printers are missing DB-backed pricing/profile config.",
+        "printers_checked": len(printer_names),
+        "missing_rate_printers": missing_rate,
+        "missing_filament_printers": missing_filament,
+    }
+    return False, detail
+
+
 def check_sql_only_readiness() -> dict[str, Any]:
     """
     Validate the minimum required state for SQL-only runtime readiness.
@@ -78,7 +206,7 @@ def check_sql_only_readiness() -> dict[str, Any]:
         result["checks"].append(check)
 
     try:
-        with db_module.connect_db() as conn:
+        with closing(db_module.connect_db()) as conn:
             add_check("db_connection", True)
             db_module.apply_migrations(conn)
             result["schema_version"] = db_module.current_schema_version(conn)
@@ -104,6 +232,11 @@ def check_sql_only_readiness() -> dict[str, Any]:
             add_check("pause_billing_default", pause_ok, **pause_detail)
             if not pause_ok:
                 result["errors"].append(pause_detail)
+
+            pricing_ok, pricing_detail = _check_configured_printer_pricing(conn)
+            add_check("configured_printer_pricing", pricing_ok, **pricing_detail)
+            if not pricing_ok:
+                result["errors"].append(pricing_detail)
     except Exception as exc:
         add_check("db_connection", False, message=str(exc))
         result["errors"].append(
