@@ -1637,7 +1637,7 @@ def recalculate_page():
     recalc_visible_cols = get_visible_columns_for_table(
         display_settings,
         "recalc_jobs",
-        ["printer", "filename", "status", "hours", "total", "job_uid"],
+        ["printer", "filename", "status", "hours", "filament", "time_cost", "material_cost", "total", "job_uid"],
     )
     return render_template(
         "recalculate.html",
@@ -2066,6 +2066,22 @@ def recalculate_preview():
             new_total = float(computed.get("total_cost") or 0.0)
         except Exception:
             new_total = 0.0
+        try:
+            duration_hours = float(computed.get("duration_hours", duration_seconds / 3600.0) or 0.0)
+        except Exception:
+            duration_hours = duration_seconds / 3600.0
+        try:
+            filament_meters = float(computed.get("filament_meters", filament_mm / 1000.0) or 0.0)
+        except Exception:
+            filament_meters = filament_mm / 1000.0
+        try:
+            time_cost = float(computed.get("time_cost") or 0.0)
+        except Exception:
+            time_cost = 0.0
+        try:
+            material_cost = float(computed.get("material_cost") or 0.0)
+        except Exception:
+            material_cost = 0.0
 
         before_total += old_total
         after_total += new_total
@@ -2074,6 +2090,10 @@ def recalculate_preview():
                 "job_uid": uid,
                 "printer": printer_name,
                 "filename": str(r.get("filename") or ""),
+                "duration_hours": duration_hours,
+                "filament_meters": filament_meters,
+                "time_cost": time_cost,
+                "material_cost": material_cost,
                 "old_total": old_total,
                 "new_total": new_total,
                 "delta": new_total - old_total,
@@ -2087,7 +2107,7 @@ def recalculate_preview():
     recalc_visible_cols = get_visible_columns_for_table(
         display_settings,
         "recalc_jobs",
-        ["printer", "filename", "status", "hours", "total", "job_uid"],
+        ["printer", "filename", "status", "hours", "filament", "time_cost", "material_cost", "total", "job_uid"],
     )
 
     msg = f"Previewing {len(preview_rows)} job(s)."
@@ -2986,7 +3006,17 @@ def _settings_view(tab: str):
             if table_id == "history":
                 allowed = [h for h in HEADERS if h != "job_uid"]
             elif table_id == "recalc_jobs":
-                allowed = ["printer", "filename", "status", "hours", "total", "job_uid"]
+                allowed = [
+                    "printer",
+                    "filename",
+                    "status",
+                    "hours",
+                    "filament",
+                    "time_cost",
+                    "material_cost",
+                    "total",
+                    "job_uid",
+                ]
             elif table_id == "projects_unassigned":
                 allowed = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
             elif table_id == "projects_project_jobs":
@@ -3298,7 +3328,17 @@ def _settings_view(tab: str):
 
     # Settings → Other: per-table column visibility (server-backed display.json).
     # Defaults: show all allowed columns if no saved selection exists.
-    recalc_allowed_cols = ["printer", "filename", "status", "hours", "total", "job_uid"]
+    recalc_allowed_cols = [
+        "printer",
+        "filename",
+        "status",
+        "hours",
+        "filament",
+        "time_cost",
+        "material_cost",
+        "total",
+        "job_uid",
+    ]
     projects_unassigned_allowed_cols = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
     projects_project_jobs_allowed_cols = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
 

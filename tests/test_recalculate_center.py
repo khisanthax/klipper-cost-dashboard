@@ -192,6 +192,37 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertIn("Preview", resp.get_data(as_text=True))
         self.assertEqual(self._read_total_cost(), before)
 
+    def test_recalculate_tables_show_cost_components(self):
+        page = self.client.get("/recalculate")
+        page_text = page.get_data(as_text=True)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Filament (m)", page_text)
+        self.assertIn("Time Cost ($)", page_text)
+        self.assertIn("Material Cost ($)", page_text)
+        self.assertIn("Total Cost ($)", page_text)
+
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
+            return {
+                "duration_hours": 1.0,
+                "filament_meters": 10.0,
+                "time_cost": 6.5,
+                "material_cost": 2.25,
+                "total_cost": 8.75,
+            }
+
+        with patch.object(self.app_module, "compute_costs", fake_compute_costs):
+            preview = self.client.post(
+                "/recalculate/preview",
+                data={"job_uids": ["test-job-uid-1"], "recompute_mode": "pricing_only"},
+            )
+        preview_text = preview.get_data(as_text=True)
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("Old Total ($)", preview_text)
+        self.assertIn("New Total ($)", preview_text)
+        self.assertIn(">6.50<", preview_text)
+        self.assertIn(">2.25<", preview_text)
+        self.assertIn(">8.75<", preview_text)
+
     def test_recalculate_preview_and_run_use_same_paused_seconds_total(self):
         paused_inputs = []
 
