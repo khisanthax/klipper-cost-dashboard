@@ -149,9 +149,13 @@ This is the live execution phase.
   - validation tooling exists.
   - diagnostic helpers exist.
   - multiple hardening fixes have already landed on `main`.
+  - Recalculate preview and execution now use the same stored pause-accounting input.
 - what remains:
   - reconcile stale documentation.
   - tighten validation coverage for SQL-only runtime behavior.
+  - finish SQL-only printer rename, merge, and delete paths that still enter compatibility file/state helpers.
+  - make Recalculate pricing components clearer so filament/material recalculation is visible.
+  - define Project cost-breakdown semantics for manual cost overrides before exposing component totals.
   - resolve the remaining inconsistent SQL-only subsystems before calling the release line clean.
 - why it matters:
   - the release is already feature-rich, but its operational contract is still sharper in code than in docs and guarantees.
