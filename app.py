@@ -2728,9 +2728,14 @@ def _settings_view(tab: str):
         if action == "delete_printer":
             printer = request.form.get("printer", "").strip()
             if printer:
-                pricing.delete_printer(printer, delete_csv=False)
-                # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
-                pricing.hide_printer(printer)
+                if _is_sql_only():
+                    from core import printer_lifecycle
+
+                    printer_lifecycle.delete_printer(printer)
+                else:
+                    pricing.delete_printer(printer, delete_csv=False)
+                    # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
+                    pricing.hide_printer(printer)
                 system_events.emit_event(
                     "deleted",
                     "Printer removed",
@@ -3002,14 +3007,24 @@ def _settings_view(tab: str):
             old = request.form.get("old_name", "").strip()
             new = request.form.get("new_name", "").strip()
             if old and new:
-                rename_printer(old, new)
+                if _is_sql_only():
+                    from core import printer_lifecycle
+
+                    printer_lifecycle.rename_printer(old, new)
+                else:
+                    rename_printer(old, new)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "merge_printers":
             primary = request.form.get("primary", "").strip()
             secondary = request.form.get("secondary", "").strip()
             if primary and secondary:
-                merge_printers(primary, secondary)
+                if _is_sql_only():
+                    from core import printer_lifecycle
+
+                    printer_lifecycle.merge_printers(primary, secondary)
+                else:
+                    merge_printers([secondary], primary)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "add_filament_profile":
