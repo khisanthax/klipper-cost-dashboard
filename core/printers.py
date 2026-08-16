@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from typing import Optional, Set
 
@@ -84,9 +85,9 @@ def _is_sql_only() -> bool:
 
 def _load_sql_printers() -> Set[str]:
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        rows = conn.execute("SELECT name FROM printers").fetchall()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            rows = conn.execute("SELECT name FROM printers").fetchall()
     except Exception:
         return set()
     out: Set[str] = set()

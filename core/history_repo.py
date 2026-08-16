@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import logging
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Tuple
@@ -88,16 +89,17 @@ def _pager_meta(total: int, page: int, per_page: int) -> dict:
 def _read_backend() -> Tuple[str, Optional[str]]:
     if is_sql_only():
         return "sql", None
+    # CSV remains the default compatibility read path outside strict SQL-only mode.
     mode = str(os.getenv("KCD_READ_BACKEND", "csv")).strip().lower()
     if mode == "auto":
         mode = "sql"
     if mode == "sql":
         try:
-            conn = db_module.connect_db()
-            version = db_module.current_schema_version(conn)
-            if not version:
-                return "csv", "SQL backend not initialized; falling back to CSV."
-            return "sql", None
+            with closing(db_module.connect_db()) as conn:
+                version = db_module.current_schema_version(conn)
+                if not version:
+                    return "csv", "SQL backend not initialized; falling back to CSV."
+                return "sql", None
         except Exception:
             return "csv", "SQL backend not available; falling back to CSV."
     return "csv", None
@@ -172,87 +174,87 @@ def list_history_rows_csv(query: HistoryQuery, page: int, per_page: int, error: 
 
 
 def list_history_rows_sql(query: HistoryQuery, page: int, per_page: int, error: Optional[str]) -> HistoryResult:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-    where = []
-    params: list = []
+        where = []
+        params: list = []
 
-    if query.printer:
-        where.append("p.name = ?")
-        params.append(query.printer)
+        if query.printer:
+            where.append("p.name = ?")
+            params.append(query.printer)
 
-    if query.paused_min > 0:
-        where.append("COALESCE(j.paused_seconds_total, 0) >= ?")
-        params.append(float(query.paused_min) * 60.0)
+        if query.paused_min > 0:
+            where.append("COALESCE(j.paused_seconds_total, 0) >= ?")
+            params.append(float(query.paused_min) * 60.0)
 
-    if query.has_runout:
-        where.append("COALESCE(j.runout_count, 0) > 0")
+        if query.has_runout:
+            where.append("COALESCE(j.runout_count, 0) > 0")
 
-    start_epoch = None
-    end_epoch = None
-    if query.start_dt:
-        try:
-            start_epoch = int(query.start_dt.timestamp())
-        except Exception:
-            start_epoch = None
-    if query.end_dt:
-        try:
-            end_epoch = int(query.end_dt.timestamp())
-        except Exception:
-            end_epoch = None
+        start_epoch = None
+        end_epoch = None
+        if query.start_dt:
+            try:
+                start_epoch = int(query.start_dt.timestamp())
+            except Exception:
+                start_epoch = None
+        if query.end_dt:
+            try:
+                end_epoch = int(query.end_dt.timestamp())
+            except Exception:
+                end_epoch = None
 
-    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
-    if start_epoch is not None:
-        where.append(f"{ts_expr} >= ?")
-        params.append(start_epoch)
-    if end_epoch is not None:
-        op = "<" if query.end_exclusive else "<="
-        where.append(f"{ts_expr} {op} ?")
-        params.append(end_epoch)
+        ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
+        if start_epoch is not None:
+            where.append(f"{ts_expr} >= ?")
+            params.append(start_epoch)
+        if end_epoch is not None:
+            op = "<" if query.end_exclusive else "<="
+            where.append(f"{ts_expr} {op} ?")
+            params.append(end_epoch)
 
-    where_sql = " AND ".join(where)
-    if where_sql:
-        where_sql = "WHERE " + where_sql
+        where_sql = " AND ".join(where)
+        if where_sql:
+            where_sql = "WHERE " + where_sql
 
-    total_row = conn.execute(
-        f"""
-        SELECT COUNT(*)
-          FROM jobs j
-          JOIN printers p ON j.printer_id = p.id
-          {where_sql}
-        """,
-        params,
-    ).fetchone()
-    total = int(total_row[0]) if total_row else 0
+        total_row = conn.execute(
+            f"""
+            SELECT COUNT(*)
+              FROM jobs j
+              JOIN printers p ON j.printer_id = p.id
+              {where_sql}
+            """,
+            params,
+        ).fetchone()
+        total = int(total_row[0]) if total_row else 0
 
-    pager = _pager_meta(total, page, per_page)
-    limit = pager["per_page"]
-    offset = (pager["page"] - 1) * pager["per_page"]
+        pager = _pager_meta(total, page, per_page)
+        limit = pager["per_page"]
+        offset = (pager["page"] - 1) * pager["per_page"]
 
-    rows_page = _fetch_sql_rows(conn, where_sql, params, limit=limit, offset=offset)
-    rows_all = _fetch_sql_rows(conn, where_sql, params, limit=None, offset=None)
+        rows_page = _fetch_sql_rows(conn, where_sql, params, limit=limit, offset=offset)
+        rows_all = _fetch_sql_rows(conn, where_sql, params, limit=None, offset=None)
 
-    _warn_if_uniform_profile_id(conn)
+        _warn_if_uniform_profile_id(conn)
 
-    for idx, row in enumerate(rows_page[:3]):
-        logger.debug(
-            "history-sql row[%s] job_uid=%s duration_seconds=%s duration_hours=%s time_cost=%s",
-            idx,
-            row.get("job_uid"),
-            row.get("duration_seconds"),
-            row.get("duration_hours"),
-            row.get("time_cost"),
+        for idx, row in enumerate(rows_page[:3]):
+            logger.debug(
+                "history-sql row[%s] job_uid=%s duration_seconds=%s duration_hours=%s time_cost=%s",
+                idx,
+                row.get("job_uid"),
+                row.get("duration_seconds"),
+                row.get("duration_hours"),
+                row.get("time_cost"),
+            )
+
+        return HistoryResult(
+            rows_page=rows_page,
+            rows_all=rows_all,
+            total=total,
+            pager=pager,
+            backend="sql",
+            error=error,
         )
-
-    return HistoryResult(
-        rows_page=rows_page,
-        rows_all=rows_all,
-        total=total,
-        pager=pager,
-        backend="sql",
-        error=error,
-    )
 
 
 def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limit: Optional[int], offset: Optional[int]) -> List[dict]:
@@ -518,13 +520,13 @@ def set_job_thumbnail(job_uid: str, token: str) -> None:
         return
 
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-        conn.execute(
-            "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
-            (token, now, job_uid),
-        )
-        conn.commit()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+            conn.execute(
+                "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
+                (token, now, job_uid),
+            )
+            conn.commit()
     except Exception as exc:
         logger.debug("history-sql: failed to set thumbnail for job_uid=%s (%s)", job_uid, exc)

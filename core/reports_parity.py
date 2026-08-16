@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -349,47 +350,47 @@ def _load_csv_jobs(csv_path: Optional[str], start_dt: Optional[datetime], end_dt
 
 
 def _load_sql_jobs(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> List[dict]:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-    where = []
-    params: list = []
-    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.started_at, j.created_at)) AS INTEGER)"
+        where = []
+        params: list = []
+        ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.started_at, j.created_at)) AS INTEGER)"
 
-    if start_dt:
-        try:
-            where.append(f"{ts_expr} >= ?")
-            params.append(int(start_dt.timestamp()))
-        except Exception:
-            pass
-    if end_dt:
-        try:
-            where.append(f"{ts_expr} <= ?")
-            params.append(int(end_dt.timestamp()))
-        except Exception:
-            pass
+        if start_dt:
+            try:
+                where.append(f"{ts_expr} >= ?")
+                params.append(int(start_dt.timestamp()))
+            except Exception:
+                pass
+        if end_dt:
+            try:
+                where.append(f"{ts_expr} <= ?")
+                params.append(int(end_dt.timestamp()))
+            except Exception:
+                pass
 
-    where_sql = ""
-    if where:
-        where_sql = "WHERE " + " AND ".join(where)
+        where_sql = ""
+        if where:
+            where_sql = "WHERE " + " AND ".join(where)
 
-    rows = conn.execute(
-        f"""
-        SELECT
-            j.job_uid,
-            p.name AS printer,
-            j.filename,
-            j.status,
-            j.duration_seconds,
-            j.filament_mm,
-            j.total_cost,
-            {ts_expr} AS timestamp_epoch
-        FROM jobs j
-        JOIN printers p ON j.printer_id = p.id
-        {where_sql}
-        """,
-        params,
-    ).fetchall()
+        rows = conn.execute(
+            f"""
+            SELECT
+                j.job_uid,
+                p.name AS printer,
+                j.filename,
+                j.status,
+                j.duration_seconds,
+                j.filament_mm,
+                j.total_cost,
+                {ts_expr} AS timestamp_epoch
+            FROM jobs j
+            JOIN printers p ON j.printer_id = p.id
+            {where_sql}
+            """,
+            params,
+        ).fetchall()
     out = []
     for r in rows:
         row = dict(r)

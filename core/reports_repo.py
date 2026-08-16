@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
@@ -40,19 +41,20 @@ class ReportsRange:
 def _reports_backend() -> Tuple[str, Optional[str]]:
     if is_sql_only():
         return "sql", None
+    # CSV remains the default compatibility read path outside strict SQL-only mode.
     raw_mode = str(os.getenv("KCD_REPORTS_BACKEND", "csv")).strip().lower()
     mode = raw_mode
     if raw_mode == "auto":
         mode = "sql"
     if mode == "sql":
         try:
-            conn = db_module.connect_db()
-            version = db_module.current_schema_version(conn)
-            if not version:
-                return "csv", "SQL reports backend not initialized; falling back to CSV."
-            if raw_mode == "auto":
-                _warn_if_sql_ahead_of_csv(conn)
-            return "sql", None
+            with closing(db_module.connect_db()) as conn:
+                version = db_module.current_schema_version(conn)
+                if not version:
+                    return "csv", "SQL reports backend not initialized; falling back to CSV."
+                if raw_mode == "auto":
+                    _warn_if_sql_ahead_of_csv(conn)
+                return "sql", None
         except Exception:
             return "csv", "SQL reports backend not available; falling back to CSV."
     return "csv", None
@@ -149,54 +151,54 @@ def _reports_from_csv(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
 
 
 def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Dict[str, Any]:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-    where_sql, params = _build_date_filter(start_dt, end_dt)
+        where_sql, params = _build_date_filter(start_dt, end_dt)
 
-    cache_ttl = _cache_ttl_seconds()
-    range_key = _range_key(start_dt, end_dt)
-    fingerprint = _reports_jobs_fingerprint(conn, where_sql, params)
-    cached = reports_cache.get_cached_payload(
-        conn,
-        key="reports:full",
-        range_key=range_key,
-        fingerprint=fingerprint,
-        ttl_seconds=cache_ttl,
-    )
-    if cached is not None:
-        return cached
+        cache_ttl = _cache_ttl_seconds()
+        range_key = _range_key(start_dt, end_dt)
+        fingerprint = _reports_jobs_fingerprint(conn, where_sql, params)
+        cached = reports_cache.get_cached_payload(
+            conn,
+            key="reports:full",
+            range_key=range_key,
+            fingerprint=fingerprint,
+            ttl_seconds=cache_ttl,
+        )
+        if cached is not None:
+            return cached
 
-    summary = _sql_summary(conn, where_sql, params)
-    monthly = _sql_monthly_breakdown(conn, where_sql, params)
-    top_printers = _sql_top_printers(conn, where_sql, params)
-    pause_analytics = _sql_pause_analytics(conn, where_sql, params, summary.get("total_prints", 0))
-    material_summary = _sql_material_summary(conn, where_sql, params)
-    profile_summary = _sql_profile_summary(conn, where_sql, params)
+        summary = _sql_summary(conn, where_sql, params)
+        monthly = _sql_monthly_breakdown(conn, where_sql, params)
+        top_printers = _sql_top_printers(conn, where_sql, params)
+        pause_analytics = _sql_pause_analytics(conn, where_sql, params, summary.get("total_prints", 0))
+        material_summary = _sql_material_summary(conn, where_sql, params)
+        profile_summary = _sql_profile_summary(conn, where_sql, params)
 
-    payload = {
-        "monthly_breakdown": monthly,
-        "top_printers": top_printers,
-        "summary": summary,
-        "pause_analytics": pause_analytics,
-        "material_summary": material_summary,
-        "profile_summary": profile_summary,
-    }
+        payload = {
+            "monthly_breakdown": monthly,
+            "top_printers": top_printers,
+            "summary": summary,
+            "pause_analytics": pause_analytics,
+            "material_summary": material_summary,
+            "profile_summary": profile_summary,
+        }
 
-    if cache_ttl > 0 and fingerprint:
-        try:
-            reports_cache.set_cached_payload(
-                conn,
-                key="reports:full",
-                range_key=range_key,
-                fingerprint=fingerprint,
-                payload=payload,
-            )
-            conn.commit()
-        except Exception:
-            pass
+        if cache_ttl > 0 and fingerprint:
+            try:
+                reports_cache.set_cached_payload(
+                    conn,
+                    key="reports:full",
+                    range_key=range_key,
+                    fingerprint=fingerprint,
+                    payload=payload,
+                )
+                conn.commit()
+            except Exception:
+                pass
 
-    return payload
+        return payload
 
 
 def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Tuple[str, list]:

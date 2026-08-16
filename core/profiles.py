@@ -4,6 +4,7 @@ Filament Profiles Management
 import os
 import uuid
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from core import db as db_module
 from core.config import PROFILES_FILE, DATA_DIR
@@ -225,14 +226,14 @@ def _load_sql_profiles():
     Returns dict of profile_uid (or id) -> profile_data.
     """
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        rows = conn.execute(
-            """
-            SELECT id, profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter
-              FROM filament_profiles
-            """
-        ).fetchall()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                """
+                SELECT id, profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter
+                  FROM filament_profiles
+                """
+            ).fetchall()
     except Exception:
         return {}
 
@@ -286,57 +287,57 @@ def _upsert_sql_profile(profile_data: dict) -> str:
     grams_per_meter = profile_data.get("grams_per_meter")
     now = _utc_now_iso()
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM filament_profiles WHERE profile_uid = ? OR name = ?",
-        (profile_id, name),
-    ).fetchone()
-    if row:
-        conn.execute(
-            """
-            UPDATE filament_profiles
-               SET profile_uid = ?, name = ?, material = ?, brand = ?, color = ?,
-                   filament_mode = ?, filament_rate = ?, cost_per_kg = ?, grams_per_meter = ?,
-                   updated_at = ?
-             WHERE id = ?
-            """,
-            (
-                profile_id,
-                name,
-                material,
-                brand,
-                color,
-                filament_mode,
-                filament_rate,
-                cost_per_kg,
-                grams_per_meter,
-                now,
-                row["id"] if isinstance(row, sqlite3.Row) else row[0],
-            ),
-        )
-    else:
-        conn.execute(
-            """
-            INSERT INTO filament_profiles
-                (profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                profile_id,
-                name,
-                material,
-                brand,
-                color,
-                filament_mode,
-                filament_rate,
-                cost_per_kg,
-                grams_per_meter,
-                now,
-                now,
-            ),
-        )
-    conn.commit()
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM filament_profiles WHERE profile_uid = ? OR name = ?",
+            (profile_id, name),
+        ).fetchone()
+        if row:
+            conn.execute(
+                """
+                UPDATE filament_profiles
+                   SET profile_uid = ?, name = ?, material = ?, brand = ?, color = ?,
+                       filament_mode = ?, filament_rate = ?, cost_per_kg = ?, grams_per_meter = ?,
+                       updated_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    profile_id,
+                    name,
+                    material,
+                    brand,
+                    color,
+                    filament_mode,
+                    filament_rate,
+                    cost_per_kg,
+                    grams_per_meter,
+                    now,
+                    row["id"] if isinstance(row, sqlite3.Row) else row[0],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO filament_profiles
+                    (profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    profile_id,
+                    name,
+                    material,
+                    brand,
+                    color,
+                    filament_mode,
+                    filament_rate,
+                    cost_per_kg,
+                    grams_per_meter,
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
     return profile_id
 
 
@@ -358,38 +359,38 @@ def _update_sql_profile(profile_id: str, updates: dict) -> bool:
         return False
     values["updated_at"] = _utc_now_iso()
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM filament_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
-        (profile_id, profile_id),
-    ).fetchone()
-    if not row:
-        return False
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM filament_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
+            (profile_id, profile_id),
+        ).fetchone()
+        if not row:
+            return False
 
-    set_clause = ", ".join([f"{k} = ?" for k in values.keys()])
-    params = list(values.values()) + [row["id"] if isinstance(row, sqlite3.Row) else row[0]]
-    conn.execute(f"UPDATE filament_profiles SET {set_clause} WHERE id = ?", params)
-    conn.commit()
-    return True
+        set_clause = ", ".join([f"{k} = ?" for k in values.keys()])
+        params = list(values.values()) + [row["id"] if isinstance(row, sqlite3.Row) else row[0]]
+        conn.execute(f"UPDATE filament_profiles SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+        return True
 
 
 def _delete_sql_profile(profile_id: str) -> bool:
     if not profile_id:
         return False
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM filament_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
-        (profile_id, profile_id),
-    ).fetchone()
-    if not row:
-        return False
-    conn.execute(
-        "DELETE FROM filament_profiles WHERE id = ?",
-        (row["id"] if isinstance(row, sqlite3.Row) else row[0],),
-    )
-    conn.commit()
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM filament_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
+            (profile_id, profile_id),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "DELETE FROM filament_profiles WHERE id = ?",
+            (row["id"] if isinstance(row, sqlite3.Row) else row[0],),
+        )
+        conn.commit()
 
     mappings = _load_filament_mappings_sql()
     if mappings:

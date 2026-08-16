@@ -18,6 +18,20 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "migrations")
 
 
+class ManagedConnection(sqlite3.Connection):
+    """sqlite3 connection that also closes itself after context-manager use."""
+
+    def __enter__(self):
+        super().__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -32,12 +46,11 @@ def _ensure_data_dir() -> None:
 
 def connect_db() -> sqlite3.Connection:
     _ensure_data_dir()
-    conn = sqlite3.connect(_db_path())
+    conn = sqlite3.connect(_db_path(), factory=ManagedConnection)
     conn.row_factory = sqlite3.Row
-    with conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
 

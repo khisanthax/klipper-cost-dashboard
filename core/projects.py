@@ -21,6 +21,7 @@ import os
 import time
 import uuid
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -152,24 +153,24 @@ def _project_uid_from_row(row: sqlite3.Row) -> str:
 
 def _load_projects_sql() -> Dict[str, Project]:
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        rows = conn.execute(
-            """
-            SELECT
-                id,
-                project_uid,
-                name,
-                notes,
-                status,
-                hourly_rate_override,
-                filament_cost_per_kg_override,
-                labor_only,
-                created_at,
-                updated_at
-            FROM projects
-            """
-        ).fetchall()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    project_uid,
+                    name,
+                    notes,
+                    status,
+                    hourly_rate_override,
+                    filament_cost_per_kg_override,
+                    labor_only,
+                    created_at,
+                    updated_at
+                FROM projects
+                """
+            ).fetchall()
     except Exception:
         return {}
 
@@ -193,10 +194,316 @@ def _load_projects_sql() -> Dict[str, Project]:
 
 
 def _save_projects_sql(projects: Iterable[Project]) -> None:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    now = _iso_now()
-    for p in projects:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        now = _iso_now()
+        for p in projects:
+            conn.execute(
+                """
+                INSERT INTO projects (
+                    project_uid,
+                    name,
+                    notes,
+                    status,
+                    hourly_rate_override,
+                    filament_cost_per_kg_override,
+                    labor_only,
+                    created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_uid) DO UPDATE SET
+                    name=excluded.name,
+                    notes=excluded.notes,
+                    status=excluded.status,
+                    hourly_rate_override=excluded.hourly_rate_override,
+                    filament_cost_per_kg_override=excluded.filament_cost_per_kg_override,
+                    labor_only=excluded.labor_only,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    p.id,
+                    p.name,
+                    p.notes,
+                    "active",
+                    p.hourly_rate_override,
+                    p.filament_cost_per_kg_override,
+                    1 if p.labor_only else 0,
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
+
+
+def _load_assignments_sql() -> Dict[str, str]:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        assignments: Dict[str, str] = {}
+        for row in conn.execute(
+            """
+            SELECT pa.job_uid, p.id AS project_id, p.project_uid
+            FROM project_assignments pa
+            JOIN projects p ON pa.project_id = p.id
+            """
+        ):
+            job_uid = str(row["job_uid"] or "").strip()
+            if not job_uid:
+                continue
+            pid = str(row["project_uid"] or row["project_id"] or "").strip()
+            if not pid:
+                continue
+            assignments[job_uid] = pid
+        return assignments
+
+
+def _save_assignments_sql(assignments: Dict[str, str]) -> None:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        conn.execute("DELETE FROM project_assignments")
+        now = _iso_now()
+        for job_uid, project_uid in (assignments or {}).items():
+            job_uid = str(job_uid or "").strip()
+            project_uid = str(project_uid or "").strip()
+            if not job_uid or not project_uid:
+                continue
+            row = conn.execute(
+                "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+                (project_uid, project_uid),
+            ).fetchone()
+            if not row:
+                continue
+            project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+            conn.execute(
+                "INSERT OR REPLACE INTO project_assignments (project_id, job_uid, created_at) VALUES (?, ?, ?)",
+                (project_id, job_uid, now),
+            )
+        conn.commit()
+
+
+def _resolve_project_db_id(conn: sqlite3.Connection, project_uid: str) -> Optional[int]:
+    if not project_uid:
+        return None
+    row = conn.execute(
+        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+        (project_uid, project_uid),
+    ).fetchone()
+    if not row:
+        return None
+    if isinstance(row, sqlite3.Row):
+        return int(row["id"])
+    return int(row[0])
+
+
+def _load_manual_jobs_sql() -> Dict[str, List[ManualJob]]:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        jobs_by_project: Dict[str, List[ManualJob]] = {}
+        rows = conn.execute(
+            """
+            SELECT
+                mj.manual_job_id,
+                mj.title,
+                mj.hours,
+                mj.filament_g,
+                mj.cost_override,
+                mj.notes,
+                mj.created_at,
+                mj.updated_at,
+                p.project_uid,
+                p.id AS project_id
+            FROM manual_jobs mj
+            JOIN projects p ON mj.project_id = p.id
+            """
+        ).fetchall()
+        for row in rows:
+            pid = str(row["project_uid"] or row["project_id"] or "").strip()
+            if not pid:
+                continue
+            try:
+                hours = float(row["hours"] or 0.0)
+            except (TypeError, ValueError):
+                hours = 0.0
+            try:
+                filament_g = float(row["filament_g"] or 0.0)
+            except (TypeError, ValueError):
+                filament_g = 0.0
+            cost_override = row["cost_override"]
+            if cost_override is not None:
+                try:
+                    cost_override = float(cost_override)
+                except (TypeError, ValueError):
+                    cost_override = None
+
+            mj = ManualJob(
+                manual_job_id=str(row["manual_job_id"] or "").strip(),
+                project_id=pid,
+                title=str(row["title"] or "").strip(),
+                hours=hours,
+                filament_g=filament_g,
+                cost_override=cost_override,
+                created_at=str(row["created_at"] or ""),
+                updated_at=str(row["updated_at"] or ""),
+                notes=str(row["notes"] or ""),
+            )
+            if mj.manual_job_id and mj.title:
+                jobs_by_project.setdefault(pid, []).append(mj)
+        return jobs_by_project
+
+
+def _save_manual_jobs_sql(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        conn.execute("DELETE FROM manual_jobs")
+        for pid, jobs in jobs_by_project.items():
+            project_id = _resolve_project_db_id(conn, pid)
+            if project_id is None:
+                continue
+            for j in jobs:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO manual_jobs (
+                        manual_job_id,
+                        project_id,
+                        title,
+                        hours,
+                        filament_g,
+                        cost_override,
+                        notes,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        j.manual_job_id,
+                        project_id,
+                        j.title,
+                        float(j.hours or 0.0),
+                        float(j.filament_g or 0.0),
+                        j.cost_override,
+                        j.notes,
+                        j.created_at,
+                        j.updated_at,
+                    ),
+                )
+        conn.commit()
+
+
+def _load_plans_sql() -> Dict[str, List[PlannedItem]]:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        by_project: Dict[str, List[PlannedItem]] = {}
+        rows = conn.execute(
+            """
+            SELECT
+                pi.plan_id,
+                pi.filename,
+                pi.est_time_s,
+                pi.est_filament_g,
+                pi.est_cost,
+                pi.est_cost_is_override,
+                pi.status,
+                pi.source,
+                pi.notes,
+                pi.converted_to_manual_job_id,
+                pi.created_at,
+                pi.updated_at,
+                p.project_uid,
+                p.id AS project_id
+            FROM planned_items pi
+            JOIN projects p ON pi.project_id = p.id
+            """
+        ).fetchall()
+        for row in rows:
+            pid = str(row["project_uid"] or row["project_id"] or "").strip()
+            if not pid:
+                continue
+            try:
+                est_time_s = int(float(row["est_time_s"] or 0))
+            except (TypeError, ValueError):
+                est_time_s = 0
+            est_filament_g = row["est_filament_g"]
+            if est_filament_g is not None:
+                try:
+                    est_filament_g = float(est_filament_g)
+                except (TypeError, ValueError):
+                    est_filament_g = None
+            est_cost = 0.0
+            try:
+                est_cost = float(row["est_cost"] or 0.0)
+            except (TypeError, ValueError):
+                est_cost = 0.0
+            status = str(row["status"] or "active").strip().lower()
+            if status not in ("active", "fulfilled"):
+                status = "active"
+            plan = PlannedItem(
+                plan_id=str(row["plan_id"] or "").strip(),
+                project_id=pid,
+                filename=str(row["filename"] or "").strip(),
+                created_at=str(row["created_at"] or ""),
+                est_time_s=est_time_s,
+                est_filament_g=est_filament_g,
+                est_cost=est_cost,
+                est_cost_is_override=bool(row["est_cost_is_override"] or False),
+                status=status,
+                source=str(row["source"] or ""),
+                notes=str(row["notes"] or ""),
+                converted_to_manual_job_id=str(row["converted_to_manual_job_id"] or "").strip() or None,
+            )
+            if plan.plan_id and plan.filename and plan.est_time_s > 0:
+                by_project.setdefault(pid, []).append(plan)
+        return by_project
+
+
+def _save_plans_sql(by_project: Dict[str, List[PlannedItem]]) -> None:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        conn.execute("DELETE FROM planned_items")
+        for pid, items in by_project.items():
+            project_id = _resolve_project_db_id(conn, pid)
+            if project_id is None:
+                continue
+            for p in items:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO planned_items (
+                        plan_id,
+                        project_id,
+                        filename,
+                        est_time_s,
+                        est_filament_g,
+                        est_cost,
+                        est_cost_is_override,
+                        status,
+                        source,
+                        notes,
+                        converted_to_manual_job_id,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        p.plan_id,
+                        project_id,
+                        p.filename,
+                        int(p.est_time_s or 0),
+                        p.est_filament_g,
+                        float(p.est_cost or 0.0),
+                        1 if p.est_cost_is_override else 0,
+                        p.status,
+                        p.source,
+                        p.notes,
+                        p.converted_to_manual_job_id,
+                        p.created_at,
+                        p.created_at,
+                    ),
+                )
+        conn.commit()
+
+
+def _upsert_project_sql(project: Project) -> None:
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        now = _iso_now()
         conn.execute(
             """
             INSERT INTO projects (
@@ -220,324 +527,18 @@ def _save_projects_sql(projects: Iterable[Project]) -> None:
                 updated_at=excluded.updated_at
             """,
             (
-                p.id,
-                p.name,
-                p.notes,
+                project.id,
+                project.name,
+                project.notes,
                 "active",
-                p.hourly_rate_override,
-                p.filament_cost_per_kg_override,
-                1 if p.labor_only else 0,
+                project.hourly_rate_override,
+                project.filament_cost_per_kg_override,
+                1 if project.labor_only else 0,
                 now,
                 now,
             ),
         )
-    conn.commit()
-
-
-def _load_assignments_sql() -> Dict[str, str]:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    assignments: Dict[str, str] = {}
-    for row in conn.execute(
-        """
-        SELECT pa.job_uid, p.id AS project_id, p.project_uid
-        FROM project_assignments pa
-        JOIN projects p ON pa.project_id = p.id
-        """
-    ):
-        job_uid = str(row["job_uid"] or "").strip()
-        if not job_uid:
-            continue
-        pid = str(row["project_uid"] or row["project_id"] or "").strip()
-        if not pid:
-            continue
-        assignments[job_uid] = pid
-    return assignments
-
-
-def _save_assignments_sql(assignments: Dict[str, str]) -> None:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    conn.execute("DELETE FROM project_assignments")
-    now = _iso_now()
-    for job_uid, project_uid in (assignments or {}).items():
-        job_uid = str(job_uid or "").strip()
-        project_uid = str(project_uid or "").strip()
-        if not job_uid or not project_uid:
-            continue
-        row = conn.execute(
-            "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
-            (project_uid, project_uid),
-        ).fetchone()
-        if not row:
-            continue
-        project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
-        conn.execute(
-            "INSERT OR REPLACE INTO project_assignments (project_id, job_uid, created_at) VALUES (?, ?, ?)",
-            (project_id, job_uid, now),
-        )
-    conn.commit()
-
-
-def _resolve_project_db_id(conn: sqlite3.Connection, project_uid: str) -> Optional[int]:
-    if not project_uid:
-        return None
-    row = conn.execute(
-        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
-        (project_uid, project_uid),
-    ).fetchone()
-    if not row:
-        return None
-    if isinstance(row, sqlite3.Row):
-        return int(row["id"])
-    return int(row[0])
-
-
-def _load_manual_jobs_sql() -> Dict[str, List[ManualJob]]:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    jobs_by_project: Dict[str, List[ManualJob]] = {}
-    rows = conn.execute(
-        """
-        SELECT
-            mj.manual_job_id,
-            mj.title,
-            mj.hours,
-            mj.filament_g,
-            mj.cost_override,
-            mj.notes,
-            mj.created_at,
-            mj.updated_at,
-            p.project_uid,
-            p.id AS project_id
-        FROM manual_jobs mj
-        JOIN projects p ON mj.project_id = p.id
-        """
-    ).fetchall()
-    for row in rows:
-        pid = str(row["project_uid"] or row["project_id"] or "").strip()
-        if not pid:
-            continue
-        try:
-            hours = float(row["hours"] or 0.0)
-        except (TypeError, ValueError):
-            hours = 0.0
-        try:
-            filament_g = float(row["filament_g"] or 0.0)
-        except (TypeError, ValueError):
-            filament_g = 0.0
-        cost_override = row["cost_override"]
-        if cost_override is not None:
-            try:
-                cost_override = float(cost_override)
-            except (TypeError, ValueError):
-                cost_override = None
-
-        mj = ManualJob(
-            manual_job_id=str(row["manual_job_id"] or "").strip(),
-            project_id=pid,
-            title=str(row["title"] or "").strip(),
-            hours=hours,
-            filament_g=filament_g,
-            cost_override=cost_override,
-            created_at=str(row["created_at"] or ""),
-            updated_at=str(row["updated_at"] or ""),
-            notes=str(row["notes"] or ""),
-        )
-        if mj.manual_job_id and mj.title:
-            jobs_by_project.setdefault(pid, []).append(mj)
-    return jobs_by_project
-
-
-def _save_manual_jobs_sql(jobs_by_project: Dict[str, List[ManualJob]]) -> None:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    conn.execute("DELETE FROM manual_jobs")
-    for pid, jobs in jobs_by_project.items():
-        project_id = _resolve_project_db_id(conn, pid)
-        if project_id is None:
-            continue
-        for j in jobs:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO manual_jobs (
-                    manual_job_id,
-                    project_id,
-                    title,
-                    hours,
-                    filament_g,
-                    cost_override,
-                    notes,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    j.manual_job_id,
-                    project_id,
-                    j.title,
-                    float(j.hours or 0.0),
-                    float(j.filament_g or 0.0),
-                    j.cost_override,
-                    j.notes,
-                    j.created_at,
-                    j.updated_at,
-                ),
-            )
-    conn.commit()
-
-
-def _load_plans_sql() -> Dict[str, List[PlannedItem]]:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    by_project: Dict[str, List[PlannedItem]] = {}
-    rows = conn.execute(
-        """
-        SELECT
-            pi.plan_id,
-            pi.filename,
-            pi.est_time_s,
-            pi.est_filament_g,
-            pi.est_cost,
-            pi.est_cost_is_override,
-            pi.status,
-            pi.source,
-            pi.notes,
-            pi.converted_to_manual_job_id,
-            pi.created_at,
-            pi.updated_at,
-            p.project_uid,
-            p.id AS project_id
-        FROM planned_items pi
-        JOIN projects p ON pi.project_id = p.id
-        """
-    ).fetchall()
-    for row in rows:
-        pid = str(row["project_uid"] or row["project_id"] or "").strip()
-        if not pid:
-            continue
-        try:
-            est_time_s = int(float(row["est_time_s"] or 0))
-        except (TypeError, ValueError):
-            est_time_s = 0
-        est_filament_g = row["est_filament_g"]
-        if est_filament_g is not None:
-            try:
-                est_filament_g = float(est_filament_g)
-            except (TypeError, ValueError):
-                est_filament_g = None
-        est_cost = 0.0
-        try:
-            est_cost = float(row["est_cost"] or 0.0)
-        except (TypeError, ValueError):
-            est_cost = 0.0
-        status = str(row["status"] or "active").strip().lower()
-        if status not in ("active", "fulfilled"):
-            status = "active"
-        plan = PlannedItem(
-            plan_id=str(row["plan_id"] or "").strip(),
-            project_id=pid,
-            filename=str(row["filename"] or "").strip(),
-            created_at=str(row["created_at"] or ""),
-            est_time_s=est_time_s,
-            est_filament_g=est_filament_g,
-            est_cost=est_cost,
-            est_cost_is_override=bool(row["est_cost_is_override"] or False),
-            status=status,
-            source=str(row["source"] or ""),
-            notes=str(row["notes"] or ""),
-            converted_to_manual_job_id=str(row["converted_to_manual_job_id"] or "").strip() or None,
-        )
-        if plan.plan_id and plan.filename and plan.est_time_s > 0:
-            by_project.setdefault(pid, []).append(plan)
-    return by_project
-
-
-def _save_plans_sql(by_project: Dict[str, List[PlannedItem]]) -> None:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    conn.execute("DELETE FROM planned_items")
-    for pid, items in by_project.items():
-        project_id = _resolve_project_db_id(conn, pid)
-        if project_id is None:
-            continue
-        for p in items:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO planned_items (
-                    plan_id,
-                    project_id,
-                    filename,
-                    est_time_s,
-                    est_filament_g,
-                    est_cost,
-                    est_cost_is_override,
-                    status,
-                    source,
-                    notes,
-                    converted_to_manual_job_id,
-                    created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    p.plan_id,
-                    project_id,
-                    p.filename,
-                    int(p.est_time_s or 0),
-                    p.est_filament_g,
-                    float(p.est_cost or 0.0),
-                    1 if p.est_cost_is_override else 0,
-                    p.status,
-                    p.source,
-                    p.notes,
-                    p.converted_to_manual_job_id,
-                    p.created_at,
-                    p.created_at,
-                ),
-            )
-    conn.commit()
-
-
-def _upsert_project_sql(project: Project) -> None:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    now = _iso_now()
-    conn.execute(
-        """
-        INSERT INTO projects (
-            project_uid,
-            name,
-            notes,
-            status,
-            hourly_rate_override,
-            filament_cost_per_kg_override,
-            labor_only,
-            created_at,
-            updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(project_uid) DO UPDATE SET
-            name=excluded.name,
-            notes=excluded.notes,
-            status=excluded.status,
-            hourly_rate_override=excluded.hourly_rate_override,
-            filament_cost_per_kg_override=excluded.filament_cost_per_kg_override,
-            labor_only=excluded.labor_only,
-            updated_at=excluded.updated_at
-        """,
-        (
-            project.id,
-            project.name,
-            project.notes,
-            "active",
-            project.hourly_rate_override,
-            project.filament_cost_per_kg_override,
-            1 if project.labor_only else 0,
-            now,
-            now,
-        ),
-    )
-    conn.commit()
+        conn.commit()
 
 
 def _create_project_sql(project: Project) -> None:
@@ -549,17 +550,17 @@ def _update_project_sql(project: Project) -> None:
 
 
 def _delete_project_sql(project_uid: str) -> None:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
-        (project_uid, project_uid),
-    ).fetchone()
-    if not row:
-        return
-    project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
-    conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-    conn.commit()
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+            (project_uid, project_uid),
+        ).fetchone()
+        if not row:
+            return
+        project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        conn.commit()
 
 
 def _safe_read_orphaned_assignments() -> Optional[List[Dict[str, Any]]]:

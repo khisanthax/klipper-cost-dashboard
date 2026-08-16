@@ -6,6 +6,7 @@ Provides CRUD helpers for rate profiles stored in a JSON file, similar to filame
 import os
 import uuid
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from core import db as db_module
 from core.config import DATA_DIR
@@ -26,11 +27,11 @@ def _utc_now_iso() -> str:
 
 def _load_sql_profiles():
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        rows = conn.execute(
-            "SELECT id, profile_uid, name, description, rate_per_hour FROM hourly_rate_profiles"
-        ).fetchall()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                "SELECT id, profile_uid, name, description, rate_per_hour FROM hourly_rate_profiles"
+            ).fetchall()
     except Exception:
         return {"profiles": {}}
 
@@ -152,45 +153,45 @@ def _upsert_rate_profile_sql(profile_data: dict) -> str:
     rate_per_hour = profile_data.get("rate_per_hour")
     now = _utc_now_iso()
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR name = ?",
-        (profile_id, name),
-    ).fetchone()
-    if row:
-        conn.execute(
-            """
-            UPDATE hourly_rate_profiles
-               SET profile_uid = ?, name = ?, description = ?, rate_per_hour = ?, updated_at = ?
-             WHERE id = ?
-            """,
-            (
-                profile_id,
-                name,
-                description,
-                rate_per_hour,
-                now,
-                row["id"] if isinstance(row, sqlite3.Row) else row[0],
-            ),
-        )
-    else:
-        conn.execute(
-            """
-            INSERT INTO hourly_rate_profiles
-                (profile_uid, name, description, rate_per_hour, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                profile_id,
-                name,
-                description,
-                rate_per_hour,
-                now,
-                now,
-            ),
-        )
-    conn.commit()
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR name = ?",
+            (profile_id, name),
+        ).fetchone()
+        if row:
+            conn.execute(
+                """
+                UPDATE hourly_rate_profiles
+                   SET profile_uid = ?, name = ?, description = ?, rate_per_hour = ?, updated_at = ?
+                 WHERE id = ?
+                """,
+                (
+                    profile_id,
+                    name,
+                    description,
+                    rate_per_hour,
+                    now,
+                    row["id"] if isinstance(row, sqlite3.Row) else row[0],
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO hourly_rate_profiles
+                    (profile_uid, name, description, rate_per_hour, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    profile_id,
+                    name,
+                    description,
+                    rate_per_hour,
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
     return profile_id
 
 
@@ -203,36 +204,36 @@ def _update_rate_profile_sql(profile_id: str, updates: dict) -> bool:
         return False
     values["updated_at"] = _utc_now_iso()
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
-        (profile_id, profile_id),
-    ).fetchone()
-    if not row:
-        return False
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
+            (profile_id, profile_id),
+        ).fetchone()
+        if not row:
+            return False
 
-    set_clause = ", ".join([f"{k} = ?" for k in values.keys()])
-    params = list(values.values()) + [row["id"] if isinstance(row, sqlite3.Row) else row[0]]
-    conn.execute(f"UPDATE hourly_rate_profiles SET {set_clause} WHERE id = ?", params)
-    conn.commit()
-    return True
+        set_clause = ", ".join([f"{k} = ?" for k in values.keys()])
+        params = list(values.values()) + [row["id"] if isinstance(row, sqlite3.Row) else row[0]]
+        conn.execute(f"UPDATE hourly_rate_profiles SET {set_clause} WHERE id = ?", params)
+        conn.commit()
+        return True
 
 
 def _delete_rate_profile_sql(profile_id: str) -> bool:
     if not profile_id:
         return False
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    row = conn.execute(
-        "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
-        (profile_id, profile_id),
-    ).fetchone()
-    if not row:
-        return False
-    conn.execute(
-        "DELETE FROM hourly_rate_profiles WHERE id = ?",
-        (row["id"] if isinstance(row, sqlite3.Row) else row[0],),
-    )
-    conn.commit()
-    return True
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
+            (profile_id, profile_id),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "DELETE FROM hourly_rate_profiles WHERE id = ?",
+            (row["id"] if isinstance(row, sqlite3.Row) else row[0],),
+        )
+        conn.commit()
+        return True

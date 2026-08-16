@@ -15,6 +15,7 @@ import json
 import os
 import tarfile
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Tuple
@@ -47,14 +48,14 @@ def _is_sql_only() -> bool:
 def _load_backup_settings_sql() -> dict:
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
-        if not row:
-            return {}
-        raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
-        data = json.loads(raw) if raw else {}
-        return data if isinstance(data, dict) else {}
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
+            if not row:
+                return {}
+            raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
+            data = json.loads(raw) if raw else {}
+            return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -62,24 +63,24 @@ def _load_backup_settings_sql() -> dict:
 def _save_backup_settings_sql(settings_dict: dict) -> None:
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        now = datetime.now().isoformat()
-        payload = json.dumps(settings_dict if isinstance(settings_dict, dict) else {}, indent=2)
-        row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
-                (payload, now, "backup_settings"),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
-                ("backup_settings", payload, now),
-            )
-        conn.commit()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            now = datetime.now().isoformat()
+            payload = json.dumps(settings_dict if isinstance(settings_dict, dict) else {}, indent=2)
+            row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
+                    (payload, now, "backup_settings"),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
+                    ("backup_settings", payload, now),
+                )
+            conn.commit()
     except Exception:
-        pass
+        raise
 
 
 def _read_json_file(path: str, default: Any) -> Any:

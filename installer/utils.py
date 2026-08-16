@@ -19,6 +19,7 @@ import socket
 import urllib.request
 import urllib.parse
 import urllib.error
+from contextlib import closing
 from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
 import installer_macro
@@ -51,11 +52,11 @@ def _detect_sql_state() -> Dict[str, Any]:
     if db_exists:
         try:
             from core import db as db_module
-            conn = db_module.connect_db()
-            # Apply migrations so we can validate schema state.
-            db_module.apply_migrations(conn)
-            schema_version = db_module.current_schema_version(conn)
-            schema_ok = bool(schema_version)
+            with closing(db_module.connect_db()) as conn:
+                # Apply migrations so we can validate schema state.
+                db_module.apply_migrations(conn)
+                schema_version = db_module.current_schema_version(conn)
+                schema_ok = bool(schema_version)
         except Exception:
             schema_ok = False
 
@@ -87,10 +88,10 @@ def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
         return False
 
     try:
-        conn = db_module.connect_db()
-        applied = db_module.apply_migrations(conn)
-        if applied:
-            println(f"SQL migrations applied: {', '.join(applied)}")
+        with closing(db_module.connect_db()) as conn:
+            applied = db_module.apply_migrations(conn)
+            if applied:
+                println(f"SQL migrations applied: {', '.join(applied)}")
         if import_from_csv and os.path.exists(CSV_FILE):
             println("Importing CSV into SQLite (best-effort)...")
             db_import.run_import(skip_existing=True, overwrite=False)
@@ -103,10 +104,10 @@ def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
 def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Optional[str] = None) -> bool:
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
-        conn.commit()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
+            conn.commit()
         return True
     except Exception as e:
         println(f"WARNING: failed to sync printer to SQL: {e}")

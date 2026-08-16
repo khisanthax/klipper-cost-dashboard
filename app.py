@@ -11,6 +11,7 @@ import math
 import hashlib
 import time
 import re
+from contextlib import closing
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import flask
@@ -1445,15 +1446,15 @@ def _sum_total_cost_sql(job_uids: list[str]) -> float:
         return 0.0
     placeholders = ",".join(["?"] * len(job_uids))
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        row = conn.execute(
-            f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
-            job_uids,
-        ).fetchone()
-        if not row:
-            return 0.0
-        return float(row["total"] or 0.0)
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            row = conn.execute(
+                f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
+                job_uids,
+            ).fetchone()
+            if not row:
+                return 0.0
+            return float(row["total"] or 0.0)
     except Exception:
         return 0.0
 
@@ -1464,82 +1465,82 @@ def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
     placeholders = ",".join(["?"] * len(job_uids))
     updated = 0
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        rows = conn.execute(
-            f"""
-            SELECT
-                j.job_uid,
-                p.name AS printer,
-                j.duration_seconds,
-                j.filament_mm,
-                j.paused_seconds_total
-            FROM jobs j
-            JOIN printers p ON j.printer_id = p.id
-            WHERE j.job_uid IN ({placeholders})
-            """,
-            job_uids,
-        ).fetchall()
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        for row in rows:
-            job_uid = str(row["job_uid"] or "").strip()
-            if not job_uid:
-                continue
-            printer = str(row["printer"] or "").strip()
-            try:
-                duration_seconds = float(row["duration_seconds"] or 0.0)
-            except Exception:
-                duration_seconds = 0.0
-            try:
-                filament_mm = float(row["filament_mm"] or 0.0)
-            except Exception:
-                filament_mm = 0.0
-            try:
-                paused_seconds_total = float(row["paused_seconds_total"] or 0.0)
-            except Exception:
-                paused_seconds_total = 0.0
-
-            computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
-            if not computed:
-                continue
-
-            conn.execute(
-                """
-                UPDATE jobs
-                   SET duration_hours = ?,
-                       filament_meters = ?,
-                       rate_per_hour = ?,
-                       filament_mode = ?,
-                       filament_rate = ?,
-                       grams_per_meter = ?,
-                       time_cost = ?,
-                       material_cost = ?,
-                       total_cost = ?,
-                       filament_profile_id = ?,
-                       filament_material = ?,
-                       updated_at = ?
-                 WHERE job_uid = ?
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                f"""
+                SELECT
+                    j.job_uid,
+                    p.name AS printer,
+                    j.duration_seconds,
+                    j.filament_mm,
+                    j.paused_seconds_total
+                FROM jobs j
+                JOIN printers p ON j.printer_id = p.id
+                WHERE j.job_uid IN ({placeholders})
                 """,
-                (
-                    computed.get("duration_hours"),
-                    computed.get("filament_meters"),
-                    computed.get("rate_per_hour"),
-                    computed.get("filament_mode"),
-                    computed.get("filament_rate"),
-                    computed.get("grams_per_meter"),
-                    computed.get("time_cost"),
-                    computed.get("material_cost"),
-                    computed.get("total_cost"),
-                    computed.get("filament_profile_id"),
-                    computed.get("filament_material"),
-                    now_iso,
-                    job_uid,
-                ),
-            )
-            updated += 1
+                job_uids,
+            ).fetchall()
 
-        conn.commit()
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for row in rows:
+                job_uid = str(row["job_uid"] or "").strip()
+                if not job_uid:
+                    continue
+                printer = str(row["printer"] or "").strip()
+                try:
+                    duration_seconds = float(row["duration_seconds"] or 0.0)
+                except Exception:
+                    duration_seconds = 0.0
+                try:
+                    filament_mm = float(row["filament_mm"] or 0.0)
+                except Exception:
+                    filament_mm = 0.0
+                try:
+                    paused_seconds_total = float(row["paused_seconds_total"] or 0.0)
+                except Exception:
+                    paused_seconds_total = 0.0
+
+                computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
+                if not computed:
+                    continue
+
+                conn.execute(
+                    """
+                    UPDATE jobs
+                       SET duration_hours = ?,
+                           filament_meters = ?,
+                           rate_per_hour = ?,
+                           filament_mode = ?,
+                           filament_rate = ?,
+                           grams_per_meter = ?,
+                           time_cost = ?,
+                           material_cost = ?,
+                           total_cost = ?,
+                           filament_profile_id = ?,
+                           filament_material = ?,
+                           updated_at = ?
+                     WHERE job_uid = ?
+                    """,
+                    (
+                        computed.get("duration_hours"),
+                        computed.get("filament_meters"),
+                        computed.get("rate_per_hour"),
+                        computed.get("filament_mode"),
+                        computed.get("filament_rate"),
+                        computed.get("grams_per_meter"),
+                        computed.get("time_cost"),
+                        computed.get("material_cost"),
+                        computed.get("total_cost"),
+                        computed.get("filament_profile_id"),
+                        computed.get("filament_material"),
+                        now_iso,
+                        job_uid,
+                    ),
+                )
+                updated += 1
+
+            conn.commit()
     except Exception as exc:
         app.logger.warning("SQL recalc failed: %s", exc)
     if updated:
@@ -1552,16 +1553,16 @@ def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        now_iso = datetime.now(timezone.utc).isoformat()
-        cur = conn.execute(
-            f"UPDATE jobs SET status = 'completed', failure_reason = NULL, updated_at = ? "
-            f"WHERE job_uid IN ({placeholders}) AND status = 'printing'",
-            [now_iso, *job_uids],
-        )
-        conn.commit()
-        return int(cur.rowcount or 0)
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            cur = conn.execute(
+                f"UPDATE jobs SET status = 'completed', failure_reason = NULL, updated_at = ? "
+                f"WHERE job_uid IN ({placeholders}) AND status = 'printing'",
+                [now_iso, *job_uids],
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
     except Exception:
         return 0
 
@@ -1571,18 +1572,18 @@ def _delete_jobs_sql(job_uids: list[str]) -> int:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
     try:
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        conn.execute(
-            f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
-            job_uids,
-        )
-        cur = conn.execute(
-            f"DELETE FROM jobs WHERE job_uid IN ({placeholders})",
-            job_uids,
-        )
-        conn.commit()
-        return int(cur.rowcount or 0)
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            conn.execute(
+                f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
+                job_uids,
+            )
+            cur = conn.execute(
+                f"DELETE FROM jobs WHERE job_uid IN ({placeholders})",
+                job_uids,
+            )
+            conn.commit()
+            return int(cur.rowcount or 0)
     except Exception:
         return 0
 
@@ -2856,7 +2857,7 @@ def _settings_view(tab: str):
 
             try:
                 if _is_sql_only():
-                    with db_module.connect_db() as conn:
+                    with closing(db_module.connect_db()) as conn:
                         db_module.apply_migrations(conn)
                         db_module.upsert_printer(conn, printer, url)
                         conn.commit()
@@ -3246,7 +3247,7 @@ def _settings_view(tab: str):
 
     moonraker_urls = {}
     try:
-        with db_module.connect_db() as conn:
+        with closing(db_module.connect_db()) as conn:
             db_module.apply_migrations(conn)
             for p in printers:
                 moonraker_urls[p] = db_module.get_printer_moonraker_url(conn, p) or ""

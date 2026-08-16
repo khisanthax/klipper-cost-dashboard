@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -55,68 +56,68 @@ def _load_csv_rows() -> list[dict]:
 
 def run_verify() -> Dict[str, Any]:
     rows = _load_csv_rows()
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-    report: Dict[str, Any] = {
-        "schema_version": db_module.current_schema_version(conn),
-        "started_at": _utc_now_iso(),
-        "finished_at": None,
-        "counts": {},
-        "printer_counts": [],
-        "most_recent": {},
-    }
+        report: Dict[str, Any] = {
+            "schema_version": db_module.current_schema_version(conn),
+            "started_at": _utc_now_iso(),
+            "finished_at": None,
+            "counts": {},
+            "printer_counts": [],
+            "most_recent": {},
+        }
 
-    csv_count = len(rows)
-    db_count = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
-    report["counts"]["csv_jobs"] = csv_count
-    report["counts"]["db_jobs"] = db_count
+        csv_count = len(rows)
+        db_count = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+        report["counts"]["csv_jobs"] = csv_count
+        report["counts"]["db_jobs"] = db_count
 
-    def _sum_cost(rows_list):
-        total = 0.0
-        for r in rows_list:
-            try:
-                total += float(r.get("total_cost") or 0.0)
-            except Exception:
-                continue
-        return total
+        def _sum_cost(rows_list):
+            total = 0.0
+            for r in rows_list:
+                try:
+                    total += float(r.get("total_cost") or 0.0)
+                except Exception:
+                    continue
+            return total
 
-    report["counts"]["csv_total_cost"] = _sum_cost(rows)
-    report["counts"]["db_total_cost"] = float(
-        conn.execute("SELECT COALESCE(SUM(total_cost), 0) FROM jobs").fetchone()[0]
-    )
-
-    csv_printer_counts: Dict[str, int] = {}
-    for r in rows:
-        pname = str(r.get("printer") or "").strip()
-        if pname:
-            csv_printer_counts[pname] = csv_printer_counts.get(pname, 0) + 1
-
-    db_printer_counts: Dict[str, int] = {}
-    for row in conn.execute(
-        "SELECT p.name AS printer, COUNT(*) AS cnt FROM jobs j JOIN printers p ON j.printer_id = p.id GROUP BY p.name"
-    ):
-        db_printer_counts[str(row["printer"])] = int(row["cnt"])
-
-    for pname, cnt in sorted(csv_printer_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
-        report["printer_counts"].append(
-            {
-                "printer": pname,
-                "csv": cnt,
-                "db": db_printer_counts.get(pname, 0),
-            }
+        report["counts"]["csv_total_cost"] = _sum_cost(rows)
+        report["counts"]["db_total_cost"] = float(
+            conn.execute("SELECT COALESCE(SUM(total_cost), 0) FROM jobs").fetchone()[0]
         )
 
-    csv_times = []
-    for r in rows:
-        ts = _parse_timestamp(r.get("timestamp"))
-        if ts is not None:
-            csv_times.append(ts)
-    report["most_recent"]["csv"] = max(csv_times) if csv_times else 0.0
-    row = conn.execute("SELECT MAX(ended_at) AS ended_at FROM jobs").fetchone()
-    report["most_recent"]["db"] = row["ended_at"] if row else None
+        csv_printer_counts: Dict[str, int] = {}
+        for r in rows:
+            pname = str(r.get("printer") or "").strip()
+            if pname:
+                csv_printer_counts[pname] = csv_printer_counts.get(pname, 0) + 1
 
-    report["finished_at"] = _utc_now_iso()
+        db_printer_counts: Dict[str, int] = {}
+        for row in conn.execute(
+            "SELECT p.name AS printer, COUNT(*) AS cnt FROM jobs j JOIN printers p ON j.printer_id = p.id GROUP BY p.name"
+        ):
+            db_printer_counts[str(row["printer"])] = int(row["cnt"])
+
+        for pname, cnt in sorted(csv_printer_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
+            report["printer_counts"].append(
+                {
+                    "printer": pname,
+                    "csv": cnt,
+                    "db": db_printer_counts.get(pname, 0),
+                }
+            )
+
+        csv_times = []
+        for r in rows:
+            ts = _parse_timestamp(r.get("timestamp"))
+            if ts is not None:
+                csv_times.append(ts)
+        report["most_recent"]["csv"] = max(csv_times) if csv_times else 0.0
+        row = conn.execute("SELECT MAX(ended_at) AS ended_at FROM jobs").fetchone()
+        report["most_recent"]["db"] = row["ended_at"] if row else None
+
+        report["finished_at"] = _utc_now_iso()
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(VERIFY_REPORT_PATH, "w", encoding="utf-8") as f:

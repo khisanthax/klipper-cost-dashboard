@@ -13,6 +13,7 @@ import hashlib
 import logging
 import shutil
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Optional
 from core.sql_only import require_file_reads_allowed, require_file_writes_allowed, is_sql_only
@@ -47,13 +48,13 @@ def _is_sql_only() -> bool:
 def _load_user_settings_sql(key: str):
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", (key,)).fetchone()
-        if not row:
-            return None
-        raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
-        return json.loads(raw) if raw else None
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", (key,)).fetchone()
+            if not row:
+                return None
+            raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
+            return json.loads(raw) if raw else None
     except Exception:
         return None
 
@@ -61,24 +62,25 @@ def _load_user_settings_sql(key: str):
 def _save_user_settings_sql(key: str, value) -> None:
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        now = datetime.now(timezone.utc).isoformat()
-        raw = json.dumps(value, indent=2)
-        row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", (key,)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
-                (raw, now, key),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
-                (key, raw, now),
-            )
-        conn.commit()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            now = datetime.now(timezone.utc).isoformat()
+            raw = json.dumps(value, indent=2)
+            row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", (key,)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
+                    (raw, now, key),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
+                    (key, raw, now),
+                )
+            conn.commit()
     except Exception:
-        pass
+        logger.exception("Failed to persist SQL user setting %s", key)
+        raise
 
 
 def _default_display_settings(headers):
@@ -1044,14 +1046,14 @@ def load_profiles_data(profiles_file):
     if _is_sql_only():
         try:
             from core import db as db_module
-            conn = db_module.connect_db()
-            db_module.apply_migrations(conn)
-            rows = conn.execute(
-                """
-                SELECT id, profile_uid, name, material, filament_mode, filament_rate, grams_per_meter
-                  FROM filament_profiles
-                """
-            ).fetchall()
+            with closing(db_module.connect_db()) as conn:
+                db_module.apply_migrations(conn)
+                rows = conn.execute(
+                    """
+                    SELECT id, profile_uid, name, material, filament_mode, filament_rate, grams_per_meter
+                      FROM filament_profiles
+                    """
+                ).fetchall()
         except Exception:
             return {"profiles": {}, "mappings": {}}
 
