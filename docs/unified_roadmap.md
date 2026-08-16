@@ -83,14 +83,15 @@ This is the live execution phase.
 
 ### 6.2 Remove Implicit CSV Runtime Behavior
 
-- status: partial
+- status: mostly complete
 - what is already done:
   - SQL-only blocks many file-backed reads and writes.
   - auto-create/runtime bootstrap behavior is blocked in SQL-only.
   - history and reports are forced to SQL in SQL-only mode.
   - runtime file-read migration behavior has been removed from `core/storage.py` for `load_settings()` and `load_display_settings()`.
+  - printer rename, merge, and delete now use transactional SQL-only lifecycle paths without compatibility file or installer-state access.
 - what remains:
-  - broaden verification coverage so hidden CSV/JSON runtime reads are not reintroduced in SQL-only mode.
+  - future hardening can broaden verification coverage so hidden CSV/JSON runtime reads are not reintroduced in SQL-only mode.
 - why it matters:
   - SQL-only is not fully pure until runtime behavior is independent of legacy files.
 
@@ -150,11 +151,11 @@ This is the live execution phase.
   - diagnostic helpers exist.
   - multiple hardening fixes have already landed on `main`.
   - Recalculate preview and execution now use the same stored pause-accounting input.
+  - SQL-only printer rename, merge, and delete preserve DB-backed history and linked configuration without entering compatibility file/state paths.
+  - Recalculate now exposes filament usage plus time, material, and total cost components in its jobs and preview tables.
 - what remains:
   - reconcile stale documentation.
   - tighten validation coverage for SQL-only runtime behavior.
-  - finish SQL-only printer rename, merge, and delete paths that still enter compatibility file/state helpers.
-  - make Recalculate pricing components clearer so filament/material recalculation is visible.
   - define Project cost-breakdown semantics for manual cost overrides before exposing component totals.
   - resolve the remaining inconsistent SQL-only subsystems before calling the release line clean.
 - why it matters:
@@ -194,7 +195,7 @@ This is now the strongest next task because startup readiness, canonical SQL-onl
 
 ## Current Risks / Contradictions
 
-- SQL-only is not yet fully pure; some runtime file reads still remain in SQL-only-related paths.
+- No normal-path SQL-only dependency on legacy runtime files is currently known; focused coverage is representative rather than exhaustive.
 - README and some module comments still describe earlier or conflicting architectural states.
 - recalculation is intentionally incomplete because "full" recompute is still marked as coming soon.
 - compatibility CSV runtime paths remain supported for this release line, so SQL-only guardrails must keep that compatibility surface from becoming a strict-mode dependency.
