@@ -8,6 +8,7 @@ runtime file-backed state is not modified.
 from __future__ import annotations
 
 import os
+import sys
 import time
 from typing import Dict, Tuple
 
@@ -20,6 +21,13 @@ FILES_TO_WATCH = [
     "data/system_events.jsonl",
     "data/live_jobs.json",
 ]
+
+
+# Script execution otherwise allows an inherited PYTHONPATH to resolve another
+# project's ``app`` module before this repository's app.py.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 
 def _snapshot_files() -> Dict[str, Tuple[bool, float]]:
