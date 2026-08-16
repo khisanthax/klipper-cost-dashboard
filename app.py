@@ -2053,11 +2053,15 @@ def recalculate_preview():
         except Exception:
             filament_mm = 0.0
         try:
+            paused_seconds_total = float(r.get("paused_seconds_total") or 0.0)
+        except Exception:
+            paused_seconds_total = 0.0
+        try:
             old_total = float(r.get("total_cost") or 0.0)
         except Exception:
             old_total = 0.0
 
-        computed = compute_fn(printer_name, duration_seconds, filament_mm) or {}
+        computed = compute_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total) or {}
         try:
             new_total = float(computed.get("total_cost") or 0.0)
         except Exception:

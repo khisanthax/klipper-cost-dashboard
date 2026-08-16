@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 class RecalculateCenterPhase1Tests(unittest.TestCase):
     def setUp(self):
+        self._previous_backend = os.environ.get("KCD_STORAGE_BACKEND")
+        os.environ["KCD_STORAGE_BACKEND"] = "csv"
         self._tmp = tempfile.TemporaryDirectory()
         self.csv_path = os.path.join(self._tmp.name, "print_costs.csv")
 
@@ -37,15 +39,22 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
 
         self.app_module = app_module
         self._orig_csv_file = app_module.CSV_FILE
+        self._orig_backend_csv_file = app_module.storage_backend.CSV_FILE
         self._orig_data_dir = app_module.DATA_DIR
         app_module.CSV_FILE = self.csv_path
+        app_module.storage_backend.CSV_FILE = self.csv_path
         app_module.DATA_DIR = self._tmp.name
         self.client = app_module.app.test_client()
 
     def tearDown(self):
         self.app_module.CSV_FILE = self._orig_csv_file
+        self.app_module.storage_backend.CSV_FILE = self._orig_backend_csv_file
         self.app_module.DATA_DIR = self._orig_data_dir
         self._tmp.cleanup()
+        if self._previous_backend is None:
+            os.environ.pop("KCD_STORAGE_BACKEND", None)
+        else:
+            os.environ["KCD_STORAGE_BACKEND"] = self._previous_backend
 
     def _read_total_cost(self, job_uid="test-job-uid-1"):
         from core.config import HEADERS
@@ -182,6 +191,35 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Preview", resp.get_data(as_text=True))
         self.assertEqual(self._read_total_cost(), before)
+
+    def test_recalculate_preview_and_run_use_same_paused_seconds_total(self):
+        paused_inputs = []
+
+        def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, paused_seconds_total=0.0):
+            paused_inputs.append(float(paused_seconds_total))
+            return {"total_cost": float(paused_seconds_total)}
+
+        with patch.object(self.app_module, "compute_costs", fake_compute_costs):
+            preview = self.client.post(
+                "/recalculate/preview",
+                data={
+                    "job_uids": ["test-job-uid-1"],
+                    "recompute_mode": "pricing_only",
+                    "apply_rate_profile": "0",
+                    "apply_filament_profile": "0",
+                },
+                follow_redirects=False,
+            )
+            run = self.client.post(
+                "/recalculate/run",
+                data={"job_uids": ["test-job-uid-1"]},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(run.status_code, 302)
+        self.assertEqual(paused_inputs, [60.0, 60.0])
+        self.assertEqual(self._read_total_cost(), "60.0")
 
     def test_recalculate_run_appends_audit_log(self):
         def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
