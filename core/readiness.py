@@ -9,6 +9,7 @@ from contextlib import closing
 from typing import Any
 
 from core import db as db_module
+from core.numeric import finite_float, NumericValidationError
 from core.sql_only import is_sql_only
 
 
@@ -90,12 +91,17 @@ def _load_user_setting_dict(conn, *keys: str) -> dict[str, Any]:
     return {}
 
 
-def _as_float(value: Any) -> float | None:
+def _as_nonnegative_float(value: Any) -> float | None:
     try:
-        if value is None or str(value).strip() == "":
-            return None
-        return float(value)
-    except (TypeError, ValueError):
+        return finite_float(value, label="pricing value", nonnegative=True)
+    except NumericValidationError:
+        return None
+
+
+def _as_positive_float(value: Any) -> float | None:
+    try:
+        return finite_float(value, label="grams_per_meter", positive=True)
+    except NumericValidationError:
         return None
 
 
@@ -111,7 +117,7 @@ def _has_valid_rate_profile(conn, profile_uid: str) -> bool:
     if not row:
         return False
     value = row["rate_per_hour"] if hasattr(row, "__getitem__") else row[0]
-    return _as_float(value) is not None
+    return _as_nonnegative_float(value) is not None
 
 
 def _has_valid_filament_profile(conn, profile_uid: str) -> bool:
@@ -128,14 +134,18 @@ def _has_valid_filament_profile(conn, profile_uid: str) -> bool:
     mode = str(row["filament_mode"] if hasattr(row, "__getitem__") else row[0] or "").strip()
     rate = row["filament_rate"] if hasattr(row, "__getitem__") else row[1]
     grams = row["grams_per_meter"] if hasattr(row, "__getitem__") else row[2]
-    return mode in VALID_FILAMENT_MODES and _as_float(rate) is not None and _as_float(grams) is not None
+    return (
+        mode in VALID_FILAMENT_MODES
+        and _as_nonnegative_float(rate) is not None
+        and _as_positive_float(grams) is not None
+    )
 
 
 def _has_valid_printer_rate_config(conn, printer_name: str, printer_settings: dict[str, Any]) -> bool:
     active_rate_profile_id = str(printer_settings.get("active_rate_profile_id") or "").strip()
     if active_rate_profile_id:
         return _has_valid_rate_profile(conn, active_rate_profile_id)
-    return _as_float(printer_settings.get("rate_per_hour")) is not None
+    return _as_nonnegative_float(printer_settings.get("rate_per_hour")) is not None
 
 
 def _has_valid_printer_filament_config(conn, printer_name: str, printer_settings: dict[str, Any], mappings: dict[str, Any]) -> bool:
@@ -145,8 +155,8 @@ def _has_valid_printer_filament_config(conn, printer_name: str, printer_settings
     mode = str(printer_settings.get("filament_mode") or "").strip()
     return (
         mode in VALID_FILAMENT_MODES
-        and _as_float(printer_settings.get("filament_rate")) is not None
-        and _as_float(printer_settings.get("grams_per_meter")) is not None
+        and _as_nonnegative_float(printer_settings.get("filament_rate")) is not None
+        and _as_positive_float(printer_settings.get("grams_per_meter")) is not None
     )
 
 

@@ -70,6 +70,7 @@ from core.readiness import (
     enforce_sql_only_startup_readiness,
     SqlOnlyStartupReadinessError,
 )
+from core.numeric import finite_float, optional_finite_float, NumericValidationError
 
 app = Flask(__name__)
 app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
@@ -346,11 +347,13 @@ def log_print():
         return jsonify({"status": "error", "error": f"Missing fields: {', '.join(missing)}"}), 400
 
     try:
-        ts = float(payload["timestamp"])
-        duration_seconds = float(payload["duration_seconds"])
-        filament_mm = float(payload["filament_mm"])
-    except ValueError:
-        return jsonify({"status": "error", "error": "Numeric fields must be numbers"}), 400
+        ts = finite_float(payload["timestamp"], label="timestamp")
+        duration_seconds = finite_float(
+            payload["duration_seconds"], label="duration_seconds", nonnegative=True
+        )
+        filament_mm = finite_float(payload["filament_mm"], label="filament_mm", nonnegative=True)
+    except NumericValidationError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
 
     printer_name_raw = str(payload["printer"])
     filename_raw = str(payload["filename"])
@@ -358,8 +361,8 @@ def log_print():
     def _choose_duration_seconds(payload_dur, live_dur, mr_print, mr_total, mr_calc):
         def _pos(v):
             try:
-                v = float(v)
-            except Exception:
+                v = finite_float(v, label="duration candidate", nonnegative=True)
+            except NumericValidationError:
                 return 0.0
             return v if v > 0 else 0.0
 
@@ -483,8 +486,8 @@ def log_print():
             if ok and job:
                 def _as_float(v):
                     try:
-                        return float(v)
-                    except Exception:
+                        return finite_float(v, label="Moonraker numeric value")
+                    except NumericValidationError:
                         return 0.0
 
                 def _get_first(j, keys):
@@ -699,26 +702,20 @@ def job_start():
         return jsonify({"success": False, "error": "Missing required fields: printer_name, filename"}), 400
     
     # Optional fields
-    start_time = data.get("start_time")
-    if start_time:
-        try:
-            start_time = float(start_time)
-        except ValueError:
-            start_time = None
-    
-    estimated_duration = data.get("estimated_duration")
-    if estimated_duration:
-        try:
-            estimated_duration = float(estimated_duration)
-        except ValueError:
-            estimated_duration = None
-    
-    estimated_filament = data.get("estimated_filament_mm")
-    if estimated_filament:
-        try:
-            estimated_filament = float(estimated_filament)
-        except ValueError:
-            estimated_filament = None
+    try:
+        start_time = optional_finite_float(data.get("start_time"), label="start_time")
+        estimated_duration = optional_finite_float(
+            data.get("estimated_duration"),
+            label="estimated_duration",
+            nonnegative=True,
+        )
+        estimated_filament = optional_finite_float(
+            data.get("estimated_filament_mm"),
+            label="estimated_filament_mm",
+            nonnegative=True,
+        )
+    except NumericValidationError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     
     profile_id = data.get("profile_id")
     
@@ -771,9 +768,9 @@ def job_update():
     for field in ["estimated_duration", "estimated_filament_mm"]:
         if field in updates:
             try:
-                updates[field] = float(updates[field])
-            except (ValueError, TypeError):
-                pass
+                updates[field] = finite_float(updates[field], label=field, nonnegative=True)
+            except NumericValidationError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
     
     result = live.update_job(printer_name, **updates)
     
@@ -912,9 +909,9 @@ def job_cancel():
     elapsed_seconds = None
     if elapsed_raw is not None and str(elapsed_raw).strip() != "":
         try:
-            elapsed_seconds = float(elapsed_raw)
-        except Exception:
-            return jsonify({"success": False, "error": "elapsed_seconds must be a number"}), 400
+            elapsed_seconds = finite_float(elapsed_raw, label="elapsed_seconds", nonnegative=True)
+        except NumericValidationError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
     # Prefer the currently active job for this printer (more reliable than inbound payload).
     active_before = live.get_job(printer_name)
@@ -1075,7 +1072,10 @@ def index():
                         job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
                     else:
                         job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    _mark_completed_jobs_sql(job_uids)
+                    try:
+                        _mark_completed_jobs_sql(job_uids)
+                    except Exception as exc:
+                        return redirect(url_for("index", error=f"Failed to mark jobs completed: {exc}"))
                 else:
                     if all(str(v).strip().isdigit() for v in selected):
                         indices = [int(i) for i in selected if str(i).strip().isdigit()]
@@ -1096,7 +1096,10 @@ def index():
                 else:
                     job_uids = [str(v).strip() for v in selected if str(v).strip()]
 
-            updated = storage_backend.recalc_jobs(job_uids, compute_costs)
+            try:
+                updated = storage_backend.recalc_jobs(job_uids, compute_costs)
+            except Exception as exc:
+                return redirect(url_for("index", error=f"Failed to recalculate jobs: {exc}"))
             return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
 
         # Handle row deletion
@@ -1110,7 +1113,10 @@ def index():
                         job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
                     else:
                         job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    deleted = _delete_jobs_sql(job_uids)
+                    try:
+                        deleted = _delete_jobs_sql(job_uids)
+                    except Exception as exc:
+                        return redirect(url_for("index", error=f"Failed to delete jobs: {exc}"))
                     system_events.emit_event(
                         "deleted",
                         "Deleted history jobs",
@@ -1138,7 +1144,7 @@ def index():
                         )
             return redirect(url_for("index"))
 
-    error = None
+    error = request.args.get("error", "").strip() or None
     message = request.args.get("msg", "").strip()
     
     # Apply date filtering (printer + range + legacy date range inputs)
@@ -1377,6 +1383,8 @@ def _filter_history_rows_for_recalc(rows, args):
         try:
             assignments = projects.load_assignments()
         except Exception:
+            if _is_sql_only():
+                raise
             assignments = {}
 
     filtered = []
@@ -1433,11 +1441,20 @@ def _parse_required_nonneg_float(raw, field_label):
     if not raw:
         return None, f"Missing {field_label}."
     try:
-        value = float(raw)
-    except Exception:
+        value = finite_float(raw, label=field_label, nonnegative=True)
+    except NumericValidationError:
         return None, f"Invalid {field_label} (must be a non-negative number)."
-    if value < 0:
-        return None, f"Invalid {field_label} (must be a non-negative number)."
+    return value, None
+
+
+def _parse_required_positive_float(raw, field_label):
+    raw = (raw or "").strip()
+    if not raw:
+        return None, f"Missing {field_label}."
+    try:
+        value = finite_float(raw, label=field_label, positive=True)
+    except NumericValidationError:
+        return None, f"Invalid {field_label} (must be a finite number greater than zero)."
     return value, None
 
 
@@ -1448,10 +1465,7 @@ def _is_sql_only() -> bool:
 def _sql_only_printer_exists(printer: str) -> bool:
     if not _is_sql_only():
         return True
-    try:
-        return str(printer or "").strip() in get_canonical_printer_names(include_hidden=True)
-    except Exception:
-        return False
+    return str(printer or "").strip() in get_canonical_printer_names()
 
 
 def _load_history_rows_for_recalc() -> tuple[list, str | None]:
@@ -1469,18 +1483,15 @@ def _sum_total_cost_sql(job_uids: list[str]) -> float:
     if not job_uids:
         return 0.0
     placeholders = ",".join(["?"] * len(job_uids))
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            row = conn.execute(
-                f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
-                job_uids,
-            ).fetchone()
-            if not row:
-                return 0.0
-            return float(row["total"] or 0.0)
-    except Exception:
-        return 0.0
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        row = conn.execute(
+            f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
+            job_uids,
+        ).fetchone()
+        if not row:
+            return 0.0
+        return finite_float(row["total"] or 0.0, label="total_cost", nonnegative=True)
 
 
 def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
@@ -1488,85 +1499,85 @@ def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
     updated = 0
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            rows = conn.execute(
-                f"""
-                SELECT
-                    j.job_uid,
-                    p.name AS printer,
-                    j.duration_seconds,
-                    j.filament_mm,
-                    j.paused_seconds_total
-                FROM jobs j
-                JOIN printers p ON j.printer_id = p.id
-                WHERE j.job_uid IN ({placeholders})
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            f"""
+            SELECT
+                j.job_uid,
+                p.name AS printer,
+                j.duration_seconds,
+                j.filament_mm,
+                j.paused_seconds_total
+            FROM jobs j
+            JOIN printers p ON j.printer_id = p.id
+            WHERE j.job_uid IN ({placeholders})
+            """,
+            job_uids,
+        ).fetchall()
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for row in rows:
+            job_uid = str(row["job_uid"] or "").strip()
+            if not job_uid:
+                continue
+            printer = str(row["printer"] or "").strip()
+            duration_seconds = finite_float(
+                row["duration_seconds"] or 0.0,
+                label="duration_seconds",
+                nonnegative=True,
+            )
+            filament_mm = finite_float(
+                row["filament_mm"] or 0.0,
+                label="filament_mm",
+                nonnegative=True,
+            )
+            paused_seconds_total = finite_float(
+                row["paused_seconds_total"] or 0.0,
+                label="paused_seconds_total",
+                nonnegative=True,
+            )
+
+            computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
+            if not computed:
+                continue
+
+            conn.execute(
+                """
+                UPDATE jobs
+                   SET duration_hours = ?,
+                       filament_meters = ?,
+                       rate_per_hour = ?,
+                       filament_mode = ?,
+                       filament_rate = ?,
+                       grams_per_meter = ?,
+                       time_cost = ?,
+                       material_cost = ?,
+                       total_cost = ?,
+                       filament_profile_id = ?,
+                       filament_material = ?,
+                       updated_at = ?
+                 WHERE job_uid = ?
                 """,
-                job_uids,
-            ).fetchall()
+                (
+                    computed.get("duration_hours"),
+                    computed.get("filament_meters"),
+                    computed.get("rate_per_hour"),
+                    computed.get("filament_mode"),
+                    computed.get("filament_rate"),
+                    computed.get("grams_per_meter"),
+                    computed.get("time_cost"),
+                    computed.get("material_cost"),
+                    computed.get("total_cost"),
+                    computed.get("filament_profile_id"),
+                    computed.get("filament_material"),
+                    now_iso,
+                    job_uid,
+                ),
+            )
+            updated += 1
 
-            now_iso = datetime.now(timezone.utc).isoformat()
-            for row in rows:
-                job_uid = str(row["job_uid"] or "").strip()
-                if not job_uid:
-                    continue
-                printer = str(row["printer"] or "").strip()
-                try:
-                    duration_seconds = float(row["duration_seconds"] or 0.0)
-                except Exception:
-                    duration_seconds = 0.0
-                try:
-                    filament_mm = float(row["filament_mm"] or 0.0)
-                except Exception:
-                    filament_mm = 0.0
-                try:
-                    paused_seconds_total = float(row["paused_seconds_total"] or 0.0)
-                except Exception:
-                    paused_seconds_total = 0.0
-
-                computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
-                if not computed:
-                    continue
-
-                conn.execute(
-                    """
-                    UPDATE jobs
-                       SET duration_hours = ?,
-                           filament_meters = ?,
-                           rate_per_hour = ?,
-                           filament_mode = ?,
-                           filament_rate = ?,
-                           grams_per_meter = ?,
-                           time_cost = ?,
-                           material_cost = ?,
-                           total_cost = ?,
-                           filament_profile_id = ?,
-                           filament_material = ?,
-                           updated_at = ?
-                     WHERE job_uid = ?
-                    """,
-                    (
-                        computed.get("duration_hours"),
-                        computed.get("filament_meters"),
-                        computed.get("rate_per_hour"),
-                        computed.get("filament_mode"),
-                        computed.get("filament_rate"),
-                        computed.get("grams_per_meter"),
-                        computed.get("time_cost"),
-                        computed.get("material_cost"),
-                        computed.get("total_cost"),
-                        computed.get("filament_profile_id"),
-                        computed.get("filament_material"),
-                        now_iso,
-                        job_uid,
-                    ),
-                )
-                updated += 1
-
-            conn.commit()
-    except Exception as exc:
-        app.logger.warning("SQL recalc failed: %s", exc)
+        conn.commit()
     if updated:
         app.logger.info("SQL recalc updated %s job(s).", updated)
     return updated
@@ -1576,40 +1587,34 @@ def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
     if not job_uids:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            now_iso = datetime.now(timezone.utc).isoformat()
-            cur = conn.execute(
-                f"UPDATE jobs SET status = 'completed', failure_reason = NULL, updated_at = ? "
-                f"WHERE job_uid IN ({placeholders}) AND status = 'printing'",
-                [now_iso, *job_uids],
-            )
-            conn.commit()
-            return int(cur.rowcount or 0)
-    except Exception:
-        return 0
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            f"UPDATE jobs SET status = 'completed', failure_reason = NULL, updated_at = ? "
+            f"WHERE job_uid IN ({placeholders}) AND status = 'printing'",
+            [now_iso, *job_uids],
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
 
 
 def _delete_jobs_sql(job_uids: list[str]) -> int:
     if not job_uids:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            conn.execute(
-                f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
-                job_uids,
-            )
-            cur = conn.execute(
-                f"DELETE FROM jobs WHERE job_uid IN ({placeholders})",
-                job_uids,
-            )
-            conn.commit()
-            return int(cur.rowcount or 0)
-    except Exception:
-        return 0
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        conn.execute(
+            f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
+            job_uids,
+        )
+        cur = conn.execute(
+            f"DELETE FROM jobs WHERE job_uid IN ({placeholders})",
+            job_uids,
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
 
 
 @app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
@@ -1710,11 +1715,9 @@ def recalculate_run():
         if not raw:
             return None, None
         try:
-            value = float(raw)
-            if value < 0:
-                raise ValueError()
+            value = finite_float(raw, label="override", nonnegative=True)
             return value, None
-        except Exception:
+        except NumericValidationError:
             return None, "Invalid value (must be a non-negative number)."
 
     def _build_compute_fn(
@@ -1876,8 +1879,11 @@ def recalculate_run():
                     continue
 
         if _is_sql_only():
-            updated = _recalc_jobs_sql(to_update, compute_fn)
-            after_total = _sum_total_cost_sql(to_update)
+            try:
+                updated = _recalc_jobs_sql(to_update, compute_fn)
+                after_total = _sum_total_cost_sql(to_update)
+            except Exception as exc:
+                return redirect(url_for("recalculate_page", msg=f"Pricing recalculation failed: {exc}"))
         else:
             updated = storage_backend.recalc_jobs(to_update, compute_fn)
 
@@ -1956,11 +1962,9 @@ def recalculate_preview():
         if not raw:
             return None, None
         try:
-            value = float(raw)
-            if value < 0:
-                raise ValueError()
+            value = finite_float(raw, label="override", nonnegative=True)
             return value, None
-        except Exception:
+        except NumericValidationError:
             return None, "Invalid value (must be a non-negative number)."
 
     def _build_compute_fn(
@@ -2863,7 +2867,7 @@ def _settings_view(tab: str):
                     filament_rate, err = _parse_required_nonneg_float(filament_rate_raw, "filament rate")
                     if err:
                         return redirect(url_for(_settings_endpoint_for_action(action), error=err))
-                    grams_per_meter, err = _parse_required_nonneg_float(grams_raw, "grams per meter")
+                    grams_per_meter, err = _parse_required_positive_float(grams_raw, "grams per meter")
                     if err:
                         return redirect(url_for(_settings_endpoint_for_action(action), error=err))
                 else:
@@ -3115,7 +3119,7 @@ def _settings_view(tab: str):
                 rate, err = _parse_required_nonneg_float(request.form.get("filament_rate"), "filament rate")
                 if err:
                     return redirect(url_for(_settings_endpoint_for_action(action), error=err))
-                gpm, err = _parse_required_nonneg_float(request.form.get("grams_per_meter"), "grams per meter")
+                gpm, err = _parse_required_positive_float(request.form.get("grams_per_meter"), "grams per meter")
                 if err:
                     return redirect(url_for(_settings_endpoint_for_action(action), error=err))
             else:
@@ -3161,7 +3165,7 @@ def _settings_view(tab: str):
                     )
                     if err:
                         return redirect(url_for(_settings_endpoint_for_action(action), error=err))
-                    grams_per_meter, err = _parse_required_nonneg_float(
+                    grams_per_meter, err = _parse_required_positive_float(
                         request.form.get("grams_per_meter"),
                         "grams per meter",
                     )

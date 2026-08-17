@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import sqlite3
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -239,21 +240,27 @@ def job_exists(conn: sqlite3.Connection, job_uid: str) -> bool:
 
 
 def _to_float(value: object) -> Optional[float]:
-    try:
-        if value is None or value == "":
-            return None
-        return float(value)
-    except Exception:
+    if value is None or value == "":
         return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        raise ValueError("numeric database values must be finite")
+    return parsed
 
 
 def _to_int(value: object) -> Optional[int]:
-    try:
-        if value is None or value == "":
-            return None
-        return int(float(value))
-    except Exception:
+    if value is None or value == "":
         return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        raise ValueError("integer database values must be finite")
+    return int(parsed)
 
 
 def _timestamp_to_iso(value: object) -> Optional[str]:
@@ -261,9 +268,11 @@ def _timestamp_to_iso(value: object) -> Optional[str]:
         return None
     try:
         ts = float(value)
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-    except Exception:
+    except (TypeError, ValueError):
         return None
+    if not math.isfinite(ts):
+        raise ValueError("timestamp must be finite")
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 def upsert_job(conn: sqlite3.Connection, row: dict) -> None:
