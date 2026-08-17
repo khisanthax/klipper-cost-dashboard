@@ -90,6 +90,8 @@ This is the live execution phase.
   - history and reports are forced to SQL in SQL-only mode.
   - runtime file-read migration behavior has been removed from `core/storage.py` for `load_settings()` and `load_display_settings()`.
   - printer rename, merge, and delete now use transactional SQL-only lifecycle paths without compatibility file or installer-state access.
+  - hidden SQL printer rows now represent retired historical identities and are excluded from readiness, active discovery, and incoming logging.
+  - startup and representative runtime validation observes direct file opens and blocks known legacy business-state files while allowing deliberate credential/cache/export/backup exceptions.
 - what remains:
   - future hardening can broaden verification coverage so hidden CSV/JSON runtime reads are not reintroduced in SQL-only mode.
 - why it matters:
@@ -97,7 +99,7 @@ This is the live execution phase.
 
 ### 6.3 Startup Verification
 
-- status: mostly complete
+- status: complete
 - what is already done:
   - `/health` has a SQL-safe path.
   - `/health` now reports SQL-only readiness through a reusable validator instead of DB connectivity alone.
@@ -105,6 +107,8 @@ This is the live execution phase.
   - readiness verifies minimum load-bearing SQL-only runtime state: DB connectivity, migrations/schema version, required SQL tables, persisted pause billing default, and configured-printer pricing/profile calculation readiness.
   - Moonraker diagnostics exist.
   - a lightweight SQL-only validation helper exists.
+  - `python -m kcd db readiness` exposes the same readiness validator as a preflight command with actionable output and process exit status.
+  - the Docker healthcheck uses `/health` rather than the dashboard route.
 - what remains:
   - future hardening can broaden certification coverage where useful, but the practical startup readiness contract is now in place.
 - why it matters:
@@ -135,6 +139,8 @@ This is the live execution phase.
   - parity and reconciliation tooling exists.
   - CSV remains useful for compatibility runtime, backfill comparison, explicit import/export, and parity tooling.
   - focused SQL-only guard tests now exercise representative runtime routes and fail if they touch legacy CSV/JSON file guards.
+  - validation now begins before app import and detects direct access to known compatibility runtime files independently of helper-level guards.
+  - credentials such as `secret.json`, caches, explicit exports, backup archives, and explicit-operation temporary files are classified filesystem exceptions rather than SQL business state.
 - what remains:
   - keep classifying CSV runtime paths as compatibility-mode paths, not SQL-only bugs.
   - future hardening can broaden focused SQL-only isolation coverage where runtime coverage is still thin.
@@ -144,7 +150,7 @@ This is the live execution phase.
 
 ### 6.6 Release Hardening
 
-- status: partial
+- status: mostly complete
 - what is already done:
   - compile guards exist in CI.
   - validation tooling exists.
@@ -153,29 +159,29 @@ This is the live execution phase.
   - Recalculate preview and execution now use the same stored pause-accounting input.
   - SQL-only printer rename, merge, and delete preserve DB-backed history and linked configuration without entering compatibility file/state paths.
   - Recalculate now exposes filament usage plus time, material, and total cost components in its jobs and preview tables.
+  - canonical SQL reads for projects, settings, profiles, rates, printer identity, and system events surface persistence failures instead of presenting false empty state.
+  - Recalculate is explicitly pricing-only for this release; Full Recompute is deferred until its semantics are deliberately designed.
 - what remains:
   - reconcile stale documentation.
-  - tighten validation coverage for SQL-only runtime behavior.
-  - define Project cost-breakdown semantics for manual cost overrides before exposing component totals.
-  - resolve the remaining inconsistent SQL-only subsystems before calling the release line clean.
+  - run final release validation after documentation alignment.
+  - preserve Project component-cost work as a future design item using `Time Cost + Material Cost + Override/Other Cost = Total Cost` so arbitrary overrides are not assigned falsely.
 - why it matters:
   - the release is already feature-rich, but its operational contract is still sharper in code than in docs and guarantees.
 
 ## Current Position
 
-KCD is no longer a CSV-first app with experimental SQL on the side. SQL is already first-class for major read paths, migration tooling, installer behavior, SQL-only enforcement, and canonical runtime configuration. At the same time, the project is still in a transitional hardening phase: SQL-only isolation still needs continued verification, docs are stale in places, and recalculation still contains an intentionally unfinished mode.
+KCD is no longer a CSV-first app with experimental SQL on the side. SQL is first-class for major read paths, migration tooling, installer behavior, SQL-only enforcement, and canonical runtime configuration. The remaining Phase 6 work is documentation alignment and final release validation; Recalculate is deliberately pricing-only for this release.
 
 ## Current Active Work
 
-Perform Phase 6.6 release hardening without expanding product scope.
+Align release documentation with the implemented Phase 6 SQL-only contract, then run final release validation.
 
-This is now the strongest next task because startup readiness, canonical SQL-only configuration, and the CSV compatibility policy are established, while documentation, validation breadth, and intentionally incomplete areas still need release-level reconciliation.
+This is now the strongest next task because startup readiness, canonical SQL-only configuration, printer retirement, filesystem exceptions, and compatibility policy are implemented and validated in code.
 
 ## Next Planned Work
 
-1. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture.
-2. Tighten SQL-only validation and certification where useful so startup/runtime guarantees are easier to prove.
-3. Revisit recalculation scope and either complete "full" recompute or explicitly de-scope it.
+1. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture and readiness workflow.
+2. Run the final release validation snapshot and resolve only true release blockers.
 
 ## Deferred Feature Track
 
@@ -197,7 +203,6 @@ This is now the strongest next task because startup readiness, canonical SQL-onl
 
 - No normal-path SQL-only dependency on legacy runtime files is currently known; focused coverage is representative rather than exhaustive.
 - README and some module comments still describe earlier or conflicting architectural states.
-- recalculation is intentionally incomplete because "full" recompute is still marked as coming soon.
 - compatibility CSV runtime paths remain supported for this release line, so SQL-only guardrails must keep that compatibility surface from becoming a strict-mode dependency.
 
 ## Definition of Done for the Current Phase

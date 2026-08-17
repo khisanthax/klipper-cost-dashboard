@@ -1652,7 +1652,7 @@ def recalculate_page():
         selected_printer=request.args.get("printer", "All"),
         q=request.args.get("q", "").strip(),
         status=request.args.get("status", "All"),
-        recompute_mode=request.args.get("recompute_mode", "pricing_only"),
+        recompute_mode="pricing_only",
         apply_filament_profile=request.args.get("apply_filament_profile", "") == "1",
         apply_rate_profile=request.args.get("apply_rate_profile", "") == "1",
         filament_profile_id=request.args.get("filament_profile_id", "").strip(),
@@ -1789,7 +1789,7 @@ def recalculate_run():
         recompute_mode = "pricing_only"
 
     if recompute_mode == "full":
-        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
+        return redirect(url_for("recalculate_page", msg="Only pricing recalculation is supported in this release."))
 
     compute_fn, plan_err, plan = _build_compute_fn(
         apply_rate_profile,
@@ -2011,7 +2011,7 @@ def recalculate_preview():
     if recompute_mode not in ("pricing_only", "full"):
         recompute_mode = "pricing_only"
     if recompute_mode == "full":
-        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
+        return redirect(url_for("recalculate_page", msg="Only pricing recalculation is supported in this release."))
 
     compute_fn, plan_or_err = _build_compute_fn(
         apply_rate_profile,

@@ -116,18 +116,9 @@
                             <div class="fw-semibold">Recalculation Plan</div>
                             <div class="text-muted small">Applies only to this run; does not change printer defaults.</div>
                         </div>
+                        <input type="hidden" name="recompute_mode" value="pricing_only">
                         <div class="row g-2 mt-1 align-items-end">
-                            <div class="col-md-3">
-                                <label class="form-label mb-1">Mode</label>
-                                <select name="recompute_mode" class="form-select form-select-sm">
-                                    <option value="pricing_only" {% if (recompute_mode or 'pricing_only') == 'pricing_only' %}selected{% endif %}>
-                                        Pricing-only
-                                    </option>
-                                    <option value="full" disabled>Full (coming soon)</option>
-                                </select>
-                            </div>
-
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label mb-1">Hourly rate override</label>
                                 <input type="text"
                                        name="rate_per_hour_override"
@@ -137,7 +128,7 @@
                                 <div class="text-muted small">If set, overrides the selected rate profile.</div>
                             </div>
 
-                            <div class="col-md-3">
+                            <div class="col-md-4">
                                 <label class="form-label mb-1">Filament override</label>
                                 <input type="text"
                                        name="filament_rate_per_meter_override"
@@ -147,7 +138,7 @@
                                 <div class="text-muted small">If set, uses per-meter pricing (no profile).</div>
                             </div>
 
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" name="apply_rate_profile" value="1"
                                            id="apply_rate_profile" {% if apply_rate_profile %}checked{% endif %}>
@@ -163,7 +154,7 @@
                                 </select>
                             </div>
 
-                            <div class="col-md-5">
+                            <div class="col-md-6">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" name="apply_filament_profile" value="1"
                                            id="apply_filament_profile" {% if apply_filament_profile %}checked{% endif %}>

@@ -196,6 +196,8 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         page = self.client.get("/recalculate")
         page_text = page.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)
+        self.assertNotIn("Full (coming soon)", page_text)
+        self.assertNotIn('option value="full"', page_text)
         self.assertIn("Filament (m)", page_text)
         self.assertIn("Time Cost ($)", page_text)
         self.assertIn("Material Cost ($)", page_text)
@@ -222,6 +224,15 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertIn(">6.50<", preview_text)
         self.assertIn(">2.25<", preview_text)
         self.assertIn(">8.75<", preview_text)
+
+    def test_full_recompute_request_is_explicitly_out_of_scope(self):
+        response = self.client.post(
+            "/recalculate/run",
+            data={"job_uids": ["test-job-uid-1"], "recompute_mode": "full"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("Only+pricing+recalculation+is+supported+in+this+release", response.headers.get("Location", ""))
 
     def test_recalculate_preview_and_run_use_same_paused_seconds_total(self):
         paused_inputs = []
