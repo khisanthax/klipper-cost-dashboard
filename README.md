@@ -254,13 +254,16 @@ semantics are designed.
 
 ## Projects
 
-Projects group tracked jobs, manual work, and planned items. Project cost-component
-reporting is a future design item. The intended accounting direction is:
+Projects group tracked jobs, manual work, and planned items. Actual and projected
+costs are reported with the same component equation:
 
-`Time Cost + Material Cost + Override/Other Cost = Total Cost`
+`Time Cost + Material Cost + Adjustment = Total Cost`
 
-This is not currently exposed as a Projects component breakdown; arbitrary manual
-overrides must not be assigned artificially to time or material.
+Adjustment is signed and may be positive or negative. For tracked jobs it preserves
+any difference between stored component costs and the stored total. For manual and
+planned items with an explicit total override, the ordinary time and material costs
+remain visible and Adjustment reconciles those components to the exact override.
+Component values are aggregated at full precision and rounded only for display.
 
 ## Web Interface
 

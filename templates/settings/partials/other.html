@@ -4,8 +4,20 @@
         <h5 class="mb-0">Table Column Visibility</h5>
     </div>
     <div class="card-body">
+        {% set project_column_labels = {
+            "time_cost": "Time Cost",
+            "material_cost": "Material Cost",
+            "adjustment": "Adjustment",
+            "total_cost": "Total Cost",
+            "filament_g": "Filament (g)",
+            "estimated_time": "Est. Time",
+            "estimated_time_cost": "Est. Time Cost",
+            "estimated_material_cost": "Est. Material Cost",
+            "estimated_adjustment": "Est. Adjustment",
+            "estimated_total_cost": "Est. Total Cost"
+        } %}
         <div class="text-muted small mb-3">
-            These settings are stored in <code>data/display.json</code> and apply across devices/browsers.
+            These settings are stored by the active KCD backend and apply across devices and browsers.
         </div>
 
         <h6 class="mb-2">Print History (Dashboard)</h6>
@@ -72,7 +84,7 @@
         </form>
 
         <h6 class="mb-2">Projects (Jobs in this project)</h6>
-        <form method="post" class="mb-0">
+        <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="projects_project_jobs">
             {% set selected = projects_project_jobs_selected_columns if projects_project_jobs_selected_columns and (projects_project_jobs_selected_columns|length > 0) else projects_project_jobs_allowed_cols %}
@@ -83,13 +95,55 @@
                         <input class="form-check-input" type="checkbox" name="columns" value="{{ h }}" id="col_proj_jobs_{{ h }}"
                             {% if h in selected %}checked{% endif %}>
                         <label class="form-check-label" for="col_proj_jobs_{{ h }}">
-                            {{ h.replace('_', ' ')|title }}
+                            {{ project_column_labels.get(h, h.replace('_', ' ')|title) }}
                         </label>
                     </div>
                 </div>
                 {% endfor %}
             </div>
             <button type="submit" class="btn btn-primary">Save Project Job Columns</button>
+        </form>
+
+        <h6 class="mb-2">Projects (Manual jobs)</h6>
+        <form method="post" class="mb-4">
+            <input type="hidden" name="action" value="update_columns">
+            <input type="hidden" name="table" value="projects_manual_jobs">
+            {% set selected = projects_manual_jobs_selected_columns if projects_manual_jobs_selected_columns and (projects_manual_jobs_selected_columns|length > 0) else projects_manual_jobs_allowed_cols %}
+            <div class="row g-3 mb-3">
+                {% for h in projects_manual_jobs_allowed_cols %}
+                <div class="col-md-3 col-6">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="columns" value="{{ h }}" id="col_proj_manual_{{ h }}"
+                            {% if h in selected %}checked{% endif %}>
+                        <label class="form-check-label" for="col_proj_manual_{{ h }}">
+                            {{ project_column_labels.get(h, h.replace('_', ' ')|title) }}
+                        </label>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="submit" class="btn btn-primary">Save Manual Job Columns</button>
+        </form>
+
+        <h6 class="mb-2">Projects (Planned items)</h6>
+        <form method="post" class="mb-0">
+            <input type="hidden" name="action" value="update_columns">
+            <input type="hidden" name="table" value="projects_planned_items">
+            {% set selected = projects_planned_items_selected_columns if projects_planned_items_selected_columns and (projects_planned_items_selected_columns|length > 0) else projects_planned_items_allowed_cols %}
+            <div class="row g-3 mb-3">
+                {% for h in projects_planned_items_allowed_cols %}
+                <div class="col-md-3 col-6">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="columns" value="{{ h }}" id="col_proj_planned_{{ h }}"
+                            {% if h in selected %}checked{% endif %}>
+                        <label class="form-check-label" for="col_proj_planned_{{ h }}">
+                            {{ project_column_labels.get(h, h.replace('_', ' ')|title) }}
+                        </label>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="submit" class="btn btn-primary">Save Planned Item Columns</button>
         </form>
     </div>
 </div>
