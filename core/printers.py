@@ -83,13 +83,20 @@ def _is_sql_only() -> bool:
     return is_sql_only()
 
 
-def _load_sql_printers() -> Set[str]:
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            rows = conn.execute("SELECT name FROM printers").fetchall()
-    except Exception:
-        return set()
+def _load_sql_printer_state() -> tuple[Set[str], Set[str]]:
+    """Load SQL printer identities and the persisted retired/hidden set."""
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        rows = conn.execute("SELECT name FROM printers").fetchall()
+        display_row = None
+        for key in ("display_settings", "display"):
+            display_row = conn.execute(
+                "SELECT value_json FROM user_settings WHERE key = ?",
+                (key,),
+            ).fetchone()
+            if display_row:
+                break
+
     out: Set[str] = set()
     for r in rows:
         if isinstance(r, sqlite3.Row):
@@ -102,7 +109,18 @@ def _load_sql_printers() -> Set[str]:
             name = _norm(getattr(r, "name", ""))
         if name:
             out.add(name)
-    return out
+
+    hidden: Set[str] = set()
+    if display_row:
+        raw = display_row["value_json"] if hasattr(display_row, "__getitem__") else display_row[0]
+        display = json.loads(raw)
+        if not isinstance(display, dict):
+            raise ValueError("SQL display settings must contain a JSON object")
+        hidden_raw = display.get("hidden_printers", [])
+        if not isinstance(hidden_raw, list):
+            raise ValueError("SQL display_settings.hidden_printers must contain a JSON list")
+        hidden = {_norm(name) for name in hidden_raw if _norm(name)}
+    return out, hidden
 
 
 def get_canonical_printer_names(include_hidden: bool = False) -> Set[str]:
@@ -113,7 +131,7 @@ def get_canonical_printer_names(include_hidden: bool = False) -> Set[str]:
     - Any name that looks like a .gcode filename is excluded.
     """
     if _is_sql_only():
-        configured = _load_sql_printers()
+        configured, sql_hidden = _load_sql_printer_state()
         installed = set()
     else:
         settings = load_settings(SETTINGS_FILE)
@@ -121,8 +139,11 @@ def get_canonical_printer_names(include_hidden: bool = False) -> Set[str]:
         installed = _load_installer_printers()
 
     hidden: Set[str] = set()
-    if not include_hidden and not _is_sql_only():
-        hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
+    if not include_hidden:
+        if _is_sql_only():
+            hidden = sql_hidden
+        else:
+            hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
 
     names = (configured | installed) - hidden
     names = {p for p in names if p and not looks_like_gcode_filename(p)}

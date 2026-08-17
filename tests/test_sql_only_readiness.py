@@ -179,6 +179,72 @@ class SqlOnlyReadinessTests(unittest.TestCase):
         self.assertTrue(readiness.get("ready"))
         self.assertTrue(any(check.get("name") == "configured_printer_pricing" and check.get("ok") for check in readiness.get("checks", [])))
 
+    def test_retired_printer_keeps_history_but_is_not_active_or_required_for_readiness(self):
+        from core import printer_lifecycle
+        from core.history_repo import HistoryQuery, list_history_rows_sql
+        from core.printers import get_canonical_printer_names
+        from core.readiness import check_sql_only_readiness
+
+        self._persist_pause_default()
+        self._upsert_printer("Active")
+        self._upsert_printer("Retired")
+        self._upsert_user_setting(
+            "printer_settings",
+            {
+                "Active": {
+                    "rate_per_hour": 7.0,
+                    "filament_mode": "per_meter",
+                    "filament_rate": 0.08,
+                    "grams_per_meter": 3.0,
+                },
+                "Retired": {
+                    "rate_per_hour": 5.0,
+                    "filament_mode": "per_meter",
+                    "filament_rate": 0.06,
+                    "grams_per_meter": 3.0,
+                },
+            },
+        )
+        with self._connect() as conn:
+            self._db_module.upsert_job(
+                conn,
+                {
+                    "job_uid": "retired-history-job",
+                    "printer": "Retired",
+                    "filename": "retained.gcode",
+                    "status": "completed",
+                },
+            )
+            conn.commit()
+
+        printer_lifecycle.delete_printer("Retired")
+
+        readiness = check_sql_only_readiness()
+        self.assertTrue(readiness.get("ready"), readiness.get("errors"))
+        pricing_check = next(
+            check for check in readiness.get("checks", []) if check.get("name") == "configured_printer_pricing"
+        )
+        self.assertEqual(pricing_check.get("printers_checked"), 1)
+        self.assertEqual(get_canonical_printer_names(), {"Active"})
+        self.assertEqual(get_canonical_printer_names(include_hidden=True), {"Active", "Retired"})
+
+        history = list_history_rows_sql(
+            HistoryQuery(printer="Retired"),
+            page=1,
+            per_page=25,
+            error=None,
+        )
+        self.assertEqual(history.total, 1)
+        self.assertEqual(history.rows_page[0].get("job_uid"), "retired-history-job")
+
+        kcd_app = self._import_app_fresh()
+        response = kcd_app.app.test_client().post(
+            "/job-start",
+            json={"printer_name": "Retired", "filename": "new.gcode"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unknown printer_name", response.get_json().get("error", ""))
+
     def test_check_sql_only_readiness_fails_stale_active_profile_references(self):
         from core.readiness import check_sql_only_readiness
 

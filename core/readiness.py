@@ -157,6 +157,16 @@ def _check_configured_printer_pricing(conn) -> tuple[bool, dict[str, Any]]:
         for row in rows
     ]
     printer_names = [name for name in printer_names if name]
+    display = _load_user_setting_dict(conn, "display_settings", "display")
+    hidden_raw = display.get("hidden_printers", [])
+    if not isinstance(hidden_raw, list):
+        return False, {
+            "code": "invalid_hidden_printer_state",
+            "message": "user_settings.display_settings.hidden_printers must be a JSON list.",
+            "printers_checked": 0,
+        }
+    hidden = {str(name or "").strip() for name in hidden_raw if str(name or "").strip()}
+    printer_names = [name for name in printer_names if name not in hidden]
     if not printer_names:
         return True, {"printers_checked": 0}
 
