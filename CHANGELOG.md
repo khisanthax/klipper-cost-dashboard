@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 - 2026-08-17
 
 ### Added
 - Added Projects cost-component reporting for tracked jobs, manual work, planned items, and project totals using `Time Cost + Material Cost + Adjustment = Total Cost`.
