@@ -26,14 +26,11 @@ def _utc_now_iso() -> str:
 
 
 def _load_sql_profiles():
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            rows = conn.execute(
-                "SELECT id, profile_uid, name, description, rate_per_hour FROM hourly_rate_profiles"
-            ).fetchall()
-    except Exception:
-        return {"profiles": {}}
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            "SELECT id, profile_uid, name, description, rate_per_hour FROM hourly_rate_profiles"
+        ).fetchall()
 
     profiles = {}
     for r in rows:

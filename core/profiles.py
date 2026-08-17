@@ -225,17 +225,14 @@ def _load_sql_profiles():
     Load filament profiles from SQLite in SQL-only mode.
     Returns dict of profile_uid (or id) -> profile_data.
     """
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            rows = conn.execute(
-                """
-                SELECT id, profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter
-                  FROM filament_profiles
-                """
-            ).fetchall()
-    except Exception:
-        return {}
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            """
+            SELECT id, profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter
+              FROM filament_profiles
+            """
+        ).fetchall()
 
     profiles = {}
     for r in rows:

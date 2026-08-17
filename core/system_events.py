@@ -143,33 +143,30 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
 
 def _iter_events_newest_first() -> Iterable[Dict[str, Any]]:
     if is_sql_only():
-        try:
-            with closing(db_module.connect_db()) as conn:
-                db_module.apply_migrations(conn)
-                rows = conn.execute(
-                    "SELECT ts, category, title, message, meta_json FROM system_events ORDER BY ts DESC"
-                ).fetchall()
-            out: List[Dict[str, Any]] = []
-            for r in rows:
-                meta_raw = r["meta_json"] if isinstance(r, dict) or hasattr(r, "__getitem__") else None
-                meta = {}
-                if meta_raw:
-                    try:
-                        meta = json.loads(meta_raw)
-                    except Exception:
-                        meta = {}
-                out.append(
-                    {
-                        "ts": r["ts"] if hasattr(r, "__getitem__") else None,
-                        "category": r["category"] if hasattr(r, "__getitem__") else None,
-                        "title": r["title"] if hasattr(r, "__getitem__") else None,
-                        "message": r["message"] if hasattr(r, "__getitem__") else None,
-                        "meta": meta,
-                    }
-                )
-            return out
-        except Exception:
-            return []
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            rows = conn.execute(
+                "SELECT ts, category, title, message, meta_json FROM system_events ORDER BY ts DESC"
+            ).fetchall()
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            meta_raw = r["meta_json"] if isinstance(r, dict) or hasattr(r, "__getitem__") else None
+            meta = {}
+            if meta_raw:
+                try:
+                    meta = json.loads(meta_raw)
+                except Exception:
+                    meta = {}
+            out.append(
+                {
+                    "ts": r["ts"] if hasattr(r, "__getitem__") else None,
+                    "category": r["category"] if hasattr(r, "__getitem__") else None,
+                    "title": r["title"] if hasattr(r, "__getitem__") else None,
+                    "message": r["message"] if hasattr(r, "__getitem__") else None,
+                    "meta": meta,
+                }
+            )
+        return out
 
     require_file_reads_allowed("system_events.jsonl", caller_hint="core.system_events._iter_events_newest_first")
     if not os.path.exists(EVENTS_FILE):

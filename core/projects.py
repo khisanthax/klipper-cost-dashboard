@@ -152,27 +152,24 @@ def _project_uid_from_row(row: sqlite3.Row) -> str:
 
 
 def _load_projects_sql() -> Dict[str, Project]:
-    try:
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            rows = conn.execute(
-                """
-                SELECT
-                    id,
-                    project_uid,
-                    name,
-                    notes,
-                    status,
-                    hourly_rate_override,
-                    filament_cost_per_kg_override,
-                    labor_only,
-                    created_at,
-                    updated_at
-                FROM projects
-                """
-            ).fetchall()
-    except Exception:
-        return {}
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                id,
+                project_uid,
+                name,
+                notes,
+                status,
+                hourly_rate_override,
+                filament_cost_per_kg_override,
+                labor_only,
+                created_at,
+                updated_at
+            FROM projects
+            """
+        ).fetchall()
 
     projects: Dict[str, Project] = {}
     for row in rows:

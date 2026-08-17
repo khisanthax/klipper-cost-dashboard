@@ -57,7 +57,8 @@ def _load_user_settings_sql(key: str):
             raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
             return json.loads(raw) if raw else None
     except Exception:
-        return None
+        logger.exception("Failed to load SQL user setting %s", key)
+        raise
 
 
 def _save_user_settings_sql(key: str, value) -> None:
