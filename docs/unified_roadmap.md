@@ -66,7 +66,7 @@ It is derived from the audited repository state, not from older handoff notes or
 
 ## Phase 6 - SQL-Only Hardening and Canonicalization
 
-This phase is complete for the current release contract.
+This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current release contract.
 
 ### 6.1 Guardrails
 
@@ -169,24 +169,21 @@ This phase is complete for the current release contract.
   - deliberate installer re-registration reactivates retired printers without changing their historical SQL identity.
 - future work:
   - Full Recompute remains deferred until its data and pricing semantics are designed.
-  - Project component-cost reporting remains a deliberate future design item.
 - why it matters:
   - the release is already feature-rich, but its operational contract is still sharper in code than in docs and guarantees.
 
 ## Current Position
 
-Phase 6 is complete for the current release contract. SQL-only is the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes for this release line. Recalculate is deliberately pricing-only.
+Phase 6 shipped in v0.4.0 on 2026-08-17. SQL-only is the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes for this release line. Recalculate is deliberately pricing-only.
 
 ## Current Active Work
 
-Verify the bounded Phase 6.6D integration and release-CI fixes on PR #46.
-
-PR #46 must remain open until the new release workflow and blocker-specific checks pass.
+Review and validate the post-v0.4.0 Projects cost-component reporting slice.
 
 ## Next Planned Work
 
-1. Perform the short independent verification of the Phase 6.6D blocker fixes.
-2. Only after approval, resume the existing v0.4.0 merge/tag/release sequence.
+1. Merge Projects cost-component reporting after feature review and CI pass.
+2. Choose the next deferred feature deliberately; Full Recompute and Modes remain unstarted.
 
 ## Deferred Feature Track
 
@@ -199,10 +196,11 @@ PR #46 must remain open until the new release workflow and blocker-specific chec
 
 ### Projects Component Costs
 
-- status: deferred, design direction recorded
-- future accounting direction:
-  - `Time Cost + Material Cost + Override/Other Cost = Total Cost`
-  - arbitrary manual or project overrides must not be assigned falsely to time or material.
+- status: implementation complete on the post-v0.4.0 feature branch, pending review
+- implemented accounting contract:
+  - `Time Cost + Material Cost + Adjustment = Total Cost`
+  - Adjustment is signed and reconciles persisted or explicit totals without inventing a labor/material split.
+  - actual tracked/manual totals remain separate from active planned-item projections.
 
 ### Modes
 

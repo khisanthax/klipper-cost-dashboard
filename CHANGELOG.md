@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Added Projects cost-component reporting for tracked jobs, manual work, planned items, and project totals using `Time Cost + Material Cost + Adjustment = Total Cost`.
+- Added signed adjustment handling for stored and explicit total overrides, configurable component columns, and finite/nonnegative planned-item input validation.
+
 ## v0.4.0 - 2026-08-16
 
 ### Added
