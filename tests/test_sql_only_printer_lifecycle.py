@@ -225,6 +225,82 @@ class SqlOnlyPrinterLifecycleTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) AS count FROM printers").fetchone()["count"], 2)
             self.assertEqual(conn.execute("SELECT COUNT(*) AS count FROM jobs").fetchone()["count"], 2)
 
+    def test_installer_reregistration_explicitly_reactivates_same_historical_identity(self):
+        self._seed_printer(
+            "Reactivate Me",
+            url="http://old.local",
+            external_id="old-client",
+            job_uid="historical-job",
+        )
+        with self.db_module.connect_db() as conn:
+            original_id = conn.execute(
+                "SELECT id FROM printers WHERE name = 'Reactivate Me'"
+            ).fetchone()["id"]
+            self._save_setting(
+                conn,
+                "display_settings",
+                {"pause_include_paused_time_default": False, "hidden_printers": []},
+            )
+
+        from core import printer_lifecycle
+        from core.printers import get_canonical_printer_names
+        from core.readiness import check_sql_only_readiness
+        from installer import utils as installer_utils
+
+        printer_lifecycle.delete_printer("Reactivate Me")
+        self.assertNotIn("Reactivate Me", get_canonical_printer_names())
+
+        # An ordinary SQL upsert may update metadata, but must not remove retirement state.
+        with self.db_module.connect_db() as conn:
+            self.db_module.upsert_printer(conn, "Reactivate Me", "http://ordinary.local")
+            conn.commit()
+        self.assertNotIn("Reactivate Me", get_canonical_printer_names())
+
+        self.assertTrue(
+            installer_utils._sync_printer_to_sql(
+                "Reactivate Me",
+                "http://reactivated.local",
+                external_id="new-client",
+            )
+        )
+        self.assertIn("Reactivate Me", get_canonical_printer_names())
+
+        with self.db_module.connect_db() as conn:
+            printer = conn.execute(
+                "SELECT id, moonraker_url, external_id FROM printers WHERE name = 'Reactivate Me'"
+            ).fetchone()
+            history = conn.execute(
+                "SELECT printer_id FROM jobs WHERE job_uid = 'historical-job'"
+            ).fetchone()
+        self.assertEqual(printer["id"], original_id)
+        self.assertEqual(history["printer_id"], original_id)
+        self.assertEqual(printer["moonraker_url"], "http://reactivated.local")
+        self.assertEqual(printer["external_id"], "new-client")
+        self.assertFalse(check_sql_only_readiness()["ready"])
+
+        with self.db_module.connect_db() as conn:
+            self._save_setting(
+                conn,
+                "printer_settings",
+                {
+                    "Reactivate Me": {
+                        "rate_per_hour": 5.0,
+                        "filament_mode": "per_meter",
+                        "filament_rate": 1.0,
+                        "grams_per_meter": 3.0,
+                    }
+                },
+            )
+        self.assertTrue(check_sql_only_readiness()["ready"])
+
+        response = self.client.post(
+            "/job-start",
+            json={"printer_name": "Reactivate Me", "filename": "new.gcode"},
+            headers={"X-API-Key": self.app_module.API_KEY},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["success"])
+
 
 if __name__ == "__main__":
     unittest.main()

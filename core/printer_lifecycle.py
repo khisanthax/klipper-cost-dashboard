@@ -241,3 +241,55 @@ def delete_printer(printer_name: str) -> None:
                 "SELECT 1 FROM user_settings WHERE key = ?", (key,)
             ).fetchone():
                 _save_setting(conn, key, data)
+
+
+def reactivate_printer(
+    printer_name: str,
+    *,
+    moonraker_url: str | None = None,
+    external_id: str | None = None,
+) -> int:
+    """Explicitly reactivate a retired SQL printer without changing its identity."""
+    printer_name = str(printer_name or "").strip()
+    if not printer_name:
+        raise ValueError("printer name is required")
+
+    with db_module.connect_db() as conn:
+        db_module.apply_migrations(conn)
+        printer = _printer_row(conn, printer_name)
+        if not printer:
+            raise ValueError(f"printer not found: {printer_name}")
+
+        display = _load_setting(conn, "display_settings")
+        legacy_display = _load_setting(conn, "display")
+        for data in (display, legacy_display):
+            hidden = data.get("hidden_printers")
+            if isinstance(hidden, list):
+                data["hidden_printers"] = sorted(
+                    {
+                        str(name).strip()
+                        for name in hidden
+                        if str(name).strip() and str(name).strip() != printer_name
+                    }
+                )
+
+        updates = ["updated_at = ?"]
+        values: list[Any] = [_utc_now_iso()]
+        if moonraker_url is not None:
+            updates.append("moonraker_url = ?")
+            values.append(str(moonraker_url or "").strip() or None)
+        if external_id is not None:
+            updates.append("external_id = ?")
+            values.append(str(external_id or "").strip() or None)
+        values.append(printer["id"])
+        conn.execute(
+            f"UPDATE printers SET {', '.join(updates)} WHERE id = ?",
+            values,
+        )
+
+        for key, data in (("display_settings", display), ("display", legacy_display)):
+            if data or key == "display_settings" or conn.execute(
+                "SELECT 1 FROM user_settings WHERE key = ?", (key,)
+            ).fetchone():
+                _save_setting(conn, key, data)
+        return int(printer["id"])

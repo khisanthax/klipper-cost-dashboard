@@ -104,10 +104,21 @@ def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
 def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Optional[str] = None) -> bool:
     try:
         from core import db as db_module
+        from core import printer_lifecycle
         with closing(db_module.connect_db()) as conn:
             db_module.apply_migrations(conn)
-            db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
-            conn.commit()
+            existing = conn.execute("SELECT id FROM printers WHERE name = ?", (printer_name,)).fetchone()
+        if existing:
+            printer_lifecycle.reactivate_printer(
+                printer_name,
+                moonraker_url=moonraker_url,
+                external_id=external_id,
+            )
+        else:
+            with closing(db_module.connect_db()) as conn:
+                db_module.apply_migrations(conn)
+                db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
+                conn.commit()
         return True
     except Exception as e:
         println(f"WARNING: failed to sync printer to SQL: {e}")
