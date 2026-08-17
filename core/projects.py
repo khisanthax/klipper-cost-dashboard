@@ -949,32 +949,19 @@ def create_manual_job(
     if not title:
         raise ValueError("Description is required")
 
-    try:
-        hours_f = float(hours)
-    except (TypeError, ValueError):
-        raise ValueError("Hours must be a number")
-    if hours_f <= 0:
-        raise ValueError("Hours must be greater than 0")
-
-    filament_f = 0.0
-    if filament_g is not None and str(filament_g).strip() != "":
-        try:
-            filament_f = float(filament_g)
-        except (TypeError, ValueError):
-            filament_f = 0.0
-    if filament_f < 0:
-        raise ValueError("Filament grams must be >= 0")
-
-    override_f: Optional[float]
-    if cost_override is None or str(cost_override).strip() == "":
-        override_f = None
-    else:
-        try:
-            override_f = float(cost_override)
-        except (TypeError, ValueError):
-            override_f = None
-    if override_f is not None and override_f < 0:
-        raise ValueError("Cost override must be >= 0")
+    hours_f = finite_float(hours, label="Hours", positive=True)
+    filament_f = optional_finite_float(
+        filament_g,
+        label="Filament grams",
+        nonnegative=True,
+    )
+    if filament_f is None:
+        filament_f = 0.0
+    override_f = optional_finite_float(
+        cost_override,
+        label="Cost override",
+        nonnegative=True,
+    )
 
     mj = ManualJob(
         manual_job_id=uuid.uuid4().hex,
@@ -1010,32 +997,19 @@ def update_manual_job(
     if not title:
         raise ValueError("Description is required")
 
-    try:
-        hours_f = float(hours)
-    except (TypeError, ValueError):
-        raise ValueError("Hours must be a number")
-    if hours_f <= 0:
-        raise ValueError("Hours must be greater than 0")
-
-    filament_f = 0.0
-    if filament_g is not None and str(filament_g).strip() != "":
-        try:
-            filament_f = float(filament_g)
-        except (TypeError, ValueError):
-            filament_f = 0.0
-    if filament_f < 0:
-        raise ValueError("Filament grams must be >= 0")
-
-    override_f: Optional[float]
-    if cost_override is None or str(cost_override).strip() == "":
-        override_f = None
-    else:
-        try:
-            override_f = float(cost_override)
-        except (TypeError, ValueError):
-            override_f = None
-    if override_f is not None and override_f < 0:
-        raise ValueError("Cost override must be >= 0")
+    hours_f = finite_float(hours, label="Hours", positive=True)
+    filament_f = optional_finite_float(
+        filament_g,
+        label="Filament grams",
+        nonnegative=True,
+    )
+    if filament_f is None:
+        filament_f = 0.0
+    override_f = optional_finite_float(
+        cost_override,
+        label="Cost override",
+        nonnegative=True,
+    )
 
     jobs_by_project = load_manual_jobs()
     for pid, jobs in jobs_by_project.items():
@@ -1621,12 +1595,22 @@ def create_project(
         raise ValueError("Project name is required")
     now = time.time()
     pid = uuid.uuid4().hex
+    hourly_override = optional_finite_float(
+        hourly_rate_override,
+        label="Hourly rate override",
+        nonnegative=True,
+    )
+    filament_override = optional_finite_float(
+        filament_cost_per_kg_override,
+        label="Filament cost per kg override",
+        nonnegative=True,
+    )
     project = Project(
         id=pid,
         name=name,
         notes=str(notes or ""),
-        hourly_rate_override=_opt_nonneg_float(hourly_rate_override),
-        filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override),
+        hourly_rate_override=hourly_override,
+        filament_cost_per_kg_override=filament_override,
         labor_only=bool(labor_only),
         created_at=now,
         updated_at=now,
@@ -1656,6 +1640,25 @@ def update_project(
     if not name:
         raise ValueError("Project name is required")
 
+    hourly_override = (
+        optional_finite_float(
+            hourly_rate_override,
+            label="Hourly rate override",
+            nonnegative=True,
+        )
+        if hourly_rate_override is not None
+        else None
+    )
+    filament_override = (
+        optional_finite_float(
+            filament_cost_per_kg_override,
+            label="Filament cost per kg override",
+            nonnegative=True,
+        )
+        if filament_cost_per_kg_override is not None
+        else None
+    )
+
     if _is_sql_only():
         existing = load_projects().get(pid)
         if not existing:
@@ -1664,8 +1667,8 @@ def update_project(
             id=pid,
             name=name,
             notes=str(notes or ""),
-            hourly_rate_override=_opt_nonneg_float(hourly_rate_override) if hourly_rate_override is not None else existing.hourly_rate_override,
-            filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override) if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+            hourly_rate_override=hourly_override if hourly_rate_override is not None else existing.hourly_rate_override,
+            filament_cost_per_kg_override=filament_override if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
             labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
             created_at=existing.created_at,
             updated_at=time.time(),
@@ -1683,8 +1686,8 @@ def update_project(
         id=pid,
         name=name,
         notes=str(notes or ""),
-        hourly_rate_override=_opt_nonneg_float(hourly_rate_override) if hourly_rate_override is not None else existing.hourly_rate_override,
-        filament_cost_per_kg_override=_opt_nonneg_float(filament_cost_per_kg_override) if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+        hourly_rate_override=hourly_override if hourly_rate_override is not None else existing.hourly_rate_override,
+        filament_cost_per_kg_override=filament_override if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
         labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
         created_at=existing.created_at,
         updated_at=now,

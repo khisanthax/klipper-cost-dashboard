@@ -1,10 +1,10 @@
 import os
+import re
 import tempfile
 import unittest
+from contextlib import ExitStack
 from unittest import mock
 
-
-os.environ.setdefault("KCD_SQL_ONLY_FAIL_FAST", "0")
 
 from core import db as db_module
 from core import projects
@@ -235,16 +235,180 @@ class ProjectCostComponentTests(unittest.TestCase):
             self.assertNotIn("adjustment", columns)
 
 
+class ProjectComponentInputValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.project = projects.Project(
+            id="p1",
+            name="Inputs",
+            hourly_rate_override=10.0,
+            filament_cost_per_kg_override=20.0,
+        )
+        self.manual = projects.ManualJob(
+            manual_job_id="m1",
+            project_id="p1",
+            title="Manual",
+            hours=1.0,
+            filament_g=10.0,
+        )
+
+    def test_project_create_and_update_reject_invalid_overrides(self):
+        invalid_values = ("nan", "inf", "-inf", "-1", "not-a-number")
+        for field in ("hourly_rate_override", "filament_cost_per_kg_override"):
+            for value in invalid_values:
+                with self.subTest(operation="create", field=field, value=value):
+                    kwargs = {field: value}
+                    with self.assertRaises(NumericValidationError):
+                        projects.create_project("Invalid", **kwargs)
+
+                with self.subTest(operation="update", field=field, value=value):
+                    kwargs = {field: value}
+                    with self.assertRaises(NumericValidationError):
+                        projects.update_project("p1", "Invalid", **kwargs)
+
+    def test_project_create_and_update_persist_valid_values_in_csv_and_sql(self):
+        for backend in ("csv", "sql"):
+            with self.subTest(backend=backend), mock.patch.dict(
+                os.environ, {"KCD_STORAGE_BACKEND": backend}
+            ), ExitStack() as stack:
+                stack.enter_context(mock.patch.object(projects, "load_projects", return_value={"p1": self.project}))
+                if backend == "sql":
+                    create_save = stack.enter_context(mock.patch.object(projects, "_create_project_sql"))
+                    update_save = stack.enter_context(mock.patch.object(projects, "_update_project_sql"))
+                else:
+                    save_projects = stack.enter_context(mock.patch.object(projects, "save_projects"))
+                    create_save = save_projects
+                    update_save = save_projects
+
+                created = projects.create_project(
+                    "Valid",
+                    hourly_rate_override="0",
+                    filament_cost_per_kg_override="2.5",
+                )
+                updated = projects.update_project(
+                    "p1",
+                    "Valid updated",
+                    hourly_rate_override="0",
+                    filament_cost_per_kg_override="",
+                )
+
+                self.assertEqual(created.hourly_rate_override, 0.0)
+                self.assertEqual(created.filament_cost_per_kg_override, 2.5)
+                self.assertEqual(updated.hourly_rate_override, 0.0)
+                self.assertIsNone(updated.filament_cost_per_kg_override)
+                create_save.assert_called()
+                update_save.assert_called()
+
+    def test_manual_create_and_update_reject_invalid_values(self):
+        invalid_cases = (
+            ("hours", "nan"),
+            ("hours", "inf"),
+            ("hours", "-inf"),
+            ("hours", "-1"),
+            ("hours", "bad"),
+            ("filament_g", "nan"),
+            ("filament_g", "inf"),
+            ("filament_g", "-inf"),
+            ("filament_g", "-1"),
+            ("filament_g", "bad"),
+            ("cost_override", "nan"),
+            ("cost_override", "inf"),
+            ("cost_override", "-inf"),
+            ("cost_override", "-1"),
+            ("cost_override", "bad"),
+        )
+        with mock.patch.object(projects, "load_projects", return_value={"p1": self.project}):
+            for field, value in invalid_cases:
+                create_kwargs = {
+                    "project_id": "p1",
+                    "title": "Invalid",
+                    "hours": "1",
+                    "filament_g": "1",
+                    "cost_override": "1",
+                }
+                create_kwargs[field] = value
+                with self.subTest(operation="create", field=field, value=value):
+                    with self.assertRaises(NumericValidationError):
+                        projects.create_manual_job(**create_kwargs)
+
+                update_kwargs = {
+                    "manual_job_id": "m1",
+                    "title": "Invalid",
+                    "hours": "1",
+                    "filament_g": "1",
+                    "cost_override": "1",
+                }
+                update_kwargs[field] = value
+                with self.subTest(operation="update", field=field, value=value):
+                    with self.assertRaises(NumericValidationError):
+                        projects.update_manual_job(**update_kwargs)
+
+    def test_manual_create_and_update_persist_zero_and_ordinary_values(self):
+        for backend in ("csv", "sql"):
+            with self.subTest(backend=backend), mock.patch.dict(
+                os.environ, {"KCD_STORAGE_BACKEND": backend}
+            ), ExitStack() as stack:
+                stack.enter_context(mock.patch.object(projects, "load_projects", return_value={"p1": self.project}))
+                load_manual = stack.enter_context(
+                    mock.patch.object(
+                        projects,
+                        "load_manual_jobs",
+                        side_effect=[{}, {"p1": [self.manual]}],
+                    )
+                )
+                if backend == "sql":
+                    persist = stack.enter_context(mock.patch.object(projects, "_save_manual_jobs_sql"))
+                else:
+                    persist = stack.enter_context(mock.patch.object(projects, "_write_json"))
+
+                created = projects.create_manual_job(
+                    project_id="p1",
+                    title="Zero values",
+                    hours="1.5",
+                    filament_g="0",
+                    cost_override="0",
+                )
+                updated = projects.update_manual_job(
+                    manual_job_id="m1",
+                    title="Ordinary values",
+                    hours="2.5",
+                    filament_g="125.5",
+                    cost_override="",
+                )
+
+                self.assertEqual(created.hours, 1.5)
+                self.assertEqual(created.filament_g, 0.0)
+                self.assertEqual(created.cost_override, 0.0)
+                self.assertEqual(updated.hours, 2.5)
+                self.assertEqual(updated.filament_g, 125.5)
+                self.assertIsNone(updated.cost_override)
+                self.assertEqual(load_manual.call_count, 2)
+                self.assertEqual(persist.call_count, 2)
+
+
 class ProjectCostComponentViewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._prior_environment = {
+            key: os.environ.get(key)
+            for key in ("KCD_STORAGE_BACKEND", "KCD_SQL_ONLY_FAIL_FAST")
+        }
+        os.environ["KCD_STORAGE_BACKEND"] = "csv"
+        os.environ["KCD_SQL_ONLY_FAIL_FAST"] = "0"
         import app as app_module
 
         cls.app_module = app_module
         cls.flask_app = app_module.app
         cls.flask_app.config.update(TESTING=True)
 
-    def render_projects(self, *, show_costs=True, tracked_columns=None):
+    @classmethod
+    def tearDownClass(cls):
+        for key, value in cls._prior_environment.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def render_projects(self, *, show_costs=True, tracked_columns=None, include_unassigned=False):
         tracked_columns = tracked_columns or list(self.app_module.PROJECTS_TRACKED_COLUMNS)
         project = {
             "id": "p1",
@@ -313,6 +477,19 @@ class ProjectCostComponentViewTests(unittest.TestCase):
             "actual_tracked_cost": 12.5,
             "actual_manual_cost": 35.0,
         }
+        unassigned = []
+        if include_unassigned:
+            unassigned = [{
+                "job_uid": "u1",
+                "printer": "Mercury",
+                "timestamp": "2026-08-17 12:00",
+                "filename": "unassigned.gcode",
+                "status": "completed",
+                "duration_hours": 1.0,
+                "filament_meters": 2.0,
+                "total_cost": 99.99,
+                "_thumbs_enabled": False,
+            }]
         context = {
             "projects": [project],
             "projects_by_id": {"p1": project},
@@ -321,9 +498,18 @@ class ProjectCostComponentViewTests(unittest.TestCase):
             "projects_manual_jobs_visible_cols": list(self.app_module.PROJECTS_MANUAL_COLUMNS),
             "projects_planned_items_visible_cols": list(self.app_module.PROJECTS_PLANNED_COLUMNS),
             "projects_unassigned_visible_cols": list(self.app_module.PROJECTS_UNASSIGNED_COLUMNS),
-            "unassigned_jobs": [],
-            "unassigned_jobs_page": [],
-            "unassigned_pager": {},
+            "unassigned_jobs": unassigned,
+            "unassigned_jobs_page": unassigned,
+            "unassigned_pager": {
+                "base_query": {},
+                "per_page": 25,
+                "total": len(unassigned),
+                "has_prev": False,
+                "has_next": False,
+                "prev_url": None,
+                "next_url": None,
+                "links": [],
+            },
             "edit_project": None,
             "edit_manual_job_id": None,
         }
@@ -340,6 +526,7 @@ class ProjectCostComponentViewTests(unittest.TestCase):
         self.assertIn("Est. Adjustment", html)
         self.assertIn("Actual (tracked + manual)", html)
         self.assertIn("Projected (active plans)", html)
+        self.assertIn("Adjustment is the signed difference", html)
         self.assertIn("-$2.50", html)
         self.assertIn("-$5.00", html)
 
@@ -358,6 +545,55 @@ class ProjectCostComponentViewTests(unittest.TestCase):
             self.assertNotIn(label, html)
         self.assertNotIn("-$2.50", html)
         self.assertNotIn("-$5.00", html)
+
+    def test_unassigned_cost_column_is_structurally_omitted_when_costs_hidden(self):
+        hidden_html = self.render_projects(show_costs=False, include_unassigned=True)
+        hidden_table = re.search(
+            r'<table[^>]+id="kcdUnassignedJobsTable".*?</table>',
+            hidden_html,
+            re.DOTALL,
+        ).group(0)
+        self.assertNotIn('data-col="cost"', hidden_table)
+        self.assertNotIn("$99.99", hidden_table)
+        self.assertNotIn('<span class="text-muted">—</span>', hidden_table)
+        self.assertEqual(
+            len(re.findall(r"<th(?:\s|>)", hidden_table)),
+            len(re.findall(r"<td(?:\s|>)", hidden_table)),
+        )
+
+        visible_html = self.render_projects(show_costs=True, include_unassigned=True)
+        visible_table = re.search(
+            r'<table[^>]+id="kcdUnassignedJobsTable".*?</table>',
+            visible_html,
+            re.DOTALL,
+        ).group(0)
+        self.assertIn('data-col="cost"', visible_table)
+        self.assertIn("$99.99", visible_table)
+
+    def test_invalid_project_override_is_returned_as_user_visible_error(self):
+        response = self.flask_app.test_client().post(
+            "/projects",
+            data={
+                "action": "create_project",
+                "name": "Invalid",
+                "hourly_rate_override": "nan",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("Hourly+rate+override+must+be+finite", response.location)
+
+        with mock.patch.object(projects, "load_projects", return_value={"p1": {}}):
+            response = self.flask_app.test_client().post(
+                "/projects",
+                data={
+                    "action": "create_manual_job",
+                    "project_id": "p1",
+                    "title": "Invalid",
+                    "hours": "not-a-number",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("Hours+must+be+a+number", response.location)
 
     def test_legacy_saved_cost_column_maps_to_total_without_enabling_new_components(self):
         settings = {
