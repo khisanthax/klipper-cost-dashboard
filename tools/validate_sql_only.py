@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 """
-Lightweight SQL-only validation helper.
+SQL-only startup and representative runtime filesystem validation.
 
-Runs a small set of endpoints under KCD_STORAGE_BACKEND=sql and checks that
-runtime file-backed state is not modified.
+Observation starts before app import. Known legacy business-state paths are
+blocked at Python's file-open layer, including direct accesses that bypass KCD's
+centralized guard helpers. Deliberate credential/cache/export/backup exceptions
+remain allowed by policy.
 """
 from __future__ import annotations
 
@@ -59,27 +61,33 @@ def _detect_changes(before: Dict[str, Tuple[bool, float]]) -> Dict[str, str]:
 
 def main() -> int:
     os.environ["KCD_STORAGE_BACKEND"] = "sql"
-    # Import app after setting env.
-    import app as kcd_app  # noqa: WPS433
-
-    client = kcd_app.app.test_client()
     before = _snapshot_files()
+    from core.sql_only import SqlOnlyFilesystemMonitor, SqlOnlyViolationError
 
-    endpoints = [
-        "/health",
-        "/",
-        "/reports",
-        "/projects",
-        "/settings/printers",
-        "/settings/other",
-        "/system-events",
-    ]
+    try:
+        with SqlOnlyFilesystemMonitor() as monitor:
+            # Import only after observation begins so startup is part of the contract.
+            import app as kcd_app  # noqa: WPS433
 
-    for ep in endpoints:
-        resp = client.get(ep)
-        if resp.status_code >= 400:
-            print(f"[sql-only] endpoint failed: {ep} status={resp.status_code}")
-            return 2
+            client = kcd_app.app.test_client()
+            endpoints = [
+                "/health",
+                "/",
+                "/reports",
+                "/projects",
+                "/settings/printers",
+                "/settings/other",
+                "/system-events",
+            ]
+
+            for ep in endpoints:
+                resp = client.get(ep)
+                if resp.status_code >= 400:
+                    print(f"[sql-only] endpoint failed: {ep} status={resp.status_code}")
+                    return 2
+    except SqlOnlyViolationError as exc:
+        print(f"[sql-only] forbidden filesystem access: {exc}")
+        return 4
 
     # allow any async disk flush
     time.sleep(0.1)
@@ -89,7 +97,11 @@ def main() -> int:
             print(f"[sql-only] file change detected: {path} ({reason})")
         return 3
 
-    print("[sql-only] validation OK: no runtime file writes detected.")
+    allowed = [access for access in monitor.accesses if access["classification"].startswith("allowed_")]
+    print(
+        "[sql-only] validation OK: startup/routes used no legacy runtime files "
+        f"({len(allowed)} allowed filesystem access(es) observed)."
+    )
     return 0
 
 

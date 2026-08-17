@@ -1750,6 +1750,20 @@ def recalculate_run():
         return compute_costs, None, plan
 
     def _append_recalc_audit_log(record):
+        if _is_sql_only():
+            system_events.emit_event(
+                "activity",
+                "Pricing recalculation completed",
+                f"Recalculated pricing for {int(record.get('count_updated') or 0)} job(s).",
+                meta={
+                    "action": "recalculate",
+                    "count_requested": int(record.get("count_requested") or 0),
+                    "count_updated": int(record.get("count_updated") or 0),
+                    "count_skipped_missing": int(record.get("count_skipped_missing") or 0),
+                    "job_uids_hash": str(record.get("job_uids_hash") or ""),
+                },
+            )
+            return
         try:
             os.makedirs(DATA_DIR, exist_ok=True)
             path = os.path.join(DATA_DIR, "recalc_runs.jsonl")

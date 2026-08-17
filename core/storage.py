@@ -2,8 +2,9 @@
 File I/O and data persistence for Print Cost Dashboard.
 
 SQL-only note:
-  File-backed writes are guarded and will raise SqlOnlyViolationError when
-  KCD_STORAGE_BACKEND=sql. Runtime SQL-only mode must not touch CSV/JSON files.
+  Canonical business-state file access is guarded when KCD_STORAGE_BACKEND=sql.
+  Deliberate filesystem exceptions include credentials, caches, explicit
+  exports/backups, and temporary files used by explicit operations.
 """
 import os
 import csv
@@ -417,7 +418,10 @@ def save_hidden_printers(display_file, headers, hidden_printers):
 
 def ensure_api_key(secret_file=None, data_dir=None):
     """
-    Load API key from secret.json if it exists.
+    Load the API key from KCD_API_KEY or secret.json.
+
+    Credential storage is an explicit SQL-only filesystem exception; API keys
+    are deployment secrets rather than canonical business/runtime state.
     Only generates a new key if the file doesn't exist (first-time setup).
     This prevents overwriting API keys set by the installer.
     Returns the API key or None if file doesn't exist and couldn't be created.
@@ -426,6 +430,10 @@ def ensure_api_key(secret_file=None, data_dir=None):
         from core.config import SECRET_FILE, DATA_DIR
         secret_file = SECRET_FILE
         data_dir = DATA_DIR
+
+    environment_key = str(os.getenv("KCD_API_KEY", "") or "").strip()
+    if environment_key:
+        return environment_key
     
     os.makedirs(data_dir, exist_ok=True)
     
