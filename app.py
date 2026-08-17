@@ -2769,6 +2769,13 @@ def _settings_view(tab: str):
 
         if action == "update_backup_settings":
             enabled = bool(request.form.get("auto_backup_enabled"))
+            if _is_sql_only() and enabled:
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        error="Automatic backups are unavailable in SQL-only mode; use Backup now.",
+                    )
+                )
             freq = (request.form.get("auto_backup_frequency") or "daily").strip().lower()
             keep_raw = (request.form.get("auto_backup_keep") or "7").strip()
             try:
