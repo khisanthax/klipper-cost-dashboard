@@ -125,7 +125,7 @@ This phase is complete for the current release contract.
   - SQL-only pricing now resolves from DB-backed settings and profile state instead of falling back to CSV or implicit default pricing during normal runtime.
   - required pricing and pause-accounting state fail loudly through runtime validation and startup readiness, while presentation and disabled-feature defaults remain intentionally SQL-safe.
 - what remains:
-  - future hardening can improve persistence error reporting, but no remaining default or fallback blocks DB-canonical SQL-only runtime configuration.
+  - no remaining default, fallback, or persistence-error ambiguity blocks DB-canonical SQL-only runtime configuration.
 - why it matters:
   - SQL-only cannot be considered canonical while runtime config still depends on legacy files or non-persisted defaults.
 
@@ -151,7 +151,7 @@ This phase is complete for the current release contract.
 
 - status: complete
 - what is already done:
-  - compile guards exist in CI.
+  - release CI runs the full unit suite, compile checks, SQL-only validation, a production Docker build, and in-container CLI/tool smoke tests without source path filters.
   - validation tooling exists.
   - diagnostic helpers exist.
   - the Phase 6 branch includes the required correctness and lifecycle hardening fixes.
@@ -162,6 +162,11 @@ This phase is complete for the current release contract.
   - Recalculate is explicitly pricing-only for this release; Full Recompute is deferred until its semantics are deliberately designed.
   - README, changelog, and high-impact module comments describe the implemented storage, readiness, and compatibility contracts.
   - final release validation covers the broad test suite, SQL-only validator, readiness CLI, compile checks, and diff hygiene.
+  - SQL-capable installer services use aligned `dual` writes and automatic SQL Reports reads, while CSV-only services keep a consistent CSV contract.
+  - every printer-client mutation endpoint uses shared fail-closed API-key authentication.
+  - manual backups use verified SQLite snapshots; strict SQL-only automatic scheduling is visibly unavailable rather than silently ignored.
+  - SQL mutation failures surface without false success/audit events, and load-bearing numeric state must be finite and calculation-valid.
+  - deliberate installer re-registration reactivates retired printers without changing their historical SQL identity.
 - future work:
   - Full Recompute remains deferred until its data and pricing semantics are designed.
   - Project component-cost reporting remains a deliberate future design item.
@@ -174,14 +179,14 @@ Phase 6 is complete for the current release contract. SQL-only is the strict/can
 
 ## Current Active Work
 
-Review the validated Phase 6 branch for main-merge and release preparation.
+Verify the bounded Phase 6.6D integration and release-CI fixes on PR #46.
 
-No merge, version selection, tag, or release publication is part of Phase 6 implementation itself.
+PR #46 must remain open until the new release workflow and blocker-specific checks pass.
 
 ## Next Planned Work
 
-1. Review and merge the validated Phase 6 branch through the normal repository workflow.
-2. Select the next official version and perform release preparation without changing the established runtime contract.
+1. Perform the short independent verification of the Phase 6.6D blocker fixes.
+2. Only after approval, resume the existing v0.4.0 merge/tag/release sequence.
 
 ## Deferred Feature Track
 

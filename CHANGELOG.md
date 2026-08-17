@@ -8,12 +8,16 @@
 - Added representative pre-import and runtime filesystem monitoring with explicit credential, cache, export, backup, and temporary-file exceptions.
 - Added `KCD_API_KEY` as an environment override for the `secret.json` credential fallback.
 - Added SQL-only printer rename, merge, retirement, and linked-state regression coverage.
+- Added explicit printer reactivation through deliberate installer re-registration while preserving historical identity.
 - Added filament usage, time cost, material cost, and total cost visibility to Recalculate jobs and previews.
+- Added release CI covering the full test suite, SQL-only validation, production Docker build, and in-container tooling smoke tests.
 
 ### Changed
 - Made SQL-backed configuration canonical in SQL-only mode, including pricing, pause policy, display settings, active profile mappings, projects, and system events.
 - Defined CSV and dual mode as supported compatibility runtime modes for this release line while keeping SQL-only strict/canonical.
 - Changed Docker healthchecks to use `/health` readiness rather than the dashboard route.
+- Changed SQL-capable installer services to use consistent `dual` writes with automatic SQL Reports reads.
+- Changed the Docker image to install pinned requirements and include the KCD CLI and operational tools.
 - Retired printers now remain available to historical jobs/events but are excluded from readiness, active discovery, and new incoming jobs.
 - Recalculate is explicitly pricing-only; Full Recompute is deferred until its semantics are designed.
 - SQL-only Recalculate audit activity is persisted through SQL system events instead of JSONL.
@@ -23,6 +27,10 @@
 - Kept Recalculate preview and execution consistent for pause-accounting inputs.
 - Isolated strict SQL-only lifecycle and representative routes from compatibility CSV/JSON and installer-state paths.
 - Corrected job-cancel test isolation so tests target the actual storage backend path.
+- Enforced fail-closed API-key authentication across every printer-client mutation endpoint.
+- Created SQLite-consistent backup snapshots that restore without live WAL/SHM files; SQL-only automatic scheduling is now visibly unavailable rather than silently ignored.
+- Surfaced SQL mutation failures without false success or audit events and preserved transactional rollback.
+- Rejected non-finite, negative, and calculation-invalid pricing, measurements, timestamps, and recalculation overrides while preserving valid zero-cost pricing.
 
 ## v0.3.0 - 2026-01-20
 

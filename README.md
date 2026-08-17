@@ -56,6 +56,16 @@ docker compose pull
 docker compose up -d
 ```
 
+The image includes the documented CLI and operational tools. Run them through
+the service container:
+
+```bash
+docker compose exec kcd python -m kcd --help
+docker compose exec kcd python -m kcd db readiness
+docker compose exec kcd python tools/validate_sql_only.py
+docker compose exec kcd python tools/kcd_backup.py --keep 7
+```
+
 Persistent state is stored under `./data`, mounted at `/app/data`. Back up that
 directory before upgrades. In CSV and dual mode this includes compatibility
 CSV/JSON state; SQL-capable installations also use `data/kcd.db`.
@@ -68,7 +78,10 @@ cd klipper-cost-dashboard
 python install.py
 ```
 
-The installer supports master setup and local or remote Klipper clients.
+The installer supports master setup and local or remote Klipper clients. A
+SQL-capable compatibility installation writes in `dual` mode and selects Reports
+with `auto`; CSV-only installation keeps both writes and Reports on CSV. The
+installer does not enable strict SQL-only automatically.
 
 ## Storage Modes
 
@@ -115,6 +128,9 @@ history CSV, installer-state, or JSONL event files as its source of truth.
 
 Perform migration commands while the installation is still in CSV or dual mode.
 Do not enable strict SQL-only until the readiness command succeeds.
+
+For Docker installations, run each command below with
+`docker compose exec kcd` before `python`, as shown in the Docker examples above.
 
 1. Back up the current data directory. KCD can create an archive with:
 
@@ -168,6 +184,10 @@ start the application temporarily to diagnose or repair incomplete state,
 diagnostic escape hatch, not the recommended steady-state configuration. Run
 `python -m kcd db readiness` again before restoring strict startup.
 
+Printer-client mutation routes require the configured `X-API-Key`. If KCD cannot
+establish a server API key, those routes fail closed rather than accepting
+unauthenticated requests.
+
 ## SQL Validation and Export
 
 Run representative startup and route-level filesystem isolation validation with:
@@ -203,9 +223,18 @@ python -m kcd cache clear
 ## Printer Retirement
 
 Deleting a printer retires it from active configuration. KCD no longer accepts
-new jobs for that identity unless it is deliberately reconfigured. Existing jobs
-and events remain available, and their historical printer references remain
-valid.
+new jobs for that identity. Existing jobs and events remain available, and their
+historical printer references remain valid. Deliberately reinstalling or
+re-registering that printer through the installer reactivates the same historical
+identity; pricing must then be configured before SQL-only readiness succeeds.
+
+## Backups
+
+`Backup now` and `python tools/kcd_backup.py` create a transactionally consistent
+SQLite snapshot and exclude live WAL/SHM files and nested backup archives.
+Automatic backup scheduling is unavailable in strict SQL-only mode and is
+disabled visibly in Settings. Backup archives include `secret.json` when present,
+so protect them as credentials-bearing files.
 
 ## Recalculate Center
 
@@ -274,3 +303,7 @@ and verify the configured Moonraker URL and response.
 KCD is actively developed. Runtime compatibility and upgrade safety matter, but
 APIs and internal formats may continue to evolve. Use GitHub issues for bug reports
 and focused feature proposals.
+
+Pull requests intended for release must pass the unfiltered **Release Validation**
+workflow, including the full unit suite, compile checks, SQL-only isolation,
+production Docker build, and in-container CLI/tool smoke tests, before merge.
