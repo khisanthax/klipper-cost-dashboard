@@ -28,6 +28,29 @@ def _cmd_db_verify(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_db_readiness(_args: argparse.Namespace) -> int:
+    from core.readiness import check_sql_only_readiness
+
+    readiness = check_sql_only_readiness()
+    ready = bool(readiness.get("ready"))
+    print(f"SQL-only readiness: {'READY' if ready else 'NOT READY'}")
+    print(f"Schema version: {readiness.get('schema_version') or 'unavailable'}")
+    print(f"Persisted printer rows: {int(readiness.get('printers_count') or 0)}")
+    print("Checks:")
+    for check in readiness.get("checks") or []:
+        status = "PASS" if check.get("ok") else "FAIL"
+        detail = str(check.get("message") or check.get("code") or "").strip()
+        suffix = f" - {detail}" if detail else ""
+        print(f"  [{status}] {check.get('name') or 'unknown'}{suffix}")
+    if not ready:
+        print("Required actions:")
+        for error in readiness.get("errors") or []:
+            code = str(error.get("code") or "readiness_error")
+            message = str(error.get("message") or "Resolve this readiness failure.")
+            print(f"  - {code}: {message}")
+    return 0 if ready else 2
+
+
 def _cmd_db_backfill(args: argparse.Namespace) -> int:
     report = db_backfill.run_backfill(source=args.source)
     if report.get("source") == "moonraker":
@@ -95,6 +118,12 @@ def main(argv: list[str] | None = None) -> int:
 
     db_verify_cmd = db_sub.add_parser("verify", help="Verify CSV/DB parity")
     db_verify_cmd.set_defaults(func=_cmd_db_verify)
+
+    db_readiness_cmd = db_sub.add_parser(
+        "readiness",
+        help="Check whether persisted state is ready for strict SQL-only startup",
+    )
+    db_readiness_cmd.set_defaults(func=_cmd_db_readiness)
 
     db_backfill_cmd = db_sub.add_parser("backfill", help="Backfill DB rows from CSV or Moonraker history")
     db_backfill_cmd.add_argument(
