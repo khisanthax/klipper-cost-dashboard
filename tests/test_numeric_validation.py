@@ -129,6 +129,22 @@ class RuntimeNumericValidationTests(unittest.TestCase):
             result = pricing.compute_costs("SV08", 3600, 1000)
         self.assertEqual(result["total_cost"], 0.0)
 
+    def test_pricing_requires_positive_density_only_when_filament_is_used(self):
+        from core import pricing
+        from core.numeric import NumericValidationError
+
+        filament_pricing = {"filament_mode": "per_meter", "filament_rate": 1.0, "grams_per_meter": 0.0}
+        with patch.object(pricing, "get_effective_rate_per_hour", return_value=1.0), patch.object(
+            pricing, "_get_effective_filament_pricing", return_value=filament_pricing
+        ), patch.object(pricing, "_include_paused_time_for_printer", return_value=True), patch.object(
+            pricing.profiles, "get_printer_mapping", return_value=None
+        ):
+            self.assertEqual(pricing.compute_costs("SV08", 3600, 0)["material_cost"], 0.0)
+            with self.assertRaises(NumericValidationError):
+                pricing.compute_costs("SV08", 3600, 1)
+            with self.assertRaises(NumericValidationError):
+                pricing.compute_costs_with_overrides("SV08", 3600, 1)
+
 
 class RouteNumericValidationTests(unittest.TestCase):
     @classmethod

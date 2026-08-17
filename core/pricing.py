@@ -295,8 +295,10 @@ def compute_costs(
     grams_per_meter = finite_float(
         filament_pricing["grams_per_meter"],
         label="grams_per_meter",
-        positive=True,
+        nonnegative=True,
     )
+    if filament_mm > 0 and grams_per_meter == 0:
+        raise NumericValidationError("grams_per_meter must be greater than zero when filament is used")
     
     # Get profile info for tracking
     profile_id = profiles.get_printer_mapping(printer_name)
@@ -443,7 +445,9 @@ def compute_costs_with_overrides(
                 profile_id = ""
 
     filament_rate = finite_float(filament_rate, label="filament_rate", nonnegative=True)
-    grams_per_meter = finite_float(grams_per_meter, label="grams_per_meter", positive=True)
+    grams_per_meter = finite_float(grams_per_meter, label="grams_per_meter", nonnegative=True)
+    if filament_mm > 0 and grams_per_meter == 0:
+        raise NumericValidationError("grams_per_meter must be greater than zero when filament is used")
 
     # Actual usage metrics (for reporting)
     duration_hours = duration_seconds / 3600.0
