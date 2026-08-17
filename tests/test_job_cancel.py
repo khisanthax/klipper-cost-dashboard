@@ -21,6 +21,7 @@ class JobCancelTests(unittest.TestCase):
         import app as app_module
 
         self.app_module = app_module
+        self.auth_headers = {"X-API-Key": app_module.API_KEY}
         self._orig_csv_file = app_module.CSV_FILE
         self._orig_data_dir = getattr(app_module, "DATA_DIR", None)
         app_module.CSV_FILE = self.csv_path
@@ -82,6 +83,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -113,10 +115,12 @@ class JobCancelTests(unittest.TestCase):
             resp1 = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
             resp2 = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp1.status_code, 200)
@@ -137,6 +141,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": ""},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -171,6 +176,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -183,6 +189,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "Cube_PETG_0.2_11m55s.gcode", "filename": "real.gcode"},
+                headers=self.auth_headers,
             )
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(self._read_rows(), [])

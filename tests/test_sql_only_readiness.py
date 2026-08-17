@@ -241,6 +241,7 @@ class SqlOnlyReadinessTests(unittest.TestCase):
         response = kcd_app.app.test_client().post(
             "/job-start",
             json={"printer_name": "Retired", "filename": "new.gcode"},
+            headers={"X-API-Key": kcd_app.API_KEY},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("Unknown printer_name", response.get_json().get("error", ""))

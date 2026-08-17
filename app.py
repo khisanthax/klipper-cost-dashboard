@@ -11,6 +11,8 @@ import math
 import hashlib
 import time
 import re
+import hmac
+from functools import wraps
 from contextlib import closing
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -311,14 +313,30 @@ def _kcd_auto_backup_hook():
 # API ENDPOINTS
 # ============================================================================
 
+
+def require_printer_api_key(view_func):
+    """Fail closed unless a printer-client request supplies the configured key."""
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        server_key = str(API_KEY or "").strip()
+        if not server_key:
+            app.logger.error("Printer-client API unavailable: server API key is not configured")
+            return jsonify(
+                {"status": "error", "error": "Printer-client API key is not configured"}
+            ), 503
+
+        supplied_key = str(request.headers.get("X-API-Key", "") or "")
+        if not supplied_key or not hmac.compare_digest(supplied_key, server_key):
+            return jsonify({"status": "error", "error": "Unauthorized"}), 403
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
 @app.post("/log-print")
+@require_printer_api_key
 def log_print():
     """API endpoint to log print data from 3D printers."""
-    # Simple API key check
-    auth = request.headers.get("X-API-Key", "")
-    if API_KEY and auth != API_KEY:
-        return jsonify({"status": "error", "error": "Unauthorized"}), 403
-
     payload = request.get_json(force=True, silent=True)
     if not payload:
         return jsonify({"status": "error", "error": "Invalid or missing JSON"}), 400
@@ -646,6 +664,7 @@ def health():
 # ============================================================================
 
 @app.post("/job-start")
+@require_printer_api_key
 def job_start():
     """Start tracking a new print job."""
     from core import live
@@ -710,6 +729,7 @@ def job_start():
 
 
 @app.post("/job-update")
+@require_printer_api_key
 def job_update():
     """Update an active print job."""
     from core import live
@@ -765,6 +785,7 @@ def job_update():
 
 
 @app.post("/job-pause")
+@require_printer_api_key
 def job_pause():
     """Pause an active print job."""
     from core import live
@@ -816,6 +837,7 @@ def job_pause():
 
 
 @app.post("/job-resume")
+@require_printer_api_key
 def job_resume():
     """Resume a paused print job."""
     from core import live
@@ -860,6 +882,7 @@ def job_resume():
 
 
 @app.post("/job-cancel")
+@require_printer_api_key
 def job_cancel():
     """Cancel an active print job."""
     from core import live
@@ -994,6 +1017,7 @@ def job_cancel():
 
 
 @app.post("/job-end")
+@require_printer_api_key
 def job_end():
     """Mark a print job as completed."""
     from core import live
