@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class SystemEventsTests(unittest.TestCase):
@@ -73,6 +74,23 @@ class SystemEventsTests(unittest.TestCase):
             else:
                 _os.environ["KCD_STORAGE_BACKEND"] = orig_env
             tmpdir.cleanup()
+
+    def test_emit_sql_only_raises_when_sql_persistence_unavailable(self):
+        import os as _os
+        from core import system_events as se
+
+        orig_env = _os.environ.get("KCD_STORAGE_BACKEND")
+        _os.environ["KCD_STORAGE_BACKEND"] = "sql"
+
+        try:
+            with patch.object(se.db_module, "connect_db", side_effect=RuntimeError("db unavailable")):
+                with self.assertRaises(RuntimeError):
+                    se.emit_event("warning", "SQL_FAIL", "db unavailable")
+        finally:
+            if orig_env is None:
+                _os.environ.pop("KCD_STORAGE_BACKEND", None)
+            else:
+                _os.environ["KCD_STORAGE_BACKEND"] = orig_env
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+from contextlib import closing
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -98,18 +99,6 @@ def main() -> int:
     parser.add_argument("--diagnostic", action="store_true", help="Print missing metadata diagnostics.")
     args = parser.parse_args()
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-
-    rows = conn.execute(
-        """
-        SELECT j.job_uid, p.name AS printer, p.moonraker_url, j.filename, j.thumbnail
-          FROM jobs j
-          JOIN printers p ON j.printer_id = p.id
-         WHERE j.thumbnail IS NULL OR TRIM(j.thumbnail) = ''
-        """
-    ).fetchall()
-
     scanned = 0
     fetched = 0
     saved = 0
@@ -122,119 +111,130 @@ def main() -> int:
 
     now = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
-    for row in rows:
-        scanned += 1
-        job_uid = str(row["job_uid"] or "").strip()
-        printer = str(row["printer"] or "").strip()
-        base_url = str(row["moonraker_url"] or "").strip()
-        filename = str(row["filename"] or "").strip()
-        if not job_uid or not printer or not filename:
-            missing_metadata += 1
-            continue
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-        try:
-            token = thumbs.compute_thumbnail_token(printer, filename, base_url=base_url)
-            small_path = _thumb_path(printer, token, "small")
-            card_path = _thumb_path(printer, token, "card")
+        rows = conn.execute(
+            """
+            SELECT j.job_uid, p.name AS printer, p.moonraker_url, j.filename, j.thumbnail
+              FROM jobs j
+              JOIN printers p ON j.printer_id = p.id
+             WHERE j.thumbnail IS NULL OR TRIM(j.thumbnail) = ''
+            """
+        ).fetchall()
 
-            found = os.path.exists(small_path) or os.path.exists(card_path)
+        for row in rows:
+            scanned += 1
+            job_uid = str(row["job_uid"] or "").strip()
+            printer = str(row["printer"] or "").strip()
+            base_url = str(row["moonraker_url"] or "").strip()
+            filename = str(row["filename"] or "").strip()
+            if not job_uid or not printer or not filename:
+                missing_metadata += 1
+                continue
 
-            if not found:
-                legacy_small = thumbs.compute_legacy_thumbnail_token(printer, filename, "small", base_url=base_url)
-                legacy_card = thumbs.compute_legacy_thumbnail_token(printer, filename, "card", base_url=base_url)
-                legacy_small_path = _thumb_path(printer, legacy_small, "small")
-                legacy_card_path = _thumb_path(printer, legacy_card, "card")
+            try:
+                token = thumbs.compute_thumbnail_token(printer, filename, base_url=base_url)
+                small_path = _thumb_path(printer, token, "small")
+                card_path = _thumb_path(printer, token, "card")
+                found = os.path.exists(small_path) or os.path.exists(card_path)
 
-                if os.path.exists(legacy_small_path):
-                    try:
-                        os.makedirs(os.path.dirname(small_path), exist_ok=True)
-                        if not os.path.exists(small_path):
-                            shutil.copy2(legacy_small_path, small_path)
-                        found = True
-                    except Exception:
-                        pass
-                if os.path.exists(legacy_card_path):
-                    try:
-                        os.makedirs(os.path.dirname(card_path), exist_ok=True)
-                        if not os.path.exists(card_path):
-                            shutil.copy2(legacy_card_path, card_path)
-                        found = True
-                    except Exception:
-                        pass
+                if not found:
+                    legacy_small = thumbs.compute_legacy_thumbnail_token(printer, filename, "small", base_url=base_url)
+                    legacy_card = thumbs.compute_legacy_thumbnail_token(printer, filename, "card", base_url=base_url)
+                    legacy_small_path = _thumb_path(printer, legacy_small, "small")
+                    legacy_card_path = _thumb_path(printer, legacy_card, "card")
 
-            if not found:
-                if not base_url:
-                    missing_metadata += 1
-                    if args.diagnostic:
-                        print(f"[diag] missing base_url printer={printer} filename={filename}")
-                    continue
-
-                meta = thumbs._metadata_thumbnails(printer, filename, size_hint="small", base_url=base_url)
-                meta_filename = filename
-                if not meta:
-                    fallback_searches += 1
-                    alt_path = _find_moonraker_path(base_url, filename)
-                    if alt_path:
-                        fallback_hits += 1
-                        meta_filename = alt_path
-                        meta = thumbs._metadata_thumbnails(printer, alt_path, size_hint="small", base_url=base_url)
-                        if args.diagnostic:
-                            print(
-                                f"[diag] fallback path printer={printer} filename={filename} alt={alt_path} meta={len(meta)}"
-                            )
-
-                if not meta:
-                    missing_metadata += 1
-                    if args.diagnostic:
-                        print(
-                            f"[diag] missing metadata printer={printer} filename={filename} base={base_url}"
-                        )
-                    continue
-
-                fetched += 1
-                small_cached = thumbs.get_cached_thumbnail_path(
-                    printer,
-                    meta_filename,
-                    "small",
-                    base_url=base_url,
-                )
-                card_cached = thumbs.get_cached_thumbnail_path(
-                    printer,
-                    meta_filename,
-                    "card",
-                    base_url=base_url,
-                )
-                if small_cached or card_cached:
-                    if meta_filename != filename:
+                    if os.path.exists(legacy_small_path):
                         try:
-                            if small_cached and not os.path.exists(small_path):
-                                os.makedirs(os.path.dirname(small_path), exist_ok=True)
-                                shutil.copy2(small_cached, small_path)
-                            if card_cached and not os.path.exists(card_path):
-                                os.makedirs(os.path.dirname(card_path), exist_ok=True)
-                                shutil.copy2(card_cached, card_path)
+                            os.makedirs(os.path.dirname(small_path), exist_ok=True)
+                            if not os.path.exists(small_path):
+                                shutil.copy2(legacy_small_path, small_path)
+                            found = True
                         except Exception:
                             pass
-                    found = True
-                    saved += 1
-                else:
-                    download_fail += 1
-                    if args.diagnostic:
-                        print(
-                            f"[diag] download failed printer={printer} filename={meta_filename} base={base_url}"
-                        )
-                    continue
+                    if os.path.exists(legacy_card_path):
+                        try:
+                            os.makedirs(os.path.dirname(card_path), exist_ok=True)
+                            if not os.path.exists(card_path):
+                                shutil.copy2(legacy_card_path, card_path)
+                            found = True
+                        except Exception:
+                            pass
 
-            if found:
-                conn.execute(
-                    "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
-                    (token, now, job_uid),
-                )
-                updated += 1
-        except Exception:
-            errors += 1
+                if not found:
+                    if not base_url:
+                        missing_metadata += 1
+                        if args.diagnostic:
+                            print(f"[diag] missing base_url printer={printer} filename={filename}")
+                        continue
 
-    conn.commit()
+                    meta = thumbs._metadata_thumbnails(printer, filename, size_hint="small", base_url=base_url)
+                    meta_filename = filename
+                    if not meta:
+                        fallback_searches += 1
+                        alt_path = _find_moonraker_path(base_url, filename)
+                        if alt_path:
+                            fallback_hits += 1
+                            meta_filename = alt_path
+                            meta = thumbs._metadata_thumbnails(printer, alt_path, size_hint="small", base_url=base_url)
+                            if args.diagnostic:
+                                print(
+                                    f"[diag] fallback path printer={printer} filename={filename} alt={alt_path} meta={len(meta)}"
+                                )
+
+                    if not meta:
+                        missing_metadata += 1
+                        if args.diagnostic:
+                            print(
+                                f"[diag] missing metadata printer={printer} filename={filename} base={base_url}"
+                            )
+                        continue
+
+                    fetched += 1
+                    small_cached = thumbs.get_cached_thumbnail_path(
+                        printer,
+                        meta_filename,
+                        "small",
+                        base_url=base_url,
+                    )
+                    card_cached = thumbs.get_cached_thumbnail_path(
+                        printer,
+                        meta_filename,
+                        "card",
+                        base_url=base_url,
+                    )
+                    if small_cached or card_cached:
+                        if meta_filename != filename:
+                            try:
+                                if small_cached and not os.path.exists(small_path):
+                                    os.makedirs(os.path.dirname(small_path), exist_ok=True)
+                                    shutil.copy2(small_cached, small_path)
+                                if card_cached and not os.path.exists(card_path):
+                                    os.makedirs(os.path.dirname(card_path), exist_ok=True)
+                                    shutil.copy2(card_cached, card_path)
+                            except Exception:
+                                pass
+                        found = True
+                        saved += 1
+                    else:
+                        download_fail += 1
+                        if args.diagnostic:
+                            print(
+                                f"[diag] download failed printer={printer} filename={meta_filename} base={base_url}"
+                            )
+                        continue
+
+                if found:
+                    conn.execute(
+                        "UPDATE jobs SET thumbnail = ?, updated_at = ? WHERE job_uid = ?",
+                        (token, now, job_uid),
+                    )
+                    updated += 1
+            except Exception:
+                errors += 1
+
+        conn.commit()
 
     print(
         "Backfill complete: "

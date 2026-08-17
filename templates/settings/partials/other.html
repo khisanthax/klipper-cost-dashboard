@@ -101,7 +101,8 @@
     </div>
     <div class="card-body">
         <div class="text-muted small mb-3">
-            Backups are stored under <code>data/backups/</code> and include the full <code>data/</code> directory (CSV + projects + profiles).
+            Backups are stored under <code>data/backups/</code>, include the data directory and API credential fallback, and should be protected accordingly.
+            {% if sql_only %}Automatic scheduling is unavailable in strict SQL-only mode; use <strong>Backup now</strong>.{% endif %}
         </div>
 
         <div class="d-flex flex-wrap gap-2 mb-4">
@@ -117,13 +118,14 @@
             <div class="col-md-3">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="auto_backup_enabled" id="auto_backup_enabled"
-                        {% if backup_settings and backup_settings.auto_backup_enabled %}checked{% endif %}>
+                        {% if backup_settings and backup_settings.auto_backup_enabled and not sql_only %}checked{% endif %}
+                        {% if sql_only %}disabled{% endif %}>
                     <label class="form-check-label" for="auto_backup_enabled">Enable automatic backups</label>
                 </div>
             </div>
             <div class="col-md-3">
                 <label class="form-label">Frequency</label>
-                <select class="form-select" name="auto_backup_frequency">
+                <select class="form-select" name="auto_backup_frequency" {% if sql_only %}disabled{% endif %}>
                     <option value="daily" {% if backup_settings and backup_settings.auto_backup_frequency == 'daily' %}selected{% endif %}>Daily</option>
                     <option value="weekly" {% if backup_settings and backup_settings.auto_backup_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
                 </select>
@@ -131,11 +133,11 @@
             <div class="col-md-3">
                 <label class="form-label">Keep</label>
                 <input type="number" class="form-control" name="auto_backup_keep" min="1" max="100"
-                    value="{{ backup_settings.auto_backup_keep if backup_settings else 7 }}">
+                    value="{{ backup_settings.auto_backup_keep if backup_settings else 7 }}" {% if sql_only %}disabled{% endif %}>
                 <div class="text-muted small">Max 100</div>
             </div>
             <div class="col-md-3 d-grid">
-                <button type="submit" class="btn btn-primary">Save Backup Settings</button>
+                <button type="submit" class="btn btn-primary" {% if sql_only %}disabled{% endif %}>Save Backup Settings</button>
             </div>
         </form>
     </div>

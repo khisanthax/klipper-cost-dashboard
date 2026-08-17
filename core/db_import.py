@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import os
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -170,271 +171,268 @@ def run_import(skip_existing: bool = True, overwrite: bool = False) -> Dict[str,
         "parity": {},
     }
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-    report["schema_version"] = db_module.current_schema_version(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        report["schema_version"] = db_module.current_schema_version(conn)
 
-    counts = {
-        "printers_inserted": 0,
-        "printers_updated": 0,
-        "filament_profiles_inserted": 0,
-        "filament_profiles_updated": 0,
-        "hourly_rate_profiles_inserted": 0,
-        "hourly_rate_profiles_updated": 0,
-        "projects_inserted": 0,
-        "projects_updated": 0,
-        "jobs_inserted": 0,
-        "jobs_updated": 0,
-        "jobs_skipped": 0,
-        "assignments_inserted": 0,
-        "assignments_skipped": 0,
-        "settings_inserted": 0,
-        "settings_updated": 0,
-    }
+        counts = {
+            "printers_inserted": 0,
+            "printers_updated": 0,
+            "filament_profiles_inserted": 0,
+            "filament_profiles_updated": 0,
+            "hourly_rate_profiles_inserted": 0,
+            "hourly_rate_profiles_updated": 0,
+            "projects_inserted": 0,
+            "projects_updated": 0,
+            "jobs_inserted": 0,
+            "jobs_updated": 0,
+            "jobs_skipped": 0,
+            "assignments_inserted": 0,
+            "assignments_skipped": 0,
+            "settings_inserted": 0,
+            "settings_updated": 0,
+        }
 
-    settings = load_settings(SETTINGS_FILE)
-    printer_names = set(settings.keys()) if isinstance(settings, dict) else set()
+        settings = load_settings(SETTINGS_FILE)
+        printer_names = set(settings.keys()) if isinstance(settings, dict) else set()
 
-    rows = _load_csv_rows()
-    for row in rows:
-        pname = str(row.get("printer") or "").strip()
-        if pname:
-            printer_names.add(pname)
+        rows = _load_csv_rows()
+        for row in rows:
+            pname = str(row.get("printer") or "").strip()
+            if pname:
+                printer_names.add(pname)
 
-    for pname in sorted(printer_names):
-        moonraker_url = None
-        if isinstance(settings, dict):
-            moonraker_url = (settings.get(pname) or {}).get("moonraker_url")
-        try:
-            existed = db_module.get_printer_id(conn, pname)
-            db_module.upsert_printer(conn, pname, moonraker_url)
-            if existed:
-                counts["printers_updated"] += 1
-            else:
-                counts["printers_inserted"] += 1
-        except Exception:
-            continue
+        for pname in sorted(printer_names):
+            moonraker_url = None
+            if isinstance(settings, dict):
+                moonraker_url = (settings.get(pname) or {}).get("moonraker_url")
+            try:
+                existed = db_module.get_printer_id(conn, pname)
+                db_module.upsert_printer(conn, pname, moonraker_url)
+                if existed:
+                    counts["printers_updated"] += 1
+                else:
+                    counts["printers_inserted"] += 1
+            except Exception:
+                continue
 
-    profiles_data = load_profiles_data(PROFILES_FILE)
-    for profile_id, profile in (profiles_data.get("profiles") or {}).items():
-        name = str(profile.get("name") or "").strip()
-        if not name:
-            continue
-        material = profile.get("material")
-        filament_mode = profile.get("filament_mode")
-        filament_rate = _safe_float(profile.get("filament_rate"))
-        grams_per_meter = _safe_float(profile.get("grams_per_meter"))
-        cost_per_kg = None
-        if filament_mode == "per_kg" and filament_rate is not None:
-            cost_per_kg = filament_rate
-        elif filament_mode == "per_gram" and filament_rate is not None:
-            cost_per_kg = filament_rate * 1000.0
-        elif filament_mode == "per_meter" and filament_rate is not None and grams_per_meter:
-            cost_per_kg = filament_rate * 1000.0 / grams_per_meter
-        row = conn.execute("SELECT id FROM filament_profiles WHERE profile_uid = ? OR name = ?", (profile_id, name)).fetchone()
-        if row:
-            conn.execute(
-                """
-                UPDATE filament_profiles
-                   SET profile_uid = ?,
-                       name = ?,
-                       material = ?,
-                       filament_mode = ?,
-                       filament_rate = ?,
-                       cost_per_kg = ?,
-                       grams_per_meter = ?,
-                       updated_at = ?
-                 WHERE id = ?
-                """,
-                (
-                    profile_id,
-                    name,
-                    material,
-                    filament_mode,
-                    filament_rate,
-                    cost_per_kg,
-                    grams_per_meter,
-                    _utc_now_iso(),
-                    int(row["id"]),
-                ),
-            )
-            counts["filament_profiles_updated"] += 1
-        else:
-            conn.execute(
-                """
-                INSERT INTO filament_profiles (
-                    profile_uid, name, material, filament_mode, filament_rate,
-                    cost_per_kg, grams_per_meter, created_at, updated_at
+        profiles_data = load_profiles_data(PROFILES_FILE)
+        for profile_id, profile in (profiles_data.get("profiles") or {}).items():
+            name = str(profile.get("name") or "").strip()
+            if not name:
+                continue
+            material = profile.get("material")
+            filament_mode = profile.get("filament_mode")
+            filament_rate = _safe_float(profile.get("filament_rate"))
+            grams_per_meter = _safe_float(profile.get("grams_per_meter"))
+            cost_per_kg = None
+            if filament_mode == "per_kg" and filament_rate is not None:
+                cost_per_kg = filament_rate
+            elif filament_mode == "per_gram" and filament_rate is not None:
+                cost_per_kg = filament_rate * 1000.0
+            elif filament_mode == "per_meter" and filament_rate is not None and grams_per_meter:
+                cost_per_kg = filament_rate * 1000.0 / grams_per_meter
+            row = conn.execute("SELECT id FROM filament_profiles WHERE profile_uid = ? OR name = ?", (profile_id, name)).fetchone()
+            if row:
+                conn.execute(
+                    """
+                    UPDATE filament_profiles
+                       SET profile_uid = ?,
+                           name = ?,
+                           material = ?,
+                           filament_mode = ?,
+                           filament_rate = ?,
+                           cost_per_kg = ?,
+                           grams_per_meter = ?,
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        profile_id,
+                        name,
+                        material,
+                        filament_mode,
+                        filament_rate,
+                        cost_per_kg,
+                        grams_per_meter,
+                        _utc_now_iso(),
+                        int(row["id"]),
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    profile_id,
-                    name,
-                    material,
-                    filament_mode,
-                    filament_rate,
-                    cost_per_kg,
-                    grams_per_meter,
-                    _utc_now_iso(),
-                    _utc_now_iso(),
-                ),
-            )
-            counts["filament_profiles_inserted"] += 1
-
-    rate_data = load_json_file(RATE_PROFILES_FILE) or {}
-    for profile_id, profile in (rate_data.get("profiles") or {}).items():
-        name = str(profile.get("name") or "").strip()
-        if not name:
-            continue
-        description = str(profile.get("description") or "").strip() or None
-        rate_per_hour = _safe_float(profile.get("rate_per_hour")) or 0.0
-        row = conn.execute("SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR name = ?", (profile_id, name)).fetchone()
-        if row:
-            conn.execute(
-                """
-                UPDATE hourly_rate_profiles
-                   SET profile_uid = ?,
-                       name = ?,
-                       description = ?,
-                       rate_per_hour = ?,
-                       updated_at = ?
-                 WHERE id = ?
-                """,
-                (
-                    profile_id,
-                    name,
-                    description,
-                    rate_per_hour,
-                    _utc_now_iso(),
-                    int(row["id"]),
-                ),
-            )
-            counts["hourly_rate_profiles_updated"] += 1
-        else:
-            conn.execute(
-                """
-                INSERT INTO hourly_rate_profiles (
-                    profile_uid, name, description, rate_per_hour, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (profile_id, name, description, rate_per_hour, _utc_now_iso(), _utc_now_iso()),
-            )
-            counts["hourly_rate_profiles_inserted"] += 1
-
-    projects_raw = load_json_file(PROJECTS_FILE) or []
-    if isinstance(projects_raw, list):
-        for proj in projects_raw:
-            inserted, updated = _upsert_project(conn, proj if isinstance(proj, dict) else {})
-            counts["projects_inserted"] += inserted
-            counts["projects_updated"] += updated
-
-    legacy_to_new: Dict[str, List[str]] = {}
-    seen = {}
-    for row in rows:
-        job_uid = str(row.get("job_uid") or "").strip()
-        if not job_uid:
-            job_uid = _deterministic_job_uid(row)
-        base_uid = job_uid
-        suffix = 1
-        while job_uid in seen:
-            suffix += 1
-            job_uid = f"{base_uid}-{suffix}"
-        if job_uid != base_uid:
-            report["warnings"]["duplicate_job_uids"].append(base_uid)
-        seen[job_uid] = True
-        row["job_uid"] = job_uid
-        try:
-            legacy_key = compute_job_uid(row)
-            legacy_to_new.setdefault(legacy_key, []).append(job_uid)
-        except Exception:
-            pass
-
-        exists = db_module.job_exists(conn, job_uid)
-        if exists and skip_existing and not overwrite:
-            counts["jobs_skipped"] += 1
-            continue
-
-        # Ensure import markers are populated
-        if not str(row.get("import_source") or "").strip():
-            row["import_source"] = "csv"
-        if not str(row.get("job_outcome") or "").strip():
-            row["job_outcome"] = str(row.get("status") or "unknown").strip().lower() or "unknown"
-
-        try:
-            db_module.upsert_job(conn, row)
-            if exists:
-                counts["jobs_updated"] += 1
+                counts["filament_profiles_updated"] += 1
             else:
-                counts["jobs_inserted"] += 1
-        except Exception as e:
-            report["warnings"]["skipped_rows"].append({"job_uid": job_uid, "reason": str(e)})
+                conn.execute(
+                    """
+                    INSERT INTO filament_profiles (
+                        profile_uid, name, material, filament_mode, filament_rate,
+                        cost_per_kg, grams_per_meter, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile_id,
+                        name,
+                        material,
+                        filament_mode,
+                        filament_rate,
+                        cost_per_kg,
+                        grams_per_meter,
+                        _utc_now_iso(),
+                        _utc_now_iso(),
+                    ),
+                )
+                counts["filament_profiles_inserted"] += 1
 
-    assignments_raw = load_json_file(ASSIGNMENTS_FILE) or {}
-    project_id_map: Dict[str, int] = {}
-    for row in conn.execute("SELECT id, project_uid FROM projects"):
-        project_id_map[str(row["project_uid"] or "")] = int(row["id"])
+        rate_data = load_json_file(RATE_PROFILES_FILE) or {}
+        for profile_id, profile in (rate_data.get("profiles") or {}).items():
+            name = str(profile.get("name") or "").strip()
+            if not name:
+                continue
+            description = str(profile.get("description") or "").strip() or None
+            rate_per_hour = _safe_float(profile.get("rate_per_hour")) or 0.0
+            row = conn.execute("SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR name = ?", (profile_id, name)).fetchone()
+            if row:
+                conn.execute(
+                    """
+                    UPDATE hourly_rate_profiles
+                       SET profile_uid = ?,
+                           name = ?,
+                           description = ?,
+                           rate_per_hour = ?,
+                           updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        profile_id,
+                        name,
+                        description,
+                        rate_per_hour,
+                        _utc_now_iso(),
+                        int(row["id"]),
+                    ),
+                )
+                counts["hourly_rate_profiles_updated"] += 1
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO hourly_rate_profiles (
+                        profile_uid, name, description, rate_per_hour, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (profile_id, name, description, rate_per_hour, _utc_now_iso(), _utc_now_iso()),
+                )
+                counts["hourly_rate_profiles_inserted"] += 1
 
-    assignments_inserted = 0
-    assignments_skipped = 0
-    for job_uid, project_uid in (assignments_raw or {}).items():
-        job_uid = str(job_uid or "").strip()
-        project_uid = str(project_uid or "").strip()
-        if not job_uid or not project_uid:
-            continue
-        # Map legacy assignment keys to newly imported job_uid when possible.
-        if job_uid not in seen:
-            mapped = legacy_to_new.get(job_uid) if legacy_to_new else None
-            if mapped and len(mapped) == 1:
-                job_uid = mapped[0]
-        project_id = project_id_map.get(project_uid)
-        if not project_id:
-            report["warnings"]["orphan_assignments"].append({"job_uid": job_uid, "project_id": project_uid})
-            assignments_skipped += 1
-            continue
-        if not db_module.job_exists(conn, job_uid):
-            assignments_skipped += 1
-            report["warnings"]["orphan_assignments"].append({"job_uid": job_uid, "project_id": project_uid})
-            continue
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO project_assignments (project_id, job_uid, created_at)
-            VALUES (?, ?, ?)
-            """,
-            (project_id, job_uid, _utc_now_iso()),
-        )
-        assignments_inserted += 1
-    counts["assignments_inserted"] = assignments_inserted
-    counts["assignments_skipped"] = assignments_skipped
+        projects_raw = load_json_file(PROJECTS_FILE) or []
+        if isinstance(projects_raw, list):
+            for proj in projects_raw:
+                inserted, updated = _upsert_project(conn, proj if isinstance(proj, dict) else {})
+                counts["projects_inserted"] += inserted
+                counts["projects_updated"] += updated
 
-    settings_inserted, settings_updated = _upsert_user_setting(conn, "printer_settings", settings)
-    counts["settings_inserted"] += settings_inserted
-    counts["settings_updated"] += settings_updated
+        legacy_to_new: Dict[str, List[str]] = {}
+        seen = {}
+        for row in rows:
+            job_uid = str(row.get("job_uid") or "").strip()
+            if not job_uid:
+                job_uid = _deterministic_job_uid(row)
+            base_uid = job_uid
+            suffix = 1
+            while job_uid in seen:
+                suffix += 1
+                job_uid = f"{base_uid}-{suffix}"
+            if job_uid != base_uid:
+                report["warnings"]["duplicate_job_uids"].append(base_uid)
+            seen[job_uid] = True
+            row["job_uid"] = job_uid
+            try:
+                legacy_key = compute_job_uid(row)
+                legacy_to_new.setdefault(legacy_key, []).append(job_uid)
+            except Exception:
+                pass
 
-    display_raw = load_json_file(DISPLAY_FILE) or {}
-    ins, upd = _upsert_user_setting(conn, "display_settings", display_raw)
-    counts["settings_inserted"] += ins
-    counts["settings_updated"] += upd
+            exists = db_module.job_exists(conn, job_uid)
+            if exists and skip_existing and not overwrite:
+                counts["jobs_skipped"] += 1
+                continue
 
-    conn.commit()
-    report["counts"] = counts
+            if not str(row.get("import_source") or "").strip():
+                row["import_source"] = "csv"
+            if not str(row.get("job_outcome") or "").strip():
+                row["job_outcome"] = str(row.get("status") or "unknown").strip().lower() or "unknown"
 
-    # Parity snapshot
-    report["parity"]["csv_job_count"] = len(rows)
-    report["parity"]["db_job_count"] = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
-    try:
-        report["parity"]["sum_total_cost_csv"] = sum(
-            float(r.get("total_cost") or 0.0) for r in rows if str(r.get("total_cost") or "").strip()
-        )
-    except Exception:
-        report["parity"]["sum_total_cost_csv"] = None
-    try:
-        report["parity"]["sum_total_cost_db"] = float(
-            conn.execute("SELECT COALESCE(SUM(total_cost), 0) FROM jobs").fetchone()[0]
-        )
-    except Exception:
-        report["parity"]["sum_total_cost_db"] = None
+            try:
+                db_module.upsert_job(conn, row)
+                if exists:
+                    counts["jobs_updated"] += 1
+                else:
+                    counts["jobs_inserted"] += 1
+            except Exception as e:
+                report["warnings"]["skipped_rows"].append({"job_uid": job_uid, "reason": str(e)})
+
+        assignments_raw = load_json_file(ASSIGNMENTS_FILE) or {}
+        project_id_map: Dict[str, int] = {}
+        for row in conn.execute("SELECT id, project_uid FROM projects"):
+            project_id_map[str(row["project_uid"] or "")] = int(row["id"])
+
+        assignments_inserted = 0
+        assignments_skipped = 0
+        for job_uid, project_uid in (assignments_raw or {}).items():
+            job_uid = str(job_uid or "").strip()
+            project_uid = str(project_uid or "").strip()
+            if not job_uid or not project_uid:
+                continue
+            if job_uid not in seen:
+                mapped = legacy_to_new.get(job_uid) if legacy_to_new else None
+                if mapped and len(mapped) == 1:
+                    job_uid = mapped[0]
+            project_id = project_id_map.get(project_uid)
+            if not project_id:
+                report["warnings"]["orphan_assignments"].append({"job_uid": job_uid, "project_id": project_uid})
+                assignments_skipped += 1
+                continue
+            if not db_module.job_exists(conn, job_uid):
+                assignments_skipped += 1
+                report["warnings"]["orphan_assignments"].append({"job_uid": job_uid, "project_id": project_uid})
+                continue
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO project_assignments (project_id, job_uid, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (project_id, job_uid, _utc_now_iso()),
+            )
+            assignments_inserted += 1
+
+        counts["assignments_inserted"] = assignments_inserted
+        counts["assignments_skipped"] = assignments_skipped
+
+        settings_inserted, settings_updated = _upsert_user_setting(conn, "printer_settings", settings)
+        counts["settings_inserted"] += settings_inserted
+        counts["settings_updated"] += settings_updated
+
+        display_raw = load_json_file(DISPLAY_FILE) or {}
+        ins, upd = _upsert_user_setting(conn, "display_settings", display_raw)
+        counts["settings_inserted"] += ins
+        counts["settings_updated"] += upd
+
+        conn.commit()
+        report["counts"] = counts
+        report["parity"]["csv_job_count"] = len(rows)
+        report["parity"]["db_job_count"] = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+        try:
+            report["parity"]["sum_total_cost_csv"] = sum(
+                float(r.get("total_cost") or 0.0) for r in rows if str(r.get("total_cost") or "").strip()
+            )
+        except Exception:
+            report["parity"]["sum_total_cost_csv"] = None
+        try:
+            report["parity"]["sum_total_cost_db"] = float(
+                conn.execute("SELECT COALESCE(SUM(total_cost), 0) FROM jobs").fetchone()[0]
+            )
+        except Exception:
+            report["parity"]["sum_total_cost_db"] = None
 
     report["finished_at"] = _utc_now_iso()
     os.makedirs(DATA_DIR, exist_ok=True)

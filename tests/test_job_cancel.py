@@ -9,6 +9,8 @@ class JobCancelTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.csv_path = os.path.join(self._tmp.name, "print_costs.csv")
+        self._orig_storage_backend = os.environ.get("KCD_STORAGE_BACKEND")
+        os.environ["KCD_STORAGE_BACKEND"] = "csv"
 
         from core.config import HEADERS
 
@@ -19,11 +21,18 @@ class JobCancelTests(unittest.TestCase):
         import app as app_module
 
         self.app_module = app_module
+        self.auth_headers = {"X-API-Key": app_module.API_KEY}
         self._orig_csv_file = app_module.CSV_FILE
         self._orig_data_dir = getattr(app_module, "DATA_DIR", None)
         app_module.CSV_FILE = self.csv_path
         if self._orig_data_dir is not None:
             app_module.DATA_DIR = self._tmp.name
+
+        from core import storage_backend
+
+        self.storage_backend = storage_backend
+        self._orig_backend_csv_file = storage_backend.CSV_FILE
+        storage_backend.CSV_FILE = self.csv_path
 
         # Isolate core.live persistence (live_jobs.json) to the temp dir.
         from core import live as live_module
@@ -43,6 +52,11 @@ class JobCancelTests(unittest.TestCase):
         self.app_module.CSV_FILE = self._orig_csv_file
         if self._orig_data_dir is not None:
             self.app_module.DATA_DIR = self._orig_data_dir
+        self.storage_backend.CSV_FILE = self._orig_backend_csv_file
+        if self._orig_storage_backend is None:
+            os.environ.pop("KCD_STORAGE_BACKEND", None)
+        else:
+            os.environ["KCD_STORAGE_BACKEND"] = self._orig_storage_backend
 
         # Restore core.live globals
         self.live_module.DATA_DIR = self._orig_live_data_dir
@@ -69,6 +83,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -100,10 +115,12 @@ class JobCancelTests(unittest.TestCase):
             resp1 = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
             resp2 = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp1.status_code, 200)
@@ -124,6 +141,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": ""},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -158,6 +176,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "SV08", "filename": "Cube_PETG_0.2_11m55s.gcode"},
+                headers=self.auth_headers,
             )
 
         self.assertEqual(resp.status_code, 200)
@@ -170,6 +189,7 @@ class JobCancelTests(unittest.TestCase):
             resp = self.client.post(
                 "/job-cancel",
                 json={"printer_name": "Cube_PETG_0.2_11m55s.gcode", "filename": "real.gcode"},
+                headers=self.auth_headers,
             )
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(self._read_rows(), [])

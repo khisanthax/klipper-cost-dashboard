@@ -144,11 +144,12 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
     Best-effort resolution for a per-printer Moonraker base URL.
 
     Priority:
-    1) settings.json per printer: moonraker_url (if present)
-    2) installer registry:
+    1) SQL printer configuration in SQL-only mode
+    2) compatibility settings per printer: moonraker_url (if present)
+    3) installer registry in compatibility modes:
        - moonraker_url (if present)
        - remote client: host -> http://<hostname>:7125
-    3) fallback:
+    4) compatibility fallback:
        - if NOT running in Docker: http://localhost:7125
        - if running in Docker: None (requires explicit moonraker_url)
     """
@@ -183,6 +184,10 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
             moonraker_url = str(settings.get("moonraker_url") or "").strip()
     if moonraker_url:
         return moonraker_url.rstrip("/")
+
+    if _is_sql_only():
+        # SQL-only runtime must not fall back to installer JSON or localhost heuristics.
+        return None
 
     for entry in _read_install_state_clients():
         if str(entry.get("printer_name") or "").strip() != printer_name:

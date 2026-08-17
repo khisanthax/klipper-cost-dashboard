@@ -52,7 +52,7 @@ It is derived from the audited repository state, not from older handoff notes or
   - Major read-heavy UI surfaces can operate from SQL rather than CSV.
 - important notes:
   - This phase is effectively complete for history and reports.
-  - It is not perfectly clean across the whole app because some runtime configuration paths still preserve file-backed compatibility behavior.
+  - CSV and JSON behavior remains deliberately available in compatibility modes, while strict SQL-only routes use SQL-backed state.
 
 ## Phase 5 - Installer SQL Awareness
 
@@ -66,7 +66,7 @@ It is derived from the audited repository state, not from older handoff notes or
 
 ## Phase 6 - SQL-Only Hardening and Canonicalization
 
-This is the live execution phase.
+This phase is complete for the current release contract.
 
 ### 6.1 Guardrails
 
@@ -83,92 +83,126 @@ This is the live execution phase.
 
 ### 6.2 Remove Implicit CSV Runtime Behavior
 
-- status: partial
+- status: complete
 - what is already done:
   - SQL-only blocks many file-backed reads and writes.
   - auto-create/runtime bootstrap behavior is blocked in SQL-only.
   - history and reports are forced to SQL in SQL-only mode.
-- what remains:
-  - remove remaining runtime file-read migration behavior from `core/storage.py`, especially `load_settings()` and `load_display_settings()`.
-  - verify no hidden config/bootstrap paths still touch CSV/JSON during normal SQL-only runtime.
+  - runtime file-read migration behavior has been removed from `core/storage.py` for `load_settings()` and `load_display_settings()`.
+  - printer rename, merge, and delete now use transactional SQL-only lifecycle paths without compatibility file or installer-state access.
+  - hidden SQL printer rows now represent retired historical identities and are excluded from readiness, active discovery, and incoming logging.
+  - startup and representative runtime validation observes direct file opens and blocks known legacy business-state files while allowing deliberate credential/cache/export/backup exceptions.
+- future hardening:
+  - representative isolation coverage can be broadened as new runtime paths are added.
 - why it matters:
   - SQL-only is not fully pure until runtime behavior is independent of legacy files.
 
 ### 6.3 Startup Verification
 
-- status: partial
+- status: complete
 - what is already done:
   - `/health` has a SQL-safe path.
+  - `/health` now reports SQL-only readiness through a reusable validator instead of DB connectivity alone.
+  - SQL-only now fails fast at startup by default through a small hook that uses the readiness validator.
+  - readiness verifies minimum load-bearing SQL-only runtime state: DB connectivity, migrations/schema version, required SQL tables, persisted pause billing default, and configured-printer pricing/profile calculation readiness.
   - Moonraker diagnostics exist.
   - a lightweight SQL-only validation helper exists.
+  - `python -m kcd db readiness` exposes the same readiness validator as a preflight command with actionable output and process exit status.
+  - the Docker healthcheck uses `/health` rather than the dashboard route.
 - what remains:
-  - decide whether startup should fail fast when SQL state is incomplete or inconsistent.
-  - add a clearer certification path for startup/runtime correctness beyond the current helper.
+  - future hardening can broaden certification coverage where useful, but the practical startup readiness contract is now in place.
 - why it matters:
   - SQL-only needs an explicit verification story, not just best-effort route hardening.
 
 ### 6.4 DB as Canonical Config
 
-- status: in progress
+- status: complete
 - what is already done:
   - Moonraker URL can be edited in the UI and stored in the DB.
-  - some SQL-only settings paths already use `user_settings`.
+  - SQL-only printer settings, pause accounting policy, display state, and filament mappings use `user_settings`.
+  - filament and hourly rate profiles use their SQL tables, and active profile references are validated before use.
   - backup settings can persist in SQL-only.
+  - SQL-only pricing now resolves from DB-backed settings and profile state instead of falling back to CSV or implicit default pricing during normal runtime.
+  - required pricing and pause-accounting state fail loudly through runtime validation and startup readiness, while presentation and disabled-feature defaults remain intentionally SQL-safe.
 - what remains:
-  - finish moving runtime configuration away from file-backed settings/display fallbacks.
-  - make SQL-only pricing/config behavior fully DB-backed.
-  - remove remaining cases where SQL-only falls back to defaults instead of persisted SQL configuration.
+  - no remaining default, fallback, or persistence-error ambiguity blocks DB-canonical SQL-only runtime configuration.
 - why it matters:
   - SQL-only cannot be considered canonical while runtime config still depends on legacy files or non-persisted defaults.
 
-### 6.5 CSV as Import/Export Only
+### 6.5 CSV Compatibility and Import/Export Role
 
-- status: not complete
+- status: complete for this release line
 - what is already done:
+  - for this release line, CSV and dual mode remain supported compatibility runtime modes for existing installs.
+  - SQL-only remains the target architecture and strict/canonical mode.
   - SQL export to CSV exists.
   - parity and reconciliation tooling exists.
-  - CSV remains useful for compatibility, backfill comparison, and explicit export.
-- what remains:
-  - decide whether CSV should remain a supported runtime compatibility mode or become a pure import/export artifact.
-  - if SQL-only is the target end state, remove residual runtime dependence on CSV outside explicit tools.
+  - CSV remains useful for compatibility runtime, backfill comparison, explicit import/export, and parity tooling.
+  - focused SQL-only guard tests now exercise representative runtime routes and fail if they touch legacy CSV/JSON file guards.
+  - validation now begins before app import and detects direct access to known compatibility runtime files independently of helper-level guards.
+  - credentials such as `secret.json`, caches, explicit exports, backup archives, and explicit-operation temporary files are classified filesystem exceptions rather than SQL business state.
+- future policy:
+  - keep classifying CSV runtime paths as compatibility-mode paths, not SQL-only bugs.
+  - any removal of CSV runtime support requires a later major-release decision.
 - why it matters:
-  - source-of-truth ambiguity remains until CSV has a clearly bounded role.
+  - source-of-truth ambiguity is reduced only when compatibility CSV paths are clearly separated from strict SQL-only runtime behavior.
 
 ### 6.6 Release Hardening
 
-- status: partial
+- status: complete
 - what is already done:
-  - compile guards exist in CI.
+  - release CI runs the full unit suite, compile checks, SQL-only validation, a production Docker build, and in-container CLI/tool smoke tests without source path filters.
   - validation tooling exists.
   - diagnostic helpers exist.
-  - multiple hardening fixes have already landed on `main`.
-- what remains:
-  - reconcile stale documentation.
-  - tighten validation coverage for SQL-only runtime behavior.
-  - resolve the remaining inconsistent SQL-only subsystems before calling the release line clean.
+  - the Phase 6 branch includes the required correctness and lifecycle hardening fixes.
+  - Recalculate preview and execution now use the same stored pause-accounting input.
+  - SQL-only printer rename, merge, and delete preserve DB-backed history and linked configuration without entering compatibility file/state paths.
+  - Recalculate now exposes filament usage plus time, material, and total cost components in its jobs and preview tables.
+  - canonical SQL reads for projects, settings, profiles, rates, printer identity, and system events surface persistence failures instead of presenting false empty state.
+  - Recalculate is explicitly pricing-only for this release; Full Recompute is deferred until its semantics are deliberately designed.
+  - README, changelog, and high-impact module comments describe the implemented storage, readiness, and compatibility contracts.
+  - final release validation covers the broad test suite, SQL-only validator, readiness CLI, compile checks, and diff hygiene.
+  - SQL-capable installer services use aligned `dual` writes and automatic SQL Reports reads, while CSV-only services keep a consistent CSV contract.
+  - every printer-client mutation endpoint uses shared fail-closed API-key authentication.
+  - manual backups use verified SQLite snapshots; strict SQL-only automatic scheduling is visibly unavailable rather than silently ignored.
+  - SQL mutation failures surface without false success/audit events, and load-bearing numeric state must be finite and calculation-valid.
+  - deliberate installer re-registration reactivates retired printers without changing their historical SQL identity.
+- future work:
+  - Full Recompute remains deferred until its data and pricing semantics are designed.
+  - Project component-cost reporting remains a deliberate future design item.
 - why it matters:
   - the release is already feature-rich, but its operational contract is still sharper in code than in docs and guarantees.
 
 ## Current Position
 
-KCD is no longer a CSV-first app with experimental SQL on the side. SQL is already first-class for major read paths, migration tooling, installer behavior, and SQL-only enforcement. At the same time, the project is still in a transitional hardening phase: SQL-only is not fully pure, configuration migration is incomplete, system events are inconsistent in SQL-only, docs are stale in places, and recalculation still contains an intentionally unfinished mode.
+Phase 6 is complete for the current release contract. SQL-only is the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes for this release line. Recalculate is deliberately pricing-only.
 
 ## Current Active Work
 
-Finish SQL-only configuration migration and remove the remaining runtime file reads from `core/storage.py` and related pricing/config paths.
+Verify the bounded Phase 6.6D integration and release-CI fixes on PR #46.
 
-This is the strongest next task because it closes the clearest contradiction between the current architecture claims and the actual runtime behavior.
+PR #46 must remain open until the new release workflow and blocker-specific checks pass.
 
 ## Next Planned Work
 
-1. Fix SQL-only system events behavior so the current SQL schema/read path is matched by a working SQL-only write path.
-2. Complete SQL-only pricing and configuration persistence so runtime behavior does not fall back to defaults where DB-backed settings are expected.
-3. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture.
-4. Tighten SQL-only validation and certification so startup/runtime guarantees are easier to prove.
-5. Decide and document the long-term role of CSV: compatibility mode vs import/export only.
-6. Revisit recalculation scope and either complete "full" recompute or explicitly de-scope it.
+1. Perform the short independent verification of the Phase 6.6D blocker fixes.
+2. Only after approval, resume the existing v0.4.0 merge/tag/release sequence.
 
 ## Deferred Feature Track
+
+### Recalculate Full Recompute
+
+- status: deferred, semantics not designed
+- current contract:
+  - Recalculate performs pricing recalculation only.
+  - Full data recomputation is not a current-release feature or blocker.
+
+### Projects Component Costs
+
+- status: deferred, design direction recorded
+- future accounting direction:
+  - `Time Cost + Material Cost + Override/Other Cost = Total Cost`
+  - arbitrary manual or project overrides must not be assigned falsely to time or material.
 
 ### Modes
 
@@ -186,16 +220,12 @@ This is the strongest next task because it closes the clearest contradiction bet
 
 ## Current Risks / Contradictions
 
-- SQL-only is not yet fully pure; some runtime file reads still remain in SQL-only-related paths.
-- SQL-only pricing/config migration is incomplete.
-- system events SQL-only behavior is inconsistent with the intended architecture.
-- README and some module comments still describe earlier or conflicting architectural states.
-- recalculation is intentionally incomplete because "full" recompute is still marked as coming soon.
-- the repo still carries both compatibility and canonicalization goals at the same time, which creates ambiguity around CSV's final role.
+- No normal-path SQL-only dependency on legacy runtime files is currently known; focused coverage is representative rather than exhaustive.
+- compatibility CSV runtime paths remain supported for this release line, so SQL-only guardrails must keep that compatibility surface from becoming a strict-mode dependency.
 
 ## Definition of Done for the Current Phase
 
-Phase 6 should be considered complete only when all of the following are true:
+Phase 6 is complete for the current release contract because all of the following are true:
 
 - SQL-only runtime does not perform normal-path reads from legacy runtime CSV/JSON files.
 - runtime configuration used in SQL-only is DB-backed rather than file-backed or default-only.

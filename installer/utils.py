@@ -19,6 +19,7 @@ import socket
 import urllib.request
 import urllib.parse
 import urllib.error
+from contextlib import closing
 from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
 import installer_macro
@@ -51,11 +52,11 @@ def _detect_sql_state() -> Dict[str, Any]:
     if db_exists:
         try:
             from core import db as db_module
-            conn = db_module.connect_db()
-            # Apply migrations so we can validate schema state.
-            db_module.apply_migrations(conn)
-            schema_version = db_module.current_schema_version(conn)
-            schema_ok = bool(schema_version)
+            with closing(db_module.connect_db()) as conn:
+                # Apply migrations so we can validate schema state.
+                db_module.apply_migrations(conn)
+                schema_version = db_module.current_schema_version(conn)
+                schema_ok = bool(schema_version)
         except Exception:
             schema_ok = False
 
@@ -87,10 +88,10 @@ def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
         return False
 
     try:
-        conn = db_module.connect_db()
-        applied = db_module.apply_migrations(conn)
-        if applied:
-            println(f"SQL migrations applied: {', '.join(applied)}")
+        with closing(db_module.connect_db()) as conn:
+            applied = db_module.apply_migrations(conn)
+            if applied:
+                println(f"SQL migrations applied: {', '.join(applied)}")
         if import_from_csv and os.path.exists(CSV_FILE):
             println("Importing CSV into SQLite (best-effort)...")
             db_import.run_import(skip_existing=True, overwrite=False)
@@ -103,10 +104,21 @@ def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
 def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Optional[str] = None) -> bool:
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
-        conn.commit()
+        from core import printer_lifecycle
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            existing = conn.execute("SELECT id FROM printers WHERE name = ?", (printer_name,)).fetchone()
+        if existing:
+            printer_lifecycle.reactivate_printer(
+                printer_name,
+                moonraker_url=moonraker_url,
+                external_id=external_id,
+            )
+        else:
+            with closing(db_module.connect_db()) as conn:
+                db_module.apply_migrations(conn)
+                db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
+                conn.commit()
         return True
     except Exception as e:
         println(f"WARNING: failed to sync printer to SQL: {e}")
@@ -245,15 +257,34 @@ def _venv_paths(root_dir: str) -> Tuple[str, str, str]:
     return venv_dir, venv_python, venv_pip
 
 
-def _write_systemd_service(service_name: str, workdir: str, venv_python: str, port: int, reports_backend: Optional[str] = None) -> str:
+def _installer_runtime_backends(sql_enabled: bool) -> Tuple[str, str]:
+    """Return the supported installer write/read backend pair."""
+    return ("dual", "auto") if sql_enabled else ("csv", "csv")
+
+
+def _render_systemd_service(
+    service_name: str,
+    workdir: str,
+    venv_python: str,
+    port: int,
+    *,
+    storage_backend: str,
+    reports_backend: str,
+) -> str:
+    storage_backend = str(storage_backend or "").strip().lower()
+    reports_backend = str(reports_backend or "").strip().lower()
+    if (storage_backend, reports_backend) not in {("csv", "csv"), ("dual", "auto")}:
+        raise ValueError(
+            "installer service requires storage/reports backends csv/csv or dual/auto"
+        )
+
     user = os.getenv("SUDO_USER") or os.getenv("USER") or ""
-    service_path = f"/etc/systemd/system/{service_name}.service"
     env_lines = [
         "Environment=PYTHONUNBUFFERED=1",
         "Environment=FLASK_APP=app.py",
+        f"Environment=KCD_STORAGE_BACKEND={storage_backend}",
+        f"Environment=KCD_REPORTS_BACKEND={reports_backend}",
     ]
-    if reports_backend:
-        env_lines.append(f"Environment=KCD_REPORTS_BACKEND={reports_backend}")
     unit = [
         "[Unit]",
         f"Description=Klipper Cost Dashboard ({service_name})",
@@ -277,7 +308,27 @@ def _write_systemd_service(service_name: str, workdir: str, venv_python: str, po
             "",
         ]
     )
-    content = "\n".join(unit)
+    return "\n".join(unit)
+
+
+def _write_systemd_service(
+    service_name: str,
+    workdir: str,
+    venv_python: str,
+    port: int,
+    *,
+    storage_backend: str,
+    reports_backend: str,
+) -> str:
+    service_path = f"/etc/systemd/system/{service_name}.service"
+    content = _render_systemd_service(
+        service_name,
+        workdir,
+        venv_python,
+        port,
+        storage_backend=storage_backend,
+        reports_backend=reports_backend,
+    )
     try:
         with open(service_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -299,7 +350,14 @@ def _print_master_summary(status: str, service_name: str, port: int) -> None:
     println(f"Logs         : journalctl -u {service_name} -f")
 
 
-def _perform_master_install(port: int, url: str, service_name: str, reports_backend: Optional[str] = None) -> bool:
+def _perform_master_install(
+    port: int,
+    url: str,
+    service_name: str,
+    *,
+    storage_backend: str,
+    reports_backend: str,
+) -> bool:
     repo_root = _repo_root()
     venv_dir, venv_python, venv_pip = _venv_paths(repo_root)
     python_bin = shutil.which("python3") or sys.executable
@@ -327,7 +385,14 @@ def _perform_master_install(port: int, url: str, service_name: str, reports_back
         return False
 
     println(f"[{len(steps) + 2}/{len(steps) + 3}] Writing systemd service...")
-    service_path = _write_systemd_service(service_name, repo_root, venv_python, port, reports_backend=reports_backend)
+    service_path = _write_systemd_service(
+        service_name,
+        repo_root,
+        venv_python,
+        port,
+        storage_backend=storage_backend,
+        reports_backend=reports_backend,
+    )
     if not service_path:
         return False
 
@@ -344,7 +409,15 @@ def _perform_master_install(port: int, url: str, service_name: str, reports_back
     return True
 
 
-def _master_install_or_status(host: str, port: int, url: str, service_name: str, reports_backend: Optional[str] = None) -> None:
+def _master_install_or_status(
+    host: str,
+    port: int,
+    url: str,
+    service_name: str,
+    *,
+    storage_backend: str,
+    reports_backend: str,
+) -> None:
     println("\n=== Master Installation ===")
     if not _systemctl_exists():
         println("systemctl not found; cannot manage the master service automatically.")
@@ -361,8 +434,8 @@ def _master_install_or_status(host: str, port: int, url: str, service_name: str,
         ok, detail = _check_url(url)
         println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
         println(f"Saved URL      : {url}")
-        if reports_backend:
-            println(f"Recommended reports backend: {reports_backend} (set in service to use SQL)")
+        println(f"Storage backend: {storage_backend}")
+        println(f"Reports backend: {reports_backend}")
 
         while True:
             choice = _safe_input(
@@ -380,12 +453,24 @@ def _master_install_or_status(host: str, port: int, url: str, service_name: str,
                 _run_cmd(f"journalctl -u {service_name} -n 100 --no-pager")
                 continue
             if choice in ("f", "force"):
-                ok_install = _perform_master_install(port, url, service_name, reports_backend=reports_backend)
+                ok_install = _perform_master_install(
+                    port,
+                    url,
+                    service_name,
+                    storage_backend=storage_backend,
+                    reports_backend=reports_backend,
+                )
                 _print_master_summary("success" if ok_install else "failed", service_name, port)
                 return
             println("Invalid option. Choose R, V, F, or B.")
 
-    ok_install = _perform_master_install(port, url, service_name, reports_backend=reports_backend)
+    ok_install = _perform_master_install(
+        port,
+        url,
+        service_name,
+        storage_backend=storage_backend,
+        reports_backend=reports_backend,
+    )
     _print_master_summary("success" if ok_install else "failed", service_name, port)
 
 
@@ -1319,7 +1404,7 @@ def master_setup(master_and_client: bool = False) -> None:
             sql_enabled = _ensure_sql_capable(import_from_csv=False)
 
     if sql_enabled:
-        println("[sql] SQL mode enabled; reports backend should be set to auto for best results.")
+        println("[sql] SQL compatibility mode enabled: dual writes with automatic SQL Reports reads.")
         try:
             s = load_settings(SETTINGS_FILE)
             if isinstance(s, dict):
@@ -1339,8 +1424,18 @@ def master_setup(master_and_client: bool = False) -> None:
     else:
         println("[sql] SQL mode not enabled; continuing in CSV-only mode.")
 
-    reports_backend = "auto" if sql_enabled else None
-    _master_install_or_status(host, port, url, service_name, reports_backend=reports_backend)
+    storage_backend, reports_backend = _installer_runtime_backends(sql_enabled)
+    save_state("master_storage_backend", storage_backend)
+    save_state("master_reports_backend", reports_backend)
+    println(f"[runtime] Service contract: storage={storage_backend}, reports={reports_backend}")
+    _master_install_or_status(
+        host,
+        port,
+        url,
+        service_name,
+        storage_backend=storage_backend,
+        reports_backend=reports_backend,
+    )
 
     if master_and_client:
         println("\nContinuing with local client installation on this machine...")
@@ -1923,7 +2018,15 @@ def uninstall_master() -> None:
         println("Master uninstall cancelled.")
         return
 
-    for key in ("master_host", "master_port", "master_url", "master_service_name", "api_key"):
+    for key in (
+        "master_host",
+        "master_port",
+        "master_url",
+        "master_service_name",
+        "master_storage_backend",
+        "master_reports_backend",
+        "api_key",
+    ):
         save_state(key, "")
 
     removed_files = []

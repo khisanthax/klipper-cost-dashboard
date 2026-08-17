@@ -43,6 +43,12 @@ data/print_costs_backup_*.csv
 data/backups/
 data/app_settings.json
 data/*.LOCAL_*
+data/test_sql_only_*.db
+data/test_sql_only_*.db-*
+data/test_sql_ready_*.db
+data/test_sql_ready_*.db-*
+data/test_tmp/
+tests/.tmp/
 
 
 
@@ -54,4 +60,3 @@ data/*.LOCAL_*
 
 
 /data/settings.local.json.CONFLICT_*
-

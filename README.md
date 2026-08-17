@@ -1,74 +1,39 @@
 # Klipper Cost Dashboard (KCD)
 
-**Klipper Cost Dashboard** is a self-hosted web dashboard that automatically tracks **time, material, and cost** for Klipper-based 3D printers.
+Klipper Cost Dashboard is a self-hosted web application that tracks print time,
+filament usage, and cost for one or more Klipper-based 3D printers. It provides
+history, reports, printer and pricing configuration, projects, system events,
+pricing recalculation, and CSV export.
 
-It is designed for makers, print farms, and small shops who want **accurate, auditable print cost data** without spreadsheets, guesswork, or manual tracking.
+## Key Features
 
-KCD integrates directly with Klipper via macros, collects data from one or more printers, and presents it in a clean web UI with support for projects, recalculation, and exports.
+- Automatic print-time and filament tracking from Klipper clients
+- Multi-printer history and reporting
+- Per-printer pricing plus hourly-rate and filament profiles
+- Pause-aware hourly billing
+- Projects, manual jobs, and planned items
+- Previewable pricing recalculation for historical jobs
+- SQL-backed system events and runtime health checks
+- Explicit CSV export, parity, import, and migration tooling
 
----
+## Architecture
 
-## ✨ Key Features
+KCD has a central dashboard (the master) and Klipper clients. Clients send job
+events to the master, which validates printer identity, calculates costs, and
+persists the result using the configured storage mode.
 
-- 📊 **Automatic print cost tracking**
-  - Tracks *actual* print duration and filament usage
-  - Supports estimated vs completed jobs
-- 🖨️ **Multi-printer support**
-  - Local and remote Klipper clients
-  - Central “Master” dashboard
-- 🧮 **Flexible cost modeling**
-  - Hourly rate profiles
-  - Filament profiles (cost, density, grams/meter)
-  - Per-printer overrides
-- 📁 **Projects & batches**
-  - Group jobs into projects (orders, builds, commissions)
-  - Track totals and projected costs
-- 🔁 **Recalculation center**
-  - Recalculate historical jobs when pricing changes
-  - Safe, previewable bulk operations
-- 📤 **CSV export & reporting**
-  - For accounting, invoicing, or analysis
-- 🛠️ **Installer-driven setup**
-  - Interactive installer for master and clients
-  - Minimal manual configuration
+KCD supports three runtime modes for this release line:
 
----
+| Mode | Role |
+| --- | --- |
+| `csv` | Supported compatibility mode using legacy CSV/JSON runtime state. |
+| `dual` | Supported compatibility and migration mode that keeps CSV behavior while also writing SQL. |
+| `sql` | Strict/canonical mode using SQLite for business and runtime state. |
 
-## 🧠 How It Works (High Level)
+CSV and dual mode remain supported for existing installations. SQL-only is the
+target architecture and the strictest operating contract.
 
-1. **Klipper macros** report job start/end data (time, filament)
-2. **Clients** send that data to the **Master dashboard**
-3. KCD stores raw + computed data (CSV + JSON)
-4. Costs are calculated using your pricing profiles
-5. The web UI lets you review, edit, group, and export jobs
-
-The system is intentionally transparent: raw data is preserved, recalculations are explicit, and nothing is “hidden magic.”
-
----
-
-## 🧩 Architecture Overview
-
-- **Master**
-  - Runs the web dashboard
-  - Stores history, settings, and projects
-- **Client**
-  - Runs on (or connects to) Klipper machines
-  - Registers printers and injects macros
-- **Data storage**
-  - CSV for print history
-  - JSON for settings, projects, assignments
-
-This makes KCD easy to back up, inspect, and migrate.
-
----
-
-## 🚀 Getting Started
-
-> **TL;DR:** Install the master, install clients, print something.
-
-## Docker (recommended)
-
-Quickstart:
+## Docker Quick Start
 
 ```bash
 mkdir -p kcd && cd kcd
@@ -77,194 +42,268 @@ mkdir -p data
 docker compose up -d
 ```
 
-- Security / network access: the default `docker-compose.yml` binds to `127.0.0.1:6060` (localhost only). If you change it to `6060:5000`, you expose KCD to your LAN. There is no login/auth; use a reverse proxy with auth if exposing beyond localhost.
-- Update: `docker compose pull && docker compose up -d`
-- Version pin: change `ghcr.io/khisanthax/klipper-cost-dashboard:latest` to `:vX.Y.Z`
-- Data persistence / upgrades: all persistent state is stored in `./data` (mounted to `/app/data`). You can safely upgrade/replace the container image without losing history/settings. Back up the `data/` directory.
-- Runtime files: `data/settings.json` and `data/print_costs.csv` are created on first run from `data/settings.example.json` and `data/print_costs.example.csv`. These runtime files are local-only and not tracked in git.
-- Dev (build from source): copy `docker-compose.dev.yml.example` to `docker-compose.dev.yml` and run `docker compose -f docker-compose.dev.yml up -d --build`
+The default compose file binds KCD to `127.0.0.1:6060`. Changing the mapping to
+`6060:5000` exposes the dashboard to the LAN. The web UI does not provide user
+login, so use an authenticated reverse proxy before exposing it beyond a trusted
+network.
 
-Quick support / troubleshooting (paste into GitHub issues):
+Common operations:
 
 ```bash
 docker compose ps
 docker compose logs --tail=200
-docker image ls | grep -E 'klipper-cost-dashboard|kcd'
+docker compose pull
+docker compose up -d
 ```
 
-If long UUID fields (e.g., Profile ID / Job UID) make History rows tall, update to the latest version; the UI now truncates those columns with ellipsis and shows full values on hover.
-If duration/thumbnail is missing for a printer, open **Settings → Printers → Diagnostics** and verify Moonraker connectivity (401/URL/HTML responses will show up there).
-
-## Experimental SQL backend (Phases 0–3)
-
-KCD still reads from CSV/JSON by default, but you can initialize an SQLite database for parity testing:
+The image includes the documented CLI and operational tools. Run them through
+the service container:
 
 ```bash
-python -m kcd db init
-python -m kcd db import
-python -m kcd db verify
+docker compose exec kcd python -m kcd --help
+docker compose exec kcd python -m kcd db readiness
+docker compose exec kcd python tools/validate_sql_only.py
+docker compose exec kcd python tools/kcd_backup.py --keep 7
 ```
 
-Dual-write mode (CSV + SQLite) can be enabled for testers (recommended):
+Persistent state is stored under `./data`, mounted at `/app/data`. Back up that
+directory before upgrades. In CSV and dual mode this includes compatibility
+CSV/JSON state; SQL-capable installations also use `data/kcd.db`.
+
+For a source installation, clone the repository and run the interactive installer:
 
 ```bash
+git clone https://github.com/khisanthax/klipper-cost-dashboard.git
+cd klipper-cost-dashboard
+python install.py
+```
+
+The installer supports master setup and local or remote Klipper clients. A
+SQL-capable compatibility installation writes in `dual` mode and selects Reports
+with `auto`; CSV-only installation keeps both writes and Reports on CSV. The
+installer does not enable strict SQL-only automatically.
+
+## Storage Modes
+
+The default mode is `csv` when `KCD_STORAGE_BACKEND` is unset.
+
+```bash
+# Compatibility runtime
+KCD_STORAGE_BACKEND=csv python app.py
+
+# Compatibility runtime plus SQL writes
 KCD_STORAGE_BACKEND=dual python app.py
+
+# Strict SQL-only runtime
+KCD_STORAGE_BACKEND=sql python app.py
 ```
 
-Do not use `KCD_STORAGE_BACKEND=sql` yet; the UI still reads from CSV in Phases 0–2.
+In SQL-only mode, SQLite is canonical for:
 
-Enable SQL reads for Print History (Phase 3):
+- jobs and history
+- printer identity and active configuration
+- pricing and pause-accounting configuration
+- hourly-rate and filament profiles and active mappings
+- projects, assignments, manual jobs, and planned items
+- display and runtime settings
+- system events
+
+SQL-only does not mean that the process performs literally zero filesystem I/O.
+The following are deliberate exceptions to the SQL business-state contract:
+
+- `data/secret.json` as the API-key credential fallback
+- thumbnail cache files
+- explicit CSV exports
+- backup archives
+- temporary files created for explicit operations
+
+Set `KCD_API_KEY` to supply the printer-client API key through the environment.
+When it is unset, KCD reads or creates `data/secret.json` as the credential
+fallback.
+
+Normal SQL-only runtime must not use legacy settings, display, project, profile,
+history CSV, installer-state, or JSONL event files as its source of truth.
+
+## Moving an Existing Installation to SQL-Only
+
+Perform migration commands while the installation is still in CSV or dual mode.
+Do not enable strict SQL-only until the readiness command succeeds.
+
+For Docker installations, run each command below with
+`docker compose exec kcd` before `python`, as shown in the Docker examples above.
+
+1. Back up the current data directory. KCD can create an archive with:
+
+   ```bash
+   python tools/kcd_backup.py --keep 7
+   ```
+
+2. Initialize SQLite and apply migrations:
+
+   ```bash
+   python -m kcd db init
+   ```
+
+3. Import legacy CSV/JSON state:
+
+   ```bash
+   python -m kcd db import
+   ```
+
+   Use `--overwrite` only when existing imported SQL rows should be replaced.
+
+4. Compare legacy history with SQL where parity is expected:
+
+   ```bash
+   python -m kcd db verify
+   ```
+
+5. Run the SQL-only preflight:
+
+   ```bash
+   python -m kcd db readiness
+   ```
+
+6. Resolve every reported failure. Readiness checks database connectivity,
+   migrations, required tables, pause billing policy, active printers, and their
+   DB-backed pricing/profile configuration.
+
+7. Set the strict runtime mode and restart KCD:
+
+   ```bash
+   export KCD_STORAGE_BACKEND=sql
+   python app.py
+   ```
+
+8. Confirm runtime readiness at `/health`. Docker uses this endpoint for its
+   healthcheck.
+
+Strict SQL-only startup fail-fast is enabled by default. If an administrator must
+start the application temporarily to diagnose or repair incomplete state,
+`KCD_SQL_ONLY_FAIL_FAST=0` disables startup enforcement. This is an emergency or
+diagnostic escape hatch, not the recommended steady-state configuration. Run
+`python -m kcd db readiness` again before restoring strict startup.
+
+Printer-client mutation routes require the configured `X-API-Key`. If KCD cannot
+establish a server API key, those routes fail closed rather than accepting
+unauthenticated requests.
+
+## SQL Validation and Export
+
+Run representative startup and route-level filesystem isolation validation with:
 
 ```bash
-KCD_READ_BACKEND=sql python app.py
+python tools/validate_sql_only.py
 ```
 
-To roll back, set `KCD_READ_BACKEND=csv` (default). Other pages still read CSV in this phase.
-
-Enable SQL reads for Reports (Phase 4):
-
-```bash
-KCD_REPORTS_BACKEND=sql python app.py
-```
-
-To roll back, set `KCD_REPORTS_BACKEND=csv` (default). Only the Reports page uses SQL in this phase.
-
-The database is stored at `data/kcd.db`.
-
-In SQL-only mode, exports are generated from SQL on demand (e.g. Download CSV uses a temporary SQL export).
-Backups remain user-triggered exports; runtime does not depend on backup/export files.
-
-### SQL-only mode guarantees
-When `KCD_STORAGE_BACKEND=sql`:
-- Runtime state comes from SQL only; CSV/JSON files are not read or written.
-- Allowed filesystem usage is limited to caches and explicit exports.
-  - Thumbnail cache (default `data/thumb_cache/`, configurable via `KCD_THUMB_CACHE_DIR`)
-  - Explicit export outputs (Download CSV or `python -m kcd export ...`)
-  - Backup archives under `data/backups/`
-
-SQL-only validation helper:
-```
-PYTHONPATH=. python tools/validate_sql_only.py
-```
-
-Phase 5 installer notes: the installer can initialize the DB and import from CSV, and a
-DB + CSV setup is expected (dual/compat mode). The installer keeps `settings.json`
-moonraker_url mappings in sync until SQL becomes the source of truth. For SQL-capable
-installs, prefer `KCD_REPORTS_BACKEND=auto` to use SQL with CSV fallback.
-
-### SQL/CSV parity after backfill
-
-If you backfilled SQL from Moonraker, SQL can legitimately have more jobs than `data/print_costs.csv`.
-When this happens, reports parity will show mismatches because the datasets differ.
-
-To regenerate a legacy CSV from SQL (same column order as `print_costs.csv`):
+Export SQL history explicitly:
 
 ```bash
 python -m kcd export csv --from sql --out data/print_costs.csv --overwrite
 ```
 
-Reports parity enhancements:
+SQL may legitimately contain jobs imported from Moonraker that are absent from a
+legacy CSV. In that case parity tools report dataset differences rather than
+implying that SQL should discard the additional rows.
 
 ```bash
-# Dump job-set differences to data/parity_sql_only.json and data/parity_csv_only.json
 python -m kcd reports parity --range 90d --dump-job-diff
-
-# Compare SQL against a temporary CSV generated from SQL
 python -m kcd reports parity --range 90d --regen-csv-from-sql
+python -m kcd history parity --limit 200
 ```
 
-### Reports cache
-
-SQL reports support a DB-backed cache (default TTL 300s):
-
-```bash
-KCD_REPORTS_CACHE_TTL_SECONDS=300 python app.py
-```
-
-Set `KCD_REPORTS_CACHE_TTL_SECONDS=0` to disable caching. You can inspect/clear cache via:
+SQL Reports uses a DB-backed cache. The default TTL is 300 seconds. Set
+`KCD_REPORTS_CACHE_TTL_SECONDS=0` to disable it.
 
 ```bash
 python -m kcd cache info
 python -m kcd cache clear
 ```
 
-When `KCD_REPORTS_BACKEND=auto` chooses SQL and the CSV appears behind the DB, KCD logs a warning suggesting:
-`python -m kcd export csv --from sql --overwrite`.
+## Printer Retirement
 
-### 1. Install the Master
+Deleting a printer retires it from active configuration. KCD no longer accepts
+new jobs for that identity. Existing jobs and events remain available, and their
+historical printer references remain valid. Deliberately reinstalling or
+re-registering that printer through the installer reactivates the same historical
+identity; pricing must then be configured before SQL-only readiness succeeds.
 
-Run the installer on the machine where you want the dashboard to live.
+## Backups
 
-```bash
-git clone https://github.com/<your-org>/klipper-cost-dashboard.git
-cd klipper-cost-dashboard
-./install.sh
-```
+`Backup now` and `python tools/kcd_backup.py` create a transactionally consistent
+SQLite snapshot and exclude live WAL/SHM files and nested backup archives.
+Automatic backup scheduling is unavailable in strict SQL-only mode and is
+disabled visibly in Settings. Backup archives include `secret.json` when present,
+so protect them as credentials-bearing files.
 
-### 2. Install Clients
+## Recalculate Center
 
-Use the same installer to add:
+Recalculate Center performs pricing recalculation for selected historical jobs.
+It supports previews and shows:
 
-- A **local client**, or
-- A **remote client via SSH**
+- hours
+- filament usage
+- time cost
+- material cost
+- total cost
+- supported hourly-rate, filament-profile, and per-run pricing overrides
 
-The installer can auto-detect existing printers and generate the required Klipper macros.
+Recalculate does not rewrite job identity or raw history. Full data recomputation
+is not part of the current release contract and remains deferred until its
+semantics are designed.
 
-### 3. Print
+## Projects
 
-Once a job runs, it will automatically appear in the dashboard.
+Projects group tracked jobs, manual work, and planned items. Project cost-component
+reporting is a future design item. The intended accounting direction is:
 
----
+`Time Cost + Material Cost + Override/Other Cost = Total Cost`
 
-## 🖥️ Web Interface Highlights
+This is not currently exposed as a Projects component breakdown; arbitrary manual
+overrides must not be assigned artificially to time or material.
 
-- **Dashboard** – live printer status and current job costs
-- **Print History** – sortable, filterable job table
-- **Settings** – pricing, filament, and printer configuration
-- **Projects** – group and total related jobs
-- **Recalculate Center** – bulk recomputation when prices change
+## Web Interface
 
----
+- **Dashboard / History**: current state plus sortable, filterable job history
+- **Reports**: date-range and printer summaries
+- **Settings**: printers, pricing, profiles, display, pause accounting, and backups
+- **Projects**: grouped tracked jobs, manual jobs, and planned items
+- **Recalculate**: previewable pricing updates for historical jobs
+- **System Events**: operational warnings, failures, and meaningful activity
 
-## 🖼️ Screenshots
+If duration or thumbnails are missing, open **Settings > Printers > Diagnostics**
+and verify the configured Moonraker URL and response.
 
-### Dashboard (live printers + active job cost)
+## Screenshots
+
+### Dashboard
+
 ![Dashboard overview](docs/images/dashboard-overview.png)
-![Dashboard overview (alt)](docs/images/dashboard-overview-2.png)
 
-### Reports (filters + rollups)
+### Reports
+
 ![Reports](docs/images/reports.png)
 
-### Projects (group jobs into builds/orders)
-![Projects](docs/images/projects.png)
-![Projects (alt)](docs/images/projects-2.png)
+### Projects
 
-### Recalculate Center (bulk recompute after pricing changes)
+![Projects](docs/images/projects.png)
+
+### Recalculate Center
+
 ![Recalculate Center](docs/images/recalculate-center.png)
 
-### Settings (Printers / Profiles / Other / Pause Accounting)
+### Settings
+
 ![Printer settings](docs/images/settings-printers.png)
 ![Profile settings](docs/images/settings-profiles.png)
-![Other settings](docs/images/settings-other.png)
 ![Pause accounting settings](docs/images/settings-pause.png)
 
----
+## Project Status
 
-## ⚠️ Project Status
+KCD is actively developed. Runtime compatibility and upgrade safety matter, but
+APIs and internal formats may continue to evolve. Use GitHub issues for bug reports
+and focused feature proposals.
 
-KCD is **actively developed** and currently used by the author.
-
-- APIs and internal data formats may evolve
-- Backward compatibility is considered but not guaranteed yet
-- Feedback and early testing are very welcome
-
-This is a great time to:
-- Open issues
-- Suggest UX improvements
-- Sanity-check workflows
-
----
-
-## 🤖 AI-Assisted Development
-
-Klipper Cost Dashboard was built using OpenAI’s GPT-5.2 as an active development partner, supporting system design, refactoring, documentation, and feature planning throughout the project.
+Pull requests intended for release must pass the unfiltered **Release Validation**
+workflow, including the full unit suite, compile checks, SQL-only isolation,
+production Docker build, and in-container CLI/tool smoke tests, before merge.

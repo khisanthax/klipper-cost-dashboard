@@ -3,7 +3,6 @@ Cost calculations and printer management for Print Cost Dashboard.
 """
 import os
 import csv
-from core import db as db_module
 from core.config import DEFAULT_PRICING, CSV_FILE, SETTINGS_FILE, HEADERS, DISPLAY_FILE
 from core.storage import (
     load_settings,
@@ -15,8 +14,13 @@ from core.storage import (
     save_hidden_printers,
 )
 from core.sql_only import is_sql_only
+from core.numeric import finite_float, NumericValidationError
 from core import profiles
 from core import rates
+
+
+class SqlOnlyPricingConfigError(RuntimeError):
+    """Raised when SQL-only runtime pricing is missing required DB-backed config."""
 
 
 class Cfg:
@@ -32,13 +36,127 @@ def _is_sql_only() -> bool:
     return is_sql_only()
 
 
+def _get_printer_settings(printer_name: str) -> dict:
+    settings = load_settings(SETTINGS_FILE)
+    printer_settings = settings.get(printer_name, {}) if isinstance(settings, dict) else {}
+    return printer_settings if isinstance(printer_settings, dict) else {}
+
+
+def _raise_sql_only_pricing_config(printer_name: str, detail: str) -> None:
+    raise SqlOnlyPricingConfigError(
+        f"SQL-only pricing config missing or invalid for printer {printer_name!r}: {detail}"
+    )
+
+
+def _get_sql_only_printer_float(printer_name: str, key: str) -> float:
+    printer_settings = _get_printer_settings(printer_name)
+    try:
+        value = printer_settings.get(key)
+        return finite_float(value, label=key, nonnegative=True)
+    except NumericValidationError:
+        _raise_sql_only_pricing_config(printer_name, f"missing or invalid {key} in user_settings.printer_settings")
+
+
+def _get_sql_only_printer_filament_config(printer_name: str) -> dict:
+    printer_settings = _get_printer_settings(printer_name)
+    mode = str(printer_settings.get("filament_mode") or "").strip()
+    rate_raw = printer_settings.get("filament_rate")
+    grams_raw = printer_settings.get("grams_per_meter")
+
+    if mode not in ("per_meter", "per_gram", "per_kg"):
+        _raise_sql_only_pricing_config(printer_name, "missing filament_mode in user_settings.printer_settings")
+    try:
+        rate = finite_float(rate_raw, label="filament_rate", nonnegative=True)
+    except NumericValidationError:
+        _raise_sql_only_pricing_config(printer_name, "missing or invalid filament_rate in user_settings.printer_settings")
+    try:
+        grams_per_meter = finite_float(grams_raw, label="grams_per_meter", positive=True)
+    except NumericValidationError:
+        _raise_sql_only_pricing_config(printer_name, "missing or invalid grams_per_meter in user_settings.printer_settings")
+    return {
+        "filament_mode": mode,
+        "filament_rate": rate,
+        "grams_per_meter": grams_per_meter,
+    }
+
+
+def _get_sql_only_pause_include_default(printer_name: str) -> bool:
+    from core.storage import _load_user_settings_sql
+
+    display = _load_user_settings_sql("display_settings")
+    if not isinstance(display, dict):
+        display = _load_user_settings_sql("display")
+    if not isinstance(display, dict):
+        _raise_sql_only_pricing_config(
+            printer_name,
+            "missing pause billing default in user_settings.display_settings",
+        )
+
+    if "pause_include_paused_time_default" in display:
+        return bool(display.get("pause_include_paused_time_default", False))
+    if "pause_exclude_paused_time_default" in display:
+        return not bool(display.get("pause_exclude_paused_time_default", False))
+
+    _raise_sql_only_pricing_config(
+        printer_name,
+        "missing pause billing default in user_settings.display_settings",
+    )
+
+
+def _coerce_profile_rate(printer_name: str, profile_id: str, profile: dict) -> float | None:
+    if not profile:
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"rate profile {profile_id!r} not found")
+        return None
+    try:
+        return finite_float(profile.get("rate_per_hour"), label="rate_per_hour", nonnegative=True)
+    except NumericValidationError:
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"rate profile {profile_id!r} is missing rate_per_hour")
+        return None
+
+
+def _coerce_profile_filament(printer_name: str, profile_id: str, profile_data: dict) -> dict | None:
+    if not profile_data:
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"filament profile {profile_id!r} not found")
+        return None
+    has_mode = "filament_mode" in profile_data
+    has_rate = "filament_rate" in profile_data
+    has_grams = "grams_per_meter" in profile_data
+    if not (has_mode and has_rate and has_grams):
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(
+                printer_name,
+                f"filament profile {profile_id!r} is missing pricing fields",
+            )
+        return None
+    mode = str(profile_data["filament_mode"] or "").strip()
+    try:
+        rate = finite_float(profile_data["filament_rate"], label="filament_rate", nonnegative=True)
+        grams = finite_float(profile_data["grams_per_meter"], label="grams_per_meter", positive=True)
+    except NumericValidationError:
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"filament profile {profile_id!r} has invalid pricing fields")
+        return None
+    if mode not in ("per_meter", "per_gram", "per_kg"):
+        if _is_sql_only():
+            _raise_sql_only_pricing_config(printer_name, f"filament profile {profile_id!r} has invalid filament_mode")
+        return None
+    return {
+        "filament_mode": mode,
+        "filament_rate": rate,
+        "grams_per_meter": grams,
+        "profile_material": profile_data.get("material", "") or "",
+    }
+
+
 def get_pricing_for_printer_raw(printer_name: str) -> dict:
     """Get pricing configuration for a printer as a dictionary."""
-    settings = load_settings(SETTINGS_FILE)
+    if _is_sql_only():
+        return _get_printer_settings(printer_name)
     base = dict(DEFAULT_PRICING)
-    override = settings.get(printer_name, {})
-    if isinstance(override, dict):
-        base.update(override)
+    base.update(_get_printer_settings(printer_name))
     return base
 
 
@@ -51,81 +169,18 @@ def get_effective_rate_per_hour(printer_name: str) -> float:
     """
     Resolve the hourly rate for a printer, honoring an active rate profile if set.
     """
-    if _is_sql_only():
-        try:
-            conn = db_module.connect_db()
-            db_module.apply_migrations(conn)
-            row = conn.execute("SELECT id FROM printers WHERE name = ?", (printer_name,)).fetchone()
-            if not row:
-                return 0.0
-            printer_id = row[0] if isinstance(row, (tuple, list)) else row["id"]
-
-            # Prefer explicit override if present on any recent job.
-            row = conn.execute(
-                """
-                SELECT j.override_rate_per_hour
-                  FROM jobs j
-                 WHERE j.printer_id = ?
-                   AND j.override_rate_per_hour IS NOT NULL
-                 ORDER BY COALESCE(j.ended_at, j.created_at) DESC
-                 LIMIT 1
-                """,
-                (printer_id,),
-            ).fetchone()
-            if row and row[0] is not None:
-                return float(row[0])
-
-            # Prefer a rate profile if the job references one.
-            row = conn.execute(
-                """
-                SELECT hr.rate_per_hour
-                  FROM jobs j
-                  JOIN hourly_rate_profiles hr
-                    ON (hr.profile_uid = j.hourly_rate_profile_id OR hr.id = j.hourly_rate_profile_id)
-                 WHERE j.printer_id = ?
-                   AND j.hourly_rate_profile_id IS NOT NULL
-                   AND TRIM(j.hourly_rate_profile_id) != ''
-                 ORDER BY COALESCE(j.ended_at, j.created_at) DESC
-                 LIMIT 1
-                """,
-                (printer_id,),
-            ).fetchone()
-            if row and row[0] is not None:
-                return float(row[0])
-
-            # Fallback: most recent stored rate_per_hour for this printer.
-            row = conn.execute(
-                """
-                SELECT j.rate_per_hour
-                  FROM jobs j
-                 WHERE j.printer_id = ?
-                   AND j.rate_per_hour IS NOT NULL
-                   AND j.rate_per_hour > 0
-                 ORDER BY COALESCE(j.ended_at, j.created_at) DESC
-                 LIMIT 1
-                """,
-                (printer_id,),
-            ).fetchone()
-            if row and row[0] is not None:
-                return float(row[0])
-        except Exception:
-            return 0.0
-
-        return 0.0
-
-    settings = load_settings(SETTINGS_FILE)
-    printer_settings = settings.get(printer_name, {})
+    printer_settings = _get_printer_settings(printer_name)
     active_rate_profile_id = printer_settings.get("active_rate_profile_id")
 
     if active_rate_profile_id:
         profile = rates.get_rate_profile(active_rate_profile_id)
-        if profile:
-            try:
-                return float(profile.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"]))
-            except (TypeError, ValueError):
-                pass
+        rate = _coerce_profile_rate(printer_name, str(active_rate_profile_id), profile)
+        if rate is not None:
+            return rate
 
     # Fallback to printer's own rate
+    if _is_sql_only():
+        return _get_sql_only_printer_float(printer_name, "rate_per_hour")
     cfg = get_pricing_for_printer(printer_name)
     try:
         return float(cfg.rate_per_hour)
@@ -142,33 +197,22 @@ def _get_effective_filament_pricing(printer_name: str) -> dict:
     
     Returns dict with: filament_mode, filament_rate, grams_per_meter
     """
-    if _is_sql_only():
-        return {
-            "filament_mode": DEFAULT_PRICING["filament_mode"],
-            "filament_rate": DEFAULT_PRICING["filament_rate"],
-            "grams_per_meter": DEFAULT_PRICING["grams_per_meter"],
-        }
     # Try to get active profile for this printer
     profile_id = profiles.get_printer_mapping(printer_name)
     
     if profile_id:
         profile_data = profiles.get_profile(profile_id)
-        
-        # Check if profile exists and has complete filament pricing data
-        if profile_data:
-            has_mode = "filament_mode" in profile_data
-            has_rate = "filament_rate" in profile_data
-            has_grams = "grams_per_meter" in profile_data
-            
-            if has_mode and has_rate and has_grams:
-                # Profile has complete data, use it
-                return {
-                    "filament_mode": profile_data["filament_mode"],
-                    "filament_rate": profile_data["filament_rate"],
-                    "grams_per_meter": profile_data["grams_per_meter"],
-                }
+        filament_cfg = _coerce_profile_filament(printer_name, str(profile_id), profile_data)
+        if filament_cfg is not None:
+            return {
+                "filament_mode": filament_cfg["filament_mode"],
+                "filament_rate": filament_cfg["filament_rate"],
+                "grams_per_meter": filament_cfg["grams_per_meter"],
+            }
     
     # No profile or incomplete data, fall back to printer settings
+    if _is_sql_only():
+        return _get_sql_only_printer_filament_config(printer_name)
     printer_cfg = get_pricing_for_printer_raw(printer_name)
     return {
         "filament_mode": printer_cfg["filament_mode"],
@@ -182,14 +226,11 @@ def _include_paused_time_for_printer(printer_name: str) -> bool:
     Resolve whether a printer should include paused time in hourly billing.
 
     Precedence:
-    1) Per-printer override (settings.json) when enabled.
-    2) Global default (display.json).
+    1) Per-printer override from the active storage backend when enabled.
+    2) Global display-setting default from the active storage backend.
     """
-    if _is_sql_only():
-        return False
     try:
-        settings = load_settings(SETTINGS_FILE)
-        printer_settings = settings.get(printer_name, {}) if isinstance(settings, dict) else {}
+        printer_settings = _get_printer_settings(printer_name)
         if printer_settings.get("pause_include_paused_time_override_enabled", False):
             return bool(printer_settings.get("pause_include_paused_time_override_value", False))
         # Backwards compatibility: old "exclude paused" semantics.
@@ -197,6 +238,9 @@ def _include_paused_time_for_printer(printer_name: str) -> bool:
             return not bool(printer_settings.get("pause_exclude_paused_time_override_value", False))
     except Exception:
         pass
+
+    if _is_sql_only():
+        return _get_sql_only_pause_include_default(printer_name)
 
     try:
         display = load_display_settings(DISPLAY_FILE, HEADERS)
@@ -225,14 +269,36 @@ def compute_costs(
     - Any non-zero duration is billed with a minimum of 1.0 hour.
       (duration_hours is still the actual elapsed time for reporting.)
     """
+    duration_seconds = finite_float(duration_seconds, label="duration_seconds", nonnegative=True)
+    filament_mm = finite_float(filament_mm, label="filament_mm", nonnegative=True)
+    paused_seconds_total = finite_float(
+        paused_seconds_total,
+        label="paused_seconds_total",
+        nonnegative=True,
+    )
+
     # Time cost uses effective rate (rate profile overrides printer base)
-    rate_per_hour = float(get_effective_rate_per_hour(printer_name))
+    rate_per_hour = finite_float(
+        get_effective_rate_per_hour(printer_name),
+        label="rate_per_hour",
+        nonnegative=True,
+    )
     
     # Material cost prefers profile data if available
     filament_pricing = _get_effective_filament_pricing(printer_name)
     filament_mode = filament_pricing["filament_mode"]
-    filament_rate = float(filament_pricing["filament_rate"])
-    grams_per_meter = float(filament_pricing["grams_per_meter"])
+    filament_rate = finite_float(
+        filament_pricing["filament_rate"],
+        label="filament_rate",
+        nonnegative=True,
+    )
+    grams_per_meter = finite_float(
+        filament_pricing["grams_per_meter"],
+        label="grams_per_meter",
+        nonnegative=True,
+    )
+    if filament_mm > 0 and grams_per_meter == 0:
+        raise NumericValidationError("grams_per_meter must be greater than zero when filament is used")
     
     # Get profile info for tracking
     profile_id = profiles.get_printer_mapping(printer_name)
@@ -311,23 +377,31 @@ def compute_costs_with_overrides(
 
     When no overrides are provided, the behavior matches compute_costs() (same pricing rules).
     """
+    duration_seconds = finite_float(duration_seconds, label="duration_seconds", nonnegative=True)
+    filament_mm = finite_float(filament_mm, label="filament_mm", nonnegative=True)
+    paused_seconds_total = finite_float(
+        paused_seconds_total,
+        label="paused_seconds_total",
+        nonnegative=True,
+    )
+
     # --- Rate override (optional) ---
     rate_per_hour = None
     if rate_per_hour_override is not None:
-        try:
-            rate_per_hour = float(rate_per_hour_override)
-        except (TypeError, ValueError):
-            rate_per_hour = None
+        rate_per_hour = finite_float(
+            rate_per_hour_override,
+            label="rate_per_hour_override",
+            nonnegative=True,
+        )
     if rate_profile_id:
-        if not _is_sql_only():
-            profile = rates.get_rate_profile(rate_profile_id)
-            if profile:
-                try:
-                    rate_per_hour = float(profile.get("rate_per_hour", DEFAULT_PRICING["rate_per_hour"]))
-                except (TypeError, ValueError):
-                    rate_per_hour = None
+        profile = rates.get_rate_profile(rate_profile_id)
+        rate_per_hour = _coerce_profile_rate(printer_name, str(rate_profile_id), profile)
     if rate_per_hour is None:
-        rate_per_hour = float(get_effective_rate_per_hour(printer_name))
+        rate_per_hour = finite_float(
+            get_effective_rate_per_hour(printer_name),
+            label="rate_per_hour",
+            nonnegative=True,
+        )
 
     # --- Filament override (optional) ---
     profile_id = ""
@@ -337,26 +411,22 @@ def compute_costs_with_overrides(
     grams_per_meter = None
 
     if filament_rate_per_meter_override is not None:
-        try:
-            filament_mode = "per_meter"
-            filament_rate = float(filament_rate_per_meter_override)
-        except (TypeError, ValueError):
-            filament_mode = None
-            filament_rate = None
+        filament_mode = "per_meter"
+        filament_rate = finite_float(
+            filament_rate_per_meter_override,
+            label="filament_rate_per_meter_override",
+            nonnegative=True,
+        )
 
     if filament_profile_id:
-        if not _is_sql_only():
-            profile_data = profiles.get_profile(filament_profile_id)
-            if profile_data:
-                has_mode = "filament_mode" in profile_data
-                has_rate = "filament_rate" in profile_data
-                has_grams = "grams_per_meter" in profile_data
-                if has_mode and has_rate and has_grams:
-                    profile_id = filament_profile_id
-                    profile_material = profile_data.get("material", "") or ""
-                    filament_mode = profile_data["filament_mode"]
-                    filament_rate = profile_data["filament_rate"]
-                    grams_per_meter = profile_data["grams_per_meter"]
+        profile_data = profiles.get_profile(filament_profile_id)
+        filament_cfg = _coerce_profile_filament(printer_name, str(filament_profile_id), profile_data)
+        if filament_cfg is not None:
+            profile_id = filament_profile_id
+            profile_material = filament_cfg["profile_material"]
+            filament_mode = filament_cfg["filament_mode"]
+            filament_rate = filament_cfg["filament_rate"]
+            grams_per_meter = filament_cfg["grams_per_meter"]
 
     if filament_mode is None or filament_rate is None or grams_per_meter is None:
         filament_pricing = _get_effective_filament_pricing(printer_name)
@@ -374,8 +444,10 @@ def compute_costs_with_overrides(
             else:
                 profile_id = ""
 
-    filament_rate = float(filament_rate)
-    grams_per_meter = float(grams_per_meter)
+    filament_rate = finite_float(filament_rate, label="filament_rate", nonnegative=True)
+    grams_per_meter = finite_float(grams_per_meter, label="grams_per_meter", nonnegative=True)
+    if filament_mm > 0 and grams_per_meter == 0:
+        raise NumericValidationError("grams_per_meter must be greater than zero when filament is used")
 
     # Actual usage metrics (for reporting)
     duration_hours = duration_seconds / 3600.0
@@ -383,13 +455,10 @@ def compute_costs_with_overrides(
     grams = filament_meters * grams_per_meter
 
     # Billing rule: minimum 1 hour for any non-zero billable time
-    billable_seconds = float(duration_seconds)
+    billable_seconds = duration_seconds
     # Default behavior: EXCLUDE paused time from hourly billing unless explicitly enabled.
     if not _include_paused_time_for_printer(printer_name):
-        try:
-            billable_seconds = max(0.0, float(duration_seconds) - float(paused_seconds_total))
-        except Exception:
-            billable_seconds = max(0.0, float(duration_seconds))
+        billable_seconds = max(0.0, duration_seconds - paused_seconds_total)
 
     if billable_seconds > 0:
         billable_hours = max(1.0, billable_seconds / 3600.0)
@@ -441,7 +510,12 @@ def compute_live_time_cost(printer_name, elapsed_seconds):
     Returns:
         float: Time cost so far
     """
-    rate_per_hour = get_effective_rate_per_hour(printer_name)
+    elapsed_seconds = finite_float(elapsed_seconds, label="elapsed_seconds", nonnegative=True)
+    rate_per_hour = finite_float(
+        get_effective_rate_per_hour(printer_name),
+        label="rate_per_hour",
+        nonnegative=True,
+    )
     elapsed_hours = elapsed_seconds / 3600.0
     return elapsed_hours * rate_per_hour
 
@@ -494,19 +568,26 @@ def get_known_printers():
 
 
 def get_configured_printers():
-    """Printers explicitly configured in settings.json (excluding hidden)."""
+    """Return active printers explicitly configured in the current backend."""
     def _norm(name) -> str:
         return str(name or "").strip()
 
     settings = load_settings(SETTINGS_FILE)
     hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
-    return sorted([p for p in settings.keys() if _norm(p) and _norm(p) not in hidden])
+    configured = {_norm(p) for p in settings.keys() if _norm(p)}
+    if _is_sql_only():
+        from core.printers import get_canonical_printer_names
+
+        canonical = {_norm(p) for p in get_canonical_printer_names(include_hidden=True) if _norm(p)}
+        configured = configured & canonical
+    return sorted([p for p in configured if p not in hidden])
 
 
 def get_discovered_printers():
     """
-    Printers found only via CSV history (not present in settings.json), excluding hidden.
-    Used for optional display in Settings.
+    Return history-only printers in compatibility modes, excluding hidden ones.
+
+    SQL-only returns active canonical SQL printers that do not have settings.
     """
     def _norm(name) -> str:
         return str(name or "").strip()
@@ -514,6 +595,13 @@ def get_discovered_printers():
     settings = load_settings(SETTINGS_FILE)
     configured = {_norm(p) for p in settings.keys() if _norm(p)}
     hidden = {_norm(p) for p in load_display_settings(DISPLAY_FILE, HEADERS).get("hidden_printers", [])}
+    if _is_sql_only():
+        from core.printers import get_canonical_printer_names
+
+        discovered = {_norm(p) for p in get_canonical_printer_names(include_hidden=True) if _norm(p)}
+        discovered = discovered - configured - hidden
+        return sorted(discovered)
+
     discovered = set()
     if os.path.exists(CSV_FILE):
         try:

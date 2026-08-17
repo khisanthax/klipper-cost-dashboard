@@ -1,7 +1,8 @@
 """
 Storage backend abstraction for job writes.
 
-Phase 2: dual-write (CSV + SQLite) for job append/update.
+CSV and dual mode remain supported compatibility runtime modes for this
+release line. SQL-only mode is the strict/canonical path and must not write CSV.
 """
 from __future__ import annotations
 
@@ -145,7 +146,7 @@ def recalc_jobs(job_uids: Iterable[str], compute_costs_fn) -> int:
             raise
         return updated
 
-    # CSV or dual mode (legacy behavior)
+    # CSV or dual mode compatibility behavior.
     updated = rewrite_csv_recalculate_costs_job_uids(CSV_FILE, HEADERS, job_uids, compute_costs_fn)
     if updated <= 0:
         return updated

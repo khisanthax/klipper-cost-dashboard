@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import os
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
@@ -60,59 +61,58 @@ def export_csv_from_sql(*, out_path: str, overwrite: bool = False) -> Tuple[int,
     if os.path.exists(out_path) and not overwrite:
         raise FileExistsError(f"CSV already exists: {out_path} (use --overwrite to replace)")
 
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
-
-    rows = conn.execute(
-        """
-        SELECT
-            j.job_uid,
-            p.name AS printer,
-            j.filename,
-            j.thumbnail,
-            j.duration_seconds,
-            j.paused_seconds_total,
-            j.pause_count,
-            j.runout_count,
-            j.duration_hours,
-            j.filament_mm,
-            j.filament_meters,
-            j.rate_per_hour,
-            j.filament_mode,
-            j.filament_rate,
-            j.grams_per_meter,
-            j.time_cost,
-            j.material_cost,
-            j.total_cost,
-            j.filament_profile_id,
-            j.filament_material,
-            j.status,
-            j.failure_reason,
-            j.import_source,
-            j.import_id,
-            j.job_outcome,
-            j.duration_seconds_raw,
-            j.duration_seconds_est,
-            j.duration_seconds_effective,
-            j.filament_mm_raw,
-            j.filament_mm_est,
-            j.filament_mm_effective,
-            j.override_rate_per_hour,
-            j.override_material_cost,
-            j.override_total_cost,
-            j.hourly_rate_profile_id,
-            j.started_at,
-            j.ended_at,
-            j.created_at
-        FROM jobs j
-        JOIN printers p ON j.printer_id = p.id
-        ORDER BY
-            COALESCE(j.started_at, j.ended_at, j.created_at) ASC,
-            p.name ASC,
-            j.filename ASC,
-            j.job_uid ASC
-        """
-    ).fetchall()
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                j.job_uid,
+                p.name AS printer,
+                j.filename,
+                j.thumbnail,
+                j.duration_seconds,
+                j.paused_seconds_total,
+                j.pause_count,
+                j.runout_count,
+                j.duration_hours,
+                j.filament_mm,
+                j.filament_meters,
+                j.rate_per_hour,
+                j.filament_mode,
+                j.filament_rate,
+                j.grams_per_meter,
+                j.time_cost,
+                j.material_cost,
+                j.total_cost,
+                j.filament_profile_id,
+                j.filament_material,
+                j.status,
+                j.failure_reason,
+                j.import_source,
+                j.import_id,
+                j.job_outcome,
+                j.duration_seconds_raw,
+                j.duration_seconds_est,
+                j.duration_seconds_effective,
+                j.filament_mm_raw,
+                j.filament_mm_est,
+                j.filament_mm_effective,
+                j.override_rate_per_hour,
+                j.override_material_cost,
+                j.override_total_cost,
+                j.hourly_rate_profile_id,
+                j.started_at,
+                j.ended_at,
+                j.created_at
+            FROM jobs j
+            JOIN printers p ON j.printer_id = p.id
+            ORDER BY
+                COALESCE(j.started_at, j.ended_at, j.created_at) ASC,
+                p.name ASC,
+                j.filename ASC,
+                j.job_uid ASC
+            """
+        ).fetchall()
 
     out_rows = []
     for row in rows:

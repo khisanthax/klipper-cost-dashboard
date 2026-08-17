@@ -11,6 +11,9 @@ import math
 import hashlib
 import time
 import re
+import hmac
+from functools import wraps
+from contextlib import closing
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import flask
@@ -62,12 +65,23 @@ from core.printers import (
     looks_like_gcode_filename,
 )
 from core.backup import load_backup_settings, save_backup_settings, create_backup_archive, maybe_run_auto_backup
+from core.readiness import (
+    check_sql_only_readiness,
+    enforce_sql_only_startup_readiness,
+    SqlOnlyStartupReadinessError,
+)
+from core.numeric import finite_float, optional_finite_float, NumericValidationError
 
 app = Flask(__name__)
 app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
 
 if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
     app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
+try:
+    enforce_sql_only_startup_readiness()
+except SqlOnlyStartupReadinessError as exc:
+    app.logger.error(str(exc))
+    raise
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
@@ -300,14 +314,30 @@ def _kcd_auto_backup_hook():
 # API ENDPOINTS
 # ============================================================================
 
+
+def require_printer_api_key(view_func):
+    """Fail closed unless a printer-client request supplies the configured key."""
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        server_key = str(API_KEY or "").strip()
+        if not server_key:
+            app.logger.error("Printer-client API unavailable: server API key is not configured")
+            return jsonify(
+                {"status": "error", "error": "Printer-client API key is not configured"}
+            ), 503
+
+        supplied_key = str(request.headers.get("X-API-Key", "") or "")
+        if not supplied_key or not hmac.compare_digest(supplied_key, server_key):
+            return jsonify({"status": "error", "error": "Unauthorized"}), 403
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
 @app.post("/log-print")
+@require_printer_api_key
 def log_print():
     """API endpoint to log print data from 3D printers."""
-    # Simple API key check
-    auth = request.headers.get("X-API-Key", "")
-    if API_KEY and auth != API_KEY:
-        return jsonify({"status": "error", "error": "Unauthorized"}), 403
-
     payload = request.get_json(force=True, silent=True)
     if not payload:
         return jsonify({"status": "error", "error": "Invalid or missing JSON"}), 400
@@ -317,11 +347,13 @@ def log_print():
         return jsonify({"status": "error", "error": f"Missing fields: {', '.join(missing)}"}), 400
 
     try:
-        ts = float(payload["timestamp"])
-        duration_seconds = float(payload["duration_seconds"])
-        filament_mm = float(payload["filament_mm"])
-    except ValueError:
-        return jsonify({"status": "error", "error": "Numeric fields must be numbers"}), 400
+        ts = finite_float(payload["timestamp"], label="timestamp")
+        duration_seconds = finite_float(
+            payload["duration_seconds"], label="duration_seconds", nonnegative=True
+        )
+        filament_mm = finite_float(payload["filament_mm"], label="filament_mm", nonnegative=True)
+    except NumericValidationError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
 
     printer_name_raw = str(payload["printer"])
     filename_raw = str(payload["filename"])
@@ -329,8 +361,8 @@ def log_print():
     def _choose_duration_seconds(payload_dur, live_dur, mr_print, mr_total, mr_calc):
         def _pos(v):
             try:
-                v = float(v)
-            except Exception:
+                v = finite_float(v, label="duration candidate", nonnegative=True)
+            except NumericValidationError:
                 return 0.0
             return v if v > 0 else 0.0
 
@@ -454,8 +486,8 @@ def log_print():
             if ok and job:
                 def _as_float(v):
                     try:
-                        return float(v)
-                    except Exception:
+                        return finite_float(v, label="Moonraker numeric value")
+                    except NumericValidationError:
                         return 0.0
 
                 def _get_first(j, keys):
@@ -586,29 +618,27 @@ def health():
 
     try:
         if _is_sql_only():
-            db_ok = False
-            printers_count = 0
-            try:
-                with db_module.connect_db() as conn:
-                    db_module.apply_migrations(conn)
-                    row = conn.execute("SELECT COUNT(*) AS c FROM printers").fetchone()
-                    if row is not None:
-                        printers_count = row["c"] if hasattr(row, "__getitem__") else int(row[0])
-                    db_ok = True
-            except Exception as exc:
-                return jsonify({"status": "error", "backend": "sql", "error": str(exc)}), 500
-
+            readiness = check_sql_only_readiness()
+            db_ok = any(
+                check.get("name") == "db_connection" and bool(check.get("ok"))
+                for check in readiness.get("checks", [])
+            )
+            ready = bool(readiness.get("ready"))
             return (
                 jsonify(
                     {
-                        "status": "ok",
+                        "status": "ok" if ready else "error",
                         "backend": "sql",
+                        "ready": ready,
                         "db_ok": db_ok,
-                        "printers_count": printers_count,
+                        "schema_version": readiness.get("schema_version"),
+                        "printers_count": readiness.get("printers_count", 0),
+                        "checks": readiness.get("checks", []),
+                        "errors": readiness.get("errors", []),
                         "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
                     }
                 ),
-                200,
+                200 if ready else 503,
             )
 
         status = {
@@ -637,6 +667,7 @@ def health():
 # ============================================================================
 
 @app.post("/job-start")
+@require_printer_api_key
 def job_start():
     """Start tracking a new print job."""
     from core import live
@@ -671,26 +702,20 @@ def job_start():
         return jsonify({"success": False, "error": "Missing required fields: printer_name, filename"}), 400
     
     # Optional fields
-    start_time = data.get("start_time")
-    if start_time:
-        try:
-            start_time = float(start_time)
-        except ValueError:
-            start_time = None
-    
-    estimated_duration = data.get("estimated_duration")
-    if estimated_duration:
-        try:
-            estimated_duration = float(estimated_duration)
-        except ValueError:
-            estimated_duration = None
-    
-    estimated_filament = data.get("estimated_filament_mm")
-    if estimated_filament:
-        try:
-            estimated_filament = float(estimated_filament)
-        except ValueError:
-            estimated_filament = None
+    try:
+        start_time = optional_finite_float(data.get("start_time"), label="start_time")
+        estimated_duration = optional_finite_float(
+            data.get("estimated_duration"),
+            label="estimated_duration",
+            nonnegative=True,
+        )
+        estimated_filament = optional_finite_float(
+            data.get("estimated_filament_mm"),
+            label="estimated_filament_mm",
+            nonnegative=True,
+        )
+    except NumericValidationError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     
     profile_id = data.get("profile_id")
     
@@ -701,6 +726,7 @@ def job_start():
 
 
 @app.post("/job-update")
+@require_printer_api_key
 def job_update():
     """Update an active print job."""
     from core import live
@@ -742,9 +768,9 @@ def job_update():
     for field in ["estimated_duration", "estimated_filament_mm"]:
         if field in updates:
             try:
-                updates[field] = float(updates[field])
-            except (ValueError, TypeError):
-                pass
+                updates[field] = finite_float(updates[field], label=field, nonnegative=True)
+            except NumericValidationError as exc:
+                return jsonify({"success": False, "error": str(exc)}), 400
     
     result = live.update_job(printer_name, **updates)
     
@@ -756,6 +782,7 @@ def job_update():
 
 
 @app.post("/job-pause")
+@require_printer_api_key
 def job_pause():
     """Pause an active print job."""
     from core import live
@@ -807,6 +834,7 @@ def job_pause():
 
 
 @app.post("/job-resume")
+@require_printer_api_key
 def job_resume():
     """Resume a paused print job."""
     from core import live
@@ -851,6 +879,7 @@ def job_resume():
 
 
 @app.post("/job-cancel")
+@require_printer_api_key
 def job_cancel():
     """Cancel an active print job."""
     from core import live
@@ -880,9 +909,9 @@ def job_cancel():
     elapsed_seconds = None
     if elapsed_raw is not None and str(elapsed_raw).strip() != "":
         try:
-            elapsed_seconds = float(elapsed_raw)
-        except Exception:
-            return jsonify({"success": False, "error": "elapsed_seconds must be a number"}), 400
+            elapsed_seconds = finite_float(elapsed_raw, label="elapsed_seconds", nonnegative=True)
+        except NumericValidationError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
 
     # Prefer the currently active job for this printer (more reliable than inbound payload).
     active_before = live.get_job(printer_name)
@@ -985,6 +1014,7 @@ def job_cancel():
 
 
 @app.post("/job-end")
+@require_printer_api_key
 def job_end():
     """Mark a print job as completed."""
     from core import live
@@ -1042,7 +1072,10 @@ def index():
                         job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
                     else:
                         job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    _mark_completed_jobs_sql(job_uids)
+                    try:
+                        _mark_completed_jobs_sql(job_uids)
+                    except Exception as exc:
+                        return redirect(url_for("index", error=f"Failed to mark jobs completed: {exc}"))
                 else:
                     if all(str(v).strip().isdigit() for v in selected):
                         indices = [int(i) for i in selected if str(i).strip().isdigit()]
@@ -1063,7 +1096,10 @@ def index():
                 else:
                     job_uids = [str(v).strip() for v in selected if str(v).strip()]
 
-            updated = storage_backend.recalc_jobs(job_uids, compute_costs)
+            try:
+                updated = storage_backend.recalc_jobs(job_uids, compute_costs)
+            except Exception as exc:
+                return redirect(url_for("index", error=f"Failed to recalculate jobs: {exc}"))
             return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
 
         # Handle row deletion
@@ -1077,7 +1113,10 @@ def index():
                         job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
                     else:
                         job_uids = [str(v).strip() for v in selected if str(v).strip()]
-                    deleted = _delete_jobs_sql(job_uids)
+                    try:
+                        deleted = _delete_jobs_sql(job_uids)
+                    except Exception as exc:
+                        return redirect(url_for("index", error=f"Failed to delete jobs: {exc}"))
                     system_events.emit_event(
                         "deleted",
                         "Deleted history jobs",
@@ -1105,7 +1144,7 @@ def index():
                         )
             return redirect(url_for("index"))
 
-    error = None
+    error = request.args.get("error", "").strip() or None
     message = request.args.get("msg", "").strip()
     
     # Apply date filtering (printer + range + legacy date range inputs)
@@ -1344,6 +1383,8 @@ def _filter_history_rows_for_recalc(rows, args):
         try:
             assignments = projects.load_assignments()
         except Exception:
+            if _is_sql_only():
+                raise
             assignments = {}
 
     filtered = []
@@ -1395,8 +1436,36 @@ def _parse_int(value, default):
         return default
 
 
+def _parse_required_nonneg_float(raw, field_label):
+    raw = (raw or "").strip()
+    if not raw:
+        return None, f"Missing {field_label}."
+    try:
+        value = finite_float(raw, label=field_label, nonnegative=True)
+    except NumericValidationError:
+        return None, f"Invalid {field_label} (must be a non-negative number)."
+    return value, None
+
+
+def _parse_required_positive_float(raw, field_label):
+    raw = (raw or "").strip()
+    if not raw:
+        return None, f"Missing {field_label}."
+    try:
+        value = finite_float(raw, label=field_label, positive=True)
+    except NumericValidationError:
+        return None, f"Invalid {field_label} (must be a finite number greater than zero)."
+    return value, None
+
+
 def _is_sql_only() -> bool:
     return str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql"
+
+
+def _sql_only_printer_exists(printer: str) -> bool:
+    if not _is_sql_only():
+        return True
+    return str(printer or "").strip() in get_canonical_printer_names()
 
 
 def _load_history_rows_for_recalc() -> tuple[list, str | None]:
@@ -1414,8 +1483,7 @@ def _sum_total_cost_sql(job_uids: list[str]) -> float:
     if not job_uids:
         return 0.0
     placeholders = ",".join(["?"] * len(job_uids))
-    try:
-        conn = db_module.connect_db()
+    with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         row = conn.execute(
             f"SELECT SUM(COALESCE(total_cost, 0)) AS total FROM jobs WHERE job_uid IN ({placeholders})",
@@ -1423,9 +1491,7 @@ def _sum_total_cost_sql(job_uids: list[str]) -> float:
         ).fetchone()
         if not row:
             return 0.0
-        return float(row["total"] or 0.0)
-    except Exception:
-        return 0.0
+        return finite_float(row["total"] or 0.0, label="total_cost", nonnegative=True)
 
 
 def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
@@ -1433,8 +1499,7 @@ def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
     updated = 0
-    try:
-        conn = db_module.connect_db()
+    with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         rows = conn.execute(
             f"""
@@ -1457,18 +1522,21 @@ def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
             if not job_uid:
                 continue
             printer = str(row["printer"] or "").strip()
-            try:
-                duration_seconds = float(row["duration_seconds"] or 0.0)
-            except Exception:
-                duration_seconds = 0.0
-            try:
-                filament_mm = float(row["filament_mm"] or 0.0)
-            except Exception:
-                filament_mm = 0.0
-            try:
-                paused_seconds_total = float(row["paused_seconds_total"] or 0.0)
-            except Exception:
-                paused_seconds_total = 0.0
+            duration_seconds = finite_float(
+                row["duration_seconds"] or 0.0,
+                label="duration_seconds",
+                nonnegative=True,
+            )
+            filament_mm = finite_float(
+                row["filament_mm"] or 0.0,
+                label="filament_mm",
+                nonnegative=True,
+            )
+            paused_seconds_total = finite_float(
+                row["paused_seconds_total"] or 0.0,
+                label="paused_seconds_total",
+                nonnegative=True,
+            )
 
             computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
             if not computed:
@@ -1510,8 +1578,6 @@ def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
             updated += 1
 
         conn.commit()
-    except Exception as exc:
-        app.logger.warning("SQL recalc failed: %s", exc)
     if updated:
         app.logger.info("SQL recalc updated %s job(s).", updated)
     return updated
@@ -1521,8 +1587,7 @@ def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
     if not job_uids:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
-    try:
-        conn = db_module.connect_db()
+    with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         now_iso = datetime.now(timezone.utc).isoformat()
         cur = conn.execute(
@@ -1532,16 +1597,13 @@ def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
         )
         conn.commit()
         return int(cur.rowcount or 0)
-    except Exception:
-        return 0
 
 
 def _delete_jobs_sql(job_uids: list[str]) -> int:
     if not job_uids:
         return 0
     placeholders = ",".join(["?"] * len(job_uids))
-    try:
-        conn = db_module.connect_db()
+    with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         conn.execute(
             f"DELETE FROM project_assignments WHERE job_uid IN ({placeholders})",
@@ -1553,14 +1615,12 @@ def _delete_jobs_sql(job_uids: list[str]) -> int:
         )
         conn.commit()
         return int(cur.rowcount or 0)
-    except Exception:
-        return 0
 
 
 @app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
 def recalculate_page():
     """
-    Recalculate Center (Phase 1): select historical jobs by job_uid and rerun pricing.
+    Recalculate Center: select historical jobs by job_uid and rerun pricing.
 
     Data safety:
       - Never deletes rows
@@ -1606,7 +1666,7 @@ def recalculate_page():
     recalc_visible_cols = get_visible_columns_for_table(
         display_settings,
         "recalc_jobs",
-        ["printer", "filename", "status", "hours", "total", "job_uid"],
+        ["printer", "filename", "status", "hours", "filament", "time_cost", "material_cost", "total", "job_uid"],
     )
     return render_template(
         "recalculate.html",
@@ -1621,7 +1681,7 @@ def recalculate_page():
         selected_printer=request.args.get("printer", "All"),
         q=request.args.get("q", "").strip(),
         status=request.args.get("status", "All"),
-        recompute_mode=request.args.get("recompute_mode", "pricing_only"),
+        recompute_mode="pricing_only",
         apply_filament_profile=request.args.get("apply_filament_profile", "") == "1",
         apply_rate_profile=request.args.get("apply_rate_profile", "") == "1",
         filament_profile_id=request.args.get("filament_profile_id", "").strip(),
@@ -1649,17 +1709,15 @@ def recalculate_page():
 
 @app.route("/recalculate/run", methods=["POST"], endpoint="recalculate_run")
 def recalculate_run():
-    """Run a bulk recalc for selected job_uids (Phase 1)."""
+    """Run pricing recalculation for selected job_uids."""
     def _parse_optional_nonneg_float(raw):
         raw = (raw or "").strip()
         if not raw:
             return None, None
         try:
-            value = float(raw)
-            if value < 0:
-                raise ValueError()
+            value = finite_float(raw, label="override", nonnegative=True)
             return value, None
-        except Exception:
+        except NumericValidationError:
             return None, "Invalid value (must be a non-negative number)."
 
     def _build_compute_fn(
@@ -1719,6 +1777,20 @@ def recalculate_run():
         return compute_costs, None, plan
 
     def _append_recalc_audit_log(record):
+        if _is_sql_only():
+            system_events.emit_event(
+                "activity",
+                "Pricing recalculation completed",
+                f"Recalculated pricing for {int(record.get('count_updated') or 0)} job(s).",
+                meta={
+                    "action": "recalculate",
+                    "count_requested": int(record.get("count_requested") or 0),
+                    "count_updated": int(record.get("count_updated") or 0),
+                    "count_skipped_missing": int(record.get("count_skipped_missing") or 0),
+                    "job_uids_hash": str(record.get("job_uids_hash") or ""),
+                },
+            )
+            return
         try:
             os.makedirs(DATA_DIR, exist_ok=True)
             path = os.path.join(DATA_DIR, "recalc_runs.jsonl")
@@ -1744,7 +1816,7 @@ def recalculate_run():
         recompute_mode = "pricing_only"
 
     if recompute_mode == "full":
-        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
+        return redirect(url_for("recalculate_page", msg="Only pricing recalculation is supported in this release."))
 
     compute_fn, plan_err, plan = _build_compute_fn(
         apply_rate_profile,
@@ -1807,8 +1879,11 @@ def recalculate_run():
                     continue
 
         if _is_sql_only():
-            updated = _recalc_jobs_sql(to_update, compute_fn)
-            after_total = _sum_total_cost_sql(to_update)
+            try:
+                updated = _recalc_jobs_sql(to_update, compute_fn)
+                after_total = _sum_total_cost_sql(to_update)
+            except Exception as exc:
+                return redirect(url_for("recalculate_page", msg=f"Pricing recalculation failed: {exc}"))
         else:
             updated = storage_backend.recalc_jobs(to_update, compute_fn)
 
@@ -1880,18 +1955,16 @@ def recalculate_run():
 
 @app.route("/recalculate/preview", methods=["POST"], endpoint="recalculate_preview")
 def recalculate_preview():
-    """Preview a bulk recalc without writing any history (Phase 3)."""
+    """Preview pricing recalculation without writing history."""
 
     def _parse_optional_nonneg_float(raw):
         raw = (raw or "").strip()
         if not raw:
             return None, None
         try:
-            value = float(raw)
-            if value < 0:
-                raise ValueError()
+            value = finite_float(raw, label="override", nonnegative=True)
             return value, None
-        except Exception:
+        except NumericValidationError:
             return None, "Invalid value (must be a non-negative number)."
 
     def _build_compute_fn(
@@ -1966,7 +2039,7 @@ def recalculate_preview():
     if recompute_mode not in ("pricing_only", "full"):
         recompute_mode = "pricing_only"
     if recompute_mode == "full":
-        return redirect(url_for("recalculate_page", msg="Full recompute is not supported yet; use pricing-only."))
+        return redirect(url_for("recalculate_page", msg="Only pricing recalculation is supported in this release."))
 
     compute_fn, plan_or_err = _build_compute_fn(
         apply_rate_profile,
@@ -2022,15 +2095,35 @@ def recalculate_preview():
         except Exception:
             filament_mm = 0.0
         try:
+            paused_seconds_total = float(r.get("paused_seconds_total") or 0.0)
+        except Exception:
+            paused_seconds_total = 0.0
+        try:
             old_total = float(r.get("total_cost") or 0.0)
         except Exception:
             old_total = 0.0
 
-        computed = compute_fn(printer_name, duration_seconds, filament_mm) or {}
+        computed = compute_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total) or {}
         try:
             new_total = float(computed.get("total_cost") or 0.0)
         except Exception:
             new_total = 0.0
+        try:
+            duration_hours = float(computed.get("duration_hours", duration_seconds / 3600.0) or 0.0)
+        except Exception:
+            duration_hours = duration_seconds / 3600.0
+        try:
+            filament_meters = float(computed.get("filament_meters", filament_mm / 1000.0) or 0.0)
+        except Exception:
+            filament_meters = filament_mm / 1000.0
+        try:
+            time_cost = float(computed.get("time_cost") or 0.0)
+        except Exception:
+            time_cost = 0.0
+        try:
+            material_cost = float(computed.get("material_cost") or 0.0)
+        except Exception:
+            material_cost = 0.0
 
         before_total += old_total
         after_total += new_total
@@ -2039,6 +2132,10 @@ def recalculate_preview():
                 "job_uid": uid,
                 "printer": printer_name,
                 "filename": str(r.get("filename") or ""),
+                "duration_hours": duration_hours,
+                "filament_meters": filament_meters,
+                "time_cost": time_cost,
+                "material_cost": material_cost,
                 "old_total": old_total,
                 "new_total": new_total,
                 "delta": new_total - old_total,
@@ -2052,7 +2149,7 @@ def recalculate_preview():
     recalc_visible_cols = get_visible_columns_for_table(
         display_settings,
         "recalc_jobs",
-        ["printer", "filename", "status", "hours", "total", "job_uid"],
+        ["printer", "filename", "status", "hours", "filament", "time_cost", "material_cost", "total", "job_uid"],
     )
 
     msg = f"Previewing {len(preview_rows)} job(s)."
@@ -2120,9 +2217,9 @@ def recalculate_preview():
 def projects_page():
     """
     Projects page:
-    - Projects are stored in data/projects.json
-    - Job membership is stored in data/project_assignments.json (job_uid -> project_id)
-    - Deleting a project unassigns jobs (no CSV rows are deleted)
+    - SQL-only uses canonical SQL project and assignment state.
+    - Compatibility modes retain JSON project and assignment state.
+    - Deleting a project unassigns jobs without deleting history rows.
     """
     error = None
 
@@ -2676,6 +2773,13 @@ def _settings_view(tab: str):
 
         if action == "update_backup_settings":
             enabled = bool(request.form.get("auto_backup_enabled"))
+            if _is_sql_only() and enabled:
+                return redirect(
+                    url_for(
+                        _settings_endpoint_for_action(action),
+                        error="Automatic backups are unavailable in SQL-only mode; use Backup now.",
+                    )
+                )
             freq = (request.form.get("auto_backup_frequency") or "daily").strip().lower()
             keep_raw = (request.form.get("auto_backup_keep") or "7").strip()
             try:
@@ -2693,9 +2797,14 @@ def _settings_view(tab: str):
         if action == "delete_printer":
             printer = request.form.get("printer", "").strip()
             if printer:
-                pricing.delete_printer(printer, delete_csv=False)
-                # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
-                pricing.hide_printer(printer)
+                if _is_sql_only():
+                    from core import printer_lifecycle
+
+                    printer_lifecycle.delete_printer(printer)
+                else:
+                    pricing.delete_printer(printer, delete_csv=False)
+                    # Soft-delete: hide from Settings/dashboard lists even if CSV history exists.
+                    pricing.hide_printer(printer)
                 system_events.emit_event(
                     "deleted",
                     "Printer removed",
@@ -2705,13 +2814,13 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "update_pause_settings":
-            # Global default is stored in display.json (display settings).
+            # The global default is stored with display settings in the active backend.
             global_include = bool(request.form.get("pause_include_paused_time_default"))
             display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
             display_settings["pause_include_paused_time_default"] = bool(global_include)
             save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
 
-            # Per-printer overrides are stored alongside printer settings in settings.json.
+            # Per-printer overrides are stored with printer settings in the active backend.
             printers = pricing.get_configured_printers()
             settings = load_settings(SETTINGS_FILE)
             if not isinstance(settings, dict):
@@ -2740,17 +2849,43 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action), msg="Pause accounting settings saved."))
 
         if action == "save_printer_defaults":
-            printer = request.form.get("printer")
+            printer = (request.form.get("printer") or "").strip()
             if printer:
+                if _is_sql_only() and not _sql_only_printer_exists(printer):
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
+                rate_raw = request.form.get("rate_per_hour")
+                mode = (request.form.get("filament_mode") or "").strip()
+                filament_rate_raw = request.form.get("filament_rate")
+                grams_raw = request.form.get("grams_per_meter")
+
+                if _is_sql_only():
+                    rate_per_hour, err = _parse_required_nonneg_float(rate_raw, "hourly rate")
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                    if mode not in {"per_meter", "per_gram", "per_kg"}:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
+                    filament_rate, err = _parse_required_nonneg_float(filament_rate_raw, "filament rate")
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                    grams_per_meter, err = _parse_required_positive_float(grams_raw, "grams per meter")
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                else:
+                    rate_per_hour = float(request.form.get("rate_per_hour", 1.0))
+                    if not mode:
+                        mode = "per_meter"
+                    filament_rate = float(request.form.get("filament_rate", 0.25))
+                    grams_per_meter = float(request.form.get("grams_per_meter", 3.0))
+
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
 
                 try:
-                    settings[printer]["rate_per_hour"] = float(request.form.get("rate_per_hour", 1.0))
-                    settings[printer]["filament_mode"] = request.form.get("filament_mode", "per_meter")
-                    settings[printer]["filament_rate"] = float(request.form.get("filament_rate", 0.25))
-                    settings[printer]["grams_per_meter"] = float(request.form.get("grams_per_meter", 3.0))
+                    settings[printer]["rate_per_hour"] = rate_per_hour
+                    settings[printer]["filament_mode"] = mode
+                    settings[printer]["filament_rate"] = filament_rate
+                    settings[printer]["grams_per_meter"] = grams_per_meter
                 except (TypeError, ValueError):
                     pass
 
@@ -2791,6 +2926,8 @@ def _settings_view(tab: str):
             url_raw = (request.form.get("moonraker_url") or "").strip()
             if not printer:
                 return redirect(url_for(_settings_endpoint_for_action(action), error="Missing printer name."))
+            if _is_sql_only() and not _sql_only_printer_exists(printer):
+                return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
 
             url = url_raw.strip()
             if url and not (url.startswith("http://") or url.startswith("https://")):
@@ -2798,7 +2935,7 @@ def _settings_view(tab: str):
 
             try:
                 if _is_sql_only():
-                    with db_module.connect_db() as conn:
+                    with closing(db_module.connect_db()) as conn:
                         db_module.apply_migrations(conn)
                         db_module.upsert_printer(conn, printer, url)
                         conn.commit()
@@ -2918,7 +3055,17 @@ def _settings_view(tab: str):
             if table_id == "history":
                 allowed = [h for h in HEADERS if h != "job_uid"]
             elif table_id == "recalc_jobs":
-                allowed = ["printer", "filename", "status", "hours", "total", "job_uid"]
+                allowed = [
+                    "printer",
+                    "filename",
+                    "status",
+                    "hours",
+                    "filament",
+                    "time_cost",
+                    "material_cost",
+                    "total",
+                    "job_uid",
+                ]
             elif table_id == "projects_unassigned":
                 allowed = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
             elif table_id == "projects_project_jobs":
@@ -2939,14 +3086,24 @@ def _settings_view(tab: str):
             old = request.form.get("old_name", "").strip()
             new = request.form.get("new_name", "").strip()
             if old and new:
-                rename_printer(old, new)
+                if _is_sql_only():
+                    from core import printer_lifecycle
+
+                    printer_lifecycle.rename_printer(old, new)
+                else:
+                    rename_printer(old, new)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "merge_printers":
             primary = request.form.get("primary", "").strip()
             secondary = request.form.get("secondary", "").strip()
             if primary and secondary:
-                merge_printers(primary, secondary)
+                if _is_sql_only():
+                    from core import printer_lifecycle
+
+                    printer_lifecycle.merge_printers(primary, secondary)
+                else:
+                    merge_printers([secondary], primary)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "add_filament_profile":
@@ -2954,16 +3111,28 @@ def _settings_view(tab: str):
             material = request.form.get("material", "").strip()
             brand = request.form.get("brand", "").strip()
             color = request.form.get("color", "").strip()
-            mode = request.form.get("filament_mode", "per_meter").strip()
+            mode = request.form.get("filament_mode", "").strip()
             description = request.form.get("description", "").strip()
-            try:
-                rate = float(request.form.get("filament_rate", 0.25))
-            except (TypeError, ValueError):
-                rate = None
-            try:
-                gpm = float(request.form.get("grams_per_meter", 3.0))
-            except (TypeError, ValueError):
-                gpm = None
+            if _is_sql_only():
+                if mode not in {"per_meter", "per_gram", "per_kg"}:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
+                rate, err = _parse_required_nonneg_float(request.form.get("filament_rate"), "filament rate")
+                if err:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                gpm, err = _parse_required_positive_float(request.form.get("grams_per_meter"), "grams per meter")
+                if err:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+            else:
+                if not mode:
+                    mode = "per_meter"
+                try:
+                    rate = float(request.form.get("filament_rate", 0.25))
+                except (TypeError, ValueError):
+                    rate = None
+                try:
+                    gpm = float(request.form.get("grams_per_meter", 3.0))
+                except (TypeError, ValueError):
+                    gpm = None
             if name and rate is not None:
                 profile = {
                     "name": name,
@@ -2987,6 +3156,21 @@ def _settings_view(tab: str):
                 brand = request.form.get("brand", "").strip()
                 color = request.form.get("color", "").strip()
                 mode = request.form.get("filament_mode", "").strip()
+                if _is_sql_only():
+                    if mode not in {"per_meter", "per_gram", "per_kg"}:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
+                    filament_rate, err = _parse_required_nonneg_float(
+                        request.form.get("filament_rate"),
+                        "filament rate",
+                    )
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+                    grams_per_meter, err = _parse_required_positive_float(
+                        request.form.get("grams_per_meter"),
+                        "grams per meter",
+                    )
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
                 if name:
                     updates["name"] = name
                 updates["material"] = material
@@ -2994,14 +3178,18 @@ def _settings_view(tab: str):
                 updates["color"] = color
                 if mode:
                     updates["filament_mode"] = mode
-                try:
-                    updates["filament_rate"] = float(request.form.get("filament_rate"))
-                except (TypeError, ValueError):
-                    updates["filament_rate"] = None
-                try:
-                    updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
-                except (TypeError, ValueError):
-                    updates["grams_per_meter"] = None
+                if _is_sql_only():
+                    updates["filament_rate"] = filament_rate
+                    updates["grams_per_meter"] = grams_per_meter
+                else:
+                    try:
+                        updates["filament_rate"] = float(request.form.get("filament_rate"))
+                    except (TypeError, ValueError):
+                        updates["filament_rate"] = None
+                    try:
+                        updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
+                    except (TypeError, ValueError):
+                        updates["grams_per_meter"] = None
                 profiles.update_profile(profile_id, updates)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -3031,16 +3219,34 @@ def _settings_view(tab: str):
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("profile_id", "").strip()
             if printer:
-                profiles.set_printer_active_profile(printer, profile_id)
+                if _is_sql_only() and not _sql_only_printer_exists(printer):
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
+                normalized_profile_id = None if profile_id in {"", "none"} else profile_id
+                saved = profiles.set_printer_mapping(printer, normalized_profile_id)
+                if _is_sql_only() and normalized_profile_id and not saved:
+                    return redirect(
+                        url_for(
+                            _settings_endpoint_for_action(action),
+                            error=f"Filament profile not found: {normalized_profile_id}",
+                        )
+                    )
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "add_rate_profile":
             name = request.form.get("rate_profile_name", "").strip()
             description = request.form.get("rate_profile_description", "").strip()
-            try:
-                rate_per_hour = float(request.form.get("rate_profile_rate", 1.0))
-            except (TypeError, ValueError):
-                rate_per_hour = None
+            if _is_sql_only():
+                rate_per_hour, err = _parse_required_nonneg_float(
+                    request.form.get("rate_profile_rate"),
+                    "hourly rate",
+                )
+                if err:
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=err))
+            else:
+                try:
+                    rate_per_hour = float(request.form.get("rate_profile_rate", 1.0))
+                except (TypeError, ValueError):
+                    rate_per_hour = None
 
             if name and rate_per_hour is not None:
                 rate_profile = {
@@ -3057,13 +3263,23 @@ def _settings_view(tab: str):
                 updates = {}
                 name = request.form.get("rate_profile_name", "").strip()
                 description = request.form.get("rate_profile_description", "").strip()
+                if _is_sql_only():
+                    rate_per_hour, err = _parse_required_nonneg_float(
+                        request.form.get("rate_profile_rate"),
+                        "hourly rate",
+                    )
+                    if err:
+                        return redirect(url_for(_settings_endpoint_for_action(action), error=err))
                 if name:
                     updates["name"] = name
                 updates["description"] = description
-                try:
-                    updates["rate_per_hour"] = float(request.form.get("rate_profile_rate"))
-                except (TypeError, ValueError):
-                    updates["rate_per_hour"] = None
+                if _is_sql_only():
+                    updates["rate_per_hour"] = rate_per_hour
+                else:
+                    try:
+                        updates["rate_per_hour"] = float(request.form.get("rate_profile_rate"))
+                    except (TypeError, ValueError):
+                        updates["rate_per_hour"] = None
                 rates.update_rate_profile(profile_id, updates)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -3093,13 +3309,23 @@ def _settings_view(tab: str):
             printer = request.form.get("printer", "").strip()
             profile_id = request.form.get("rate_profile_id", "").strip()
             if printer:
+                if _is_sql_only() and not _sql_only_printer_exists(printer):
+                    return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
-                if profile_id == "" or profile_id == "none":
+                normalized_profile_id = None if profile_id in {"", "none"} else profile_id
+                if _is_sql_only() and normalized_profile_id and not rates.get_rate_profile(normalized_profile_id):
+                    return redirect(
+                        url_for(
+                            _settings_endpoint_for_action(action),
+                            error=f"Rate profile not found: {normalized_profile_id}",
+                        )
+                    )
+                if normalized_profile_id is None:
                     settings[printer].pop("active_rate_profile_id", None)
                 else:
-                    settings[printer]["active_rate_profile_id"] = profile_id
+                    settings[printer]["active_rate_profile_id"] = normalized_profile_id
                 save_settings(SETTINGS_FILE, DATA_DIR, settings)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -3119,7 +3345,7 @@ def _settings_view(tab: str):
 
     moonraker_urls = {}
     try:
-        with db_module.connect_db() as conn:
+        with closing(db_module.connect_db()) as conn:
             db_module.apply_migrations(conn)
             for p in printers:
                 moonraker_urls[p] = db_module.get_printer_moonraker_url(conn, p) or ""
@@ -3151,7 +3377,17 @@ def _settings_view(tab: str):
 
     # Settings → Other: per-table column visibility (server-backed display.json).
     # Defaults: show all allowed columns if no saved selection exists.
-    recalc_allowed_cols = ["printer", "filename", "status", "hours", "total", "job_uid"]
+    recalc_allowed_cols = [
+        "printer",
+        "filename",
+        "status",
+        "hours",
+        "filament",
+        "time_cost",
+        "material_cost",
+        "total",
+        "job_uid",
+    ]
     projects_unassigned_allowed_cols = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
     projects_project_jobs_allowed_cols = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
 

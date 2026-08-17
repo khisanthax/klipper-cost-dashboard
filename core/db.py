@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import sqlite3
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -16,6 +17,20 @@ logger = logging.getLogger(__name__)
 
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(__file__), "migrations")
+
+
+class ManagedConnection(sqlite3.Connection):
+    """sqlite3 connection that also closes itself after context-manager use."""
+
+    def __enter__(self):
+        super().__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
 
 
 def _utc_now_iso() -> str:
@@ -32,12 +47,11 @@ def _ensure_data_dir() -> None:
 
 def connect_db() -> sqlite3.Connection:
     _ensure_data_dir()
-    conn = sqlite3.connect(_db_path())
+    conn = sqlite3.connect(_db_path(), factory=ManagedConnection)
     conn.row_factory = sqlite3.Row
-    with conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
 
@@ -226,21 +240,27 @@ def job_exists(conn: sqlite3.Connection, job_uid: str) -> bool:
 
 
 def _to_float(value: object) -> Optional[float]:
-    try:
-        if value is None or value == "":
-            return None
-        return float(value)
-    except Exception:
+    if value is None or value == "":
         return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        raise ValueError("numeric database values must be finite")
+    return parsed
 
 
 def _to_int(value: object) -> Optional[int]:
-    try:
-        if value is None or value == "":
-            return None
-        return int(float(value))
-    except Exception:
+    if value is None or value == "":
         return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        raise ValueError("integer database values must be finite")
+    return int(parsed)
 
 
 def _timestamp_to_iso(value: object) -> Optional[str]:
@@ -248,9 +268,11 @@ def _timestamp_to_iso(value: object) -> Optional[str]:
         return None
     try:
         ts = float(value)
-        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-    except Exception:
+    except (TypeError, ValueError):
         return None
+    if not math.isfinite(ts):
+        raise ValueError("timestamp must be finite")
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 def upsert_job(conn: sqlite3.Connection, row: dict) -> None:

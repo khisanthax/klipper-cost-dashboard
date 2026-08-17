@@ -53,6 +53,8 @@ def show_current_settings():
     println(f"Master Host: {load_state('master_host', 'Not set')}")
     println(f"Master Port: {load_state('master_port', DEFAULT_PORT)}")
     println(f"Service Name: {load_state('master_service_name', DEFAULT_SERVICE_NAME)}")
+    println(f"Storage Backend: {load_state('master_storage_backend', 'csv')}")
+    println(f"Reports Backend: {load_state('master_reports_backend', 'csv')}")
     println(f"API Key: {load_state('api_key', 'Not set')}")
     println(f"Printer Dir: {load_state('printer_dir', 'Not set')}")
     println(f"Script Path: {load_state('script_path', 'Not set')}")

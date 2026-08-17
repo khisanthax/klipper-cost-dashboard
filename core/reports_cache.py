@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -84,50 +85,50 @@ def set_cached_payload(
 
 
 def cache_info() -> Dict[str, Any]:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-    row = conn.execute(
-        "SELECT COUNT(*) AS count, MIN(generated_at) AS oldest, MAX(generated_at) AS newest FROM report_cache"
-    ).fetchone()
-    count = int(row["count"] or 0) if row else 0
-    oldest = int(row["oldest"] or 0) if row else 0
-    newest = int(row["newest"] or 0) if row else 0
+        row = conn.execute(
+            "SELECT COUNT(*) AS count, MIN(generated_at) AS oldest, MAX(generated_at) AS newest FROM report_cache"
+        ).fetchone()
+        count = int(row["count"] or 0) if row else 0
+        oldest = int(row["oldest"] or 0) if row else 0
+        newest = int(row["newest"] or 0) if row else 0
 
-    keys = conn.execute(
-        """
-        SELECT key, range_key, backend_version, COUNT(*) AS entries
-          FROM report_cache
-         GROUP BY key, range_key, backend_version
-         ORDER BY key, range_key
-        """
-    ).fetchall()
+        keys = conn.execute(
+            """
+            SELECT key, range_key, backend_version, COUNT(*) AS entries
+              FROM report_cache
+             GROUP BY key, range_key, backend_version
+             ORDER BY key, range_key
+            """
+        ).fetchall()
 
-    return {
-        "count": count,
-        "oldest": oldest,
-        "newest": newest,
-        "groups": [dict(k) for k in keys],
-    }
+        return {
+            "count": count,
+            "oldest": oldest,
+            "newest": newest,
+            "groups": [dict(k) for k in keys],
+        }
 
 
 def clear_cache(*, key: Optional[str] = None, range_key: Optional[str] = None) -> int:
-    conn = db_module.connect_db()
-    db_module.apply_migrations(conn)
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
 
-    where = []
-    params = []
-    if key:
-        where.append("key = ?")
-        params.append(key)
-    if range_key:
-        where.append("range_key = ?")
-        params.append(range_key)
+        where = []
+        params = []
+        if key:
+            where.append("key = ?")
+            params.append(key)
+        if range_key:
+            where.append("range_key = ?")
+            params.append(range_key)
 
-    where_sql = ""
-    if where:
-        where_sql = "WHERE " + " AND ".join(where)
+        where_sql = ""
+        if where:
+            where_sql = "WHERE " + " AND ".join(where)
 
-    res = conn.execute(f"DELETE FROM report_cache {where_sql}", params)
-    conn.commit()
-    return int(res.rowcount or 0)
+        res = conn.execute(f"DELETE FROM report_cache {where_sql}", params)
+        conn.commit()
+        return int(res.rowcount or 0)

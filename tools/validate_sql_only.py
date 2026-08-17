@@ -1,14 +1,20 @@
 #!/usr/bin/env python
 """
-Lightweight SQL-only validation helper.
+SQL-only startup and representative runtime filesystem validation.
 
-Runs a small set of endpoints under KCD_STORAGE_BACKEND=sql and checks that
-runtime file-backed state is not modified.
+Observation starts before app import. Known legacy business-state paths are
+blocked at Python's file-open layer, including direct accesses that bypass KCD's
+centralized guard helpers. Deliberate credential/cache/export/backup exceptions
+remain allowed by policy.
 """
 from __future__ import annotations
 
+import json
 import os
+import sys
+import tempfile
 import time
+from datetime import datetime, timezone
 from typing import Dict, Tuple
 
 
@@ -20,6 +26,13 @@ FILES_TO_WATCH = [
     "data/system_events.jsonl",
     "data/live_jobs.json",
 ]
+
+
+# Script execution otherwise allows an inherited PYTHONPATH to resolve another
+# project's ``app`` module before this repository's app.py.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 
 def _snapshot_files() -> Dict[str, Tuple[bool, float]]:
@@ -49,29 +62,55 @@ def _detect_changes(before: Dict[str, Tuple[bool, float]]) -> Dict[str, str]:
     return changes
 
 
-def main() -> int:
-    os.environ["KCD_STORAGE_BACKEND"] = "sql"
-    # Import app after setting env.
-    import app as kcd_app  # noqa: WPS433
+def _prepare_isolated_sql_state() -> None:
+    from core import db
 
-    client = kcd_app.app.test_client()
+    with db.connect_db() as conn:
+        db.apply_migrations(conn)
+        conn.execute(
+            """
+            INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                "display_settings",
+                json.dumps({"pause_include_paused_time_default": False}),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+
+
+def _run_validation() -> int:
     before = _snapshot_files()
+    from core.sql_only import SqlOnlyFilesystemMonitor, SqlOnlyViolationError
 
-    endpoints = [
-        "/health",
-        "/",
-        "/reports",
-        "/projects",
-        "/settings/printers",
-        "/settings/other",
-        "/system-events",
-    ]
+    try:
+        with SqlOnlyFilesystemMonitor() as monitor:
+            # Import only after observation begins so startup is part of the contract.
+            import app as kcd_app  # noqa: WPS433
 
-    for ep in endpoints:
-        resp = client.get(ep)
-        if resp.status_code >= 400:
-            print(f"[sql-only] endpoint failed: {ep} status={resp.status_code}")
-            return 2
+            client = kcd_app.app.test_client()
+            endpoints = [
+                "/health",
+                "/",
+                "/reports",
+                "/projects",
+                "/settings/printers",
+                "/settings/other",
+                "/system-events",
+            ]
+
+            for ep in endpoints:
+                resp = client.get(ep)
+                if resp.status_code >= 400:
+                    print(f"[sql-only] endpoint failed: {ep} status={resp.status_code}")
+                    return 2
+    except SqlOnlyViolationError as exc:
+        print(f"[sql-only] forbidden filesystem access: {exc}")
+        return 4
 
     # allow any async disk flush
     time.sleep(0.1)
@@ -81,8 +120,26 @@ def main() -> int:
             print(f"[sql-only] file change detected: {path} ({reason})")
         return 3
 
-    print("[sql-only] validation OK: no runtime file writes detected.")
+    allowed = [access for access in monitor.accesses if access["classification"].startswith("allowed_")]
+    print(
+        "[sql-only] validation OK: startup/routes used no legacy runtime files "
+        f"({len(allowed)} allowed filesystem access(es) observed)."
+    )
     return 0
+
+
+def main() -> int:
+    os.environ["KCD_STORAGE_BACKEND"] = "sql"
+    os.environ.setdefault("KCD_API_KEY", "sql-only-validator")
+
+    original_cwd = os.getcwd()
+    with tempfile.TemporaryDirectory(prefix="kcd-sql-only-validation-") as tmpdir:
+        try:
+            os.chdir(tmpdir)
+            _prepare_isolated_sql_state()
+            return _run_validation()
+        finally:
+            os.chdir(original_cwd)
 
 
 if __name__ == "__main__":

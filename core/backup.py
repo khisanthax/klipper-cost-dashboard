@@ -4,17 +4,19 @@ Backup utilities for Klipper Cost Dashboard.
 Backups are written under `data/backups/` so they survive container rebuilds
 when `./data:/app/data` is bind-mounted via docker-compose.
 
-SQL-only note:
-  Backups are file-backed and are blocked in SQL-only mode to avoid runtime
-  JSON/CSV reads/writes.
+Backup archives are an explicit filesystem exception in SQL-only mode. Both
+user-invoked and enabled automatic backups use a consistent SQLite snapshot.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tarfile
+import tempfile
 import time
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional, Tuple
@@ -45,41 +47,58 @@ def _is_sql_only() -> bool:
 
 
 def _load_backup_settings_sql() -> dict:
-    try:
-        from core import db as db_module
-        conn = db_module.connect_db()
+    from core import db as db_module
+    with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         row = conn.execute("SELECT value_json FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
         if not row:
             return {}
         raw = row[0] if isinstance(row, (tuple, list)) else row["value_json"]
         data = json.loads(raw) if raw else {}
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+        if not isinstance(data, dict):
+            raise ValueError("user_settings.backup_settings must contain a JSON object")
+        return data
+
+
+def _create_sqlite_snapshot(source_path: str, snapshot_path: str) -> None:
+    """Create and verify a transactionally consistent SQLite snapshot."""
+    source = None
+    destination = None
+    try:
+        source = sqlite3.connect(source_path, timeout=30)
+        destination = sqlite3.connect(snapshot_path, timeout=30)
+        source.backup(destination)
+        check = destination.execute("PRAGMA integrity_check").fetchone()
+        if not check or str(check[0]).strip().lower() != "ok":
+            raise RuntimeError("SQLite backup snapshot failed integrity_check")
+    finally:
+        if destination is not None:
+            destination.close()
+        if source is not None:
+            source.close()
 
 
 def _save_backup_settings_sql(settings_dict: dict) -> None:
     try:
         from core import db as db_module
-        conn = db_module.connect_db()
-        db_module.apply_migrations(conn)
-        now = datetime.now().isoformat()
-        payload = json.dumps(settings_dict if isinstance(settings_dict, dict) else {}, indent=2)
-        row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
-                (payload, now, "backup_settings"),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
-                ("backup_settings", payload, now),
-            )
-        conn.commit()
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn)
+            now = datetime.now().isoformat()
+            payload = json.dumps(settings_dict if isinstance(settings_dict, dict) else {}, indent=2)
+            row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", ("backup_settings",)).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
+                    (payload, now, "backup_settings"),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
+                    ("backup_settings", payload, now),
+                )
+            conn.commit()
     except Exception:
-        pass
+        raise
 
 
 def _read_json_file(path: str, default: Any) -> Any:
@@ -143,6 +162,8 @@ def save_backup_settings(
     auto_backup_frequency: str,
     auto_backup_keep: int,
 ) -> BackupSettings:
+    if _is_sql_only() and auto_backup_enabled:
+        raise ValueError("Automatic backups are unavailable in SQL-only mode; use Backup now.")
     if _is_sql_only():
         b = _load_backup_settings_sql()
         if not isinstance(b, dict):
@@ -212,25 +233,41 @@ def create_backup_archive(*, keep: Optional[int] = None) -> str:
     out_path = os.path.join(BACKUPS_DIR, filename)
 
     data_dir_abs = os.path.abspath(DATA_DIR)
-    backups_dir_abs = os.path.abspath(BACKUPS_DIR)
+
+    from core import db as db_module
+
+    source_db = os.path.abspath(db_module._db_path())
+    has_sqlite = os.path.isfile(source_db)
 
     def _filter(ti: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
         # `ti.name` is based on arcname ("data/...")
         if ti.name == "data/backups" or ti.name.startswith("data/backups/"):
             return None
+        if ti.name in ("data/kcd.db", "data/kcd.db-wal", "data/kcd.db-shm"):
+            return None
         return ti
 
-    with tarfile.open(out_path, "w:gz") as tf:
-        # Add the entire data/ directory (includes print_costs.csv and all project JSON files).
-        tf.add(data_dir_abs, arcname="data", filter=_filter)
+    try:
+        with tempfile.TemporaryDirectory(prefix="kcd_backup_snapshot_") as temp_dir:
+            snapshot_path = os.path.join(temp_dir, "kcd.db")
+            if has_sqlite:
+                _create_sqlite_snapshot(source_db, snapshot_path)
 
-        # If CSV is configured outside data/, include it explicitly (rare).
+            with tarfile.open(out_path, "w:gz") as tf:
+                tf.add(data_dir_abs, arcname="data", filter=_filter)
+                if has_sqlite:
+                    tf.add(snapshot_path, arcname="data/kcd.db")
+
+                # If CSV is configured outside data/, include it explicitly (rare).
+                csv_abs = os.path.abspath(CSV_FILE)
+                if os.path.exists(csv_abs) and not csv_abs.startswith(data_dir_abs + os.sep):
+                    tf.add(csv_abs, arcname=os.path.join("data", os.path.basename(csv_abs)))
+    except Exception:
         try:
-            csv_abs = os.path.abspath(CSV_FILE)
-            if os.path.exists(csv_abs) and not csv_abs.startswith(data_dir_abs + os.sep):
-                tf.add(csv_abs, arcname=os.path.join("data", os.path.basename(csv_abs)))
-        except Exception:
-            pass
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        finally:
+            raise
 
     if keep is not None:
         _enforce_retention(int(keep))
@@ -244,6 +281,9 @@ def maybe_run_auto_backup() -> Tuple[bool, Optional[str], Optional[str]]:
 
     Returns (ran, archive_path, error_message).
     """
+    if _is_sql_only():
+        return False, None, "Automatic backups are disabled in SQL-only mode."
+
     try:
         settings = load_backup_settings()
     except Exception:
