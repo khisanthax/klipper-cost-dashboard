@@ -1,12 +1,56 @@
-﻿# Changelog
+# Changelog
+
+## Unreleased
+
+### Added
+- Added reusable SQL-only readiness validation shared by startup, `/health`, and `python -m kcd db readiness`.
+- Added default fail-fast startup for strict SQL-only mode, with `KCD_SQL_ONLY_FAIL_FAST=0` as a diagnostic escape hatch.
+- Added representative pre-import and runtime filesystem monitoring with explicit credential, cache, export, backup, and temporary-file exceptions.
+- Added `KCD_API_KEY` as an environment override for the `secret.json` credential fallback.
+- Added SQL-only printer rename, merge, retirement, and linked-state regression coverage.
+- Added filament usage, time cost, material cost, and total cost visibility to Recalculate jobs and previews.
+
+### Changed
+- Made SQL-backed configuration canonical in SQL-only mode, including pricing, pause policy, display settings, active profile mappings, projects, and system events.
+- Defined CSV and dual mode as supported compatibility runtime modes for this release line while keeping SQL-only strict/canonical.
+- Changed Docker healthchecks to use `/health` readiness rather than the dashboard route.
+- Retired printers now remain available to historical jobs/events but are excluded from readiness, active discovery, and new incoming jobs.
+- Recalculate is explicitly pricing-only; Full Recompute is deferred until its semantics are designed.
+- SQL-only Recalculate audit activity is persisted through SQL system events instead of JSONL.
+
+### Fixed
+- Surfaced canonical SQL read and write failures instead of presenting false empty state or successful persistence.
+- Kept Recalculate preview and execution consistent for pause-accounting inputs.
+- Isolated strict SQL-only lifecycle and representative routes from compatibility CSV/JSON and installer-state paths.
+- Corrected job-cancel test isolation so tests target the actual storage backend path.
+
+## v0.3.0 - 2026-01-20
+
+### Added
+- Added the SQLite foundation, schema migrations, legacy CSV/JSON import, dual writes, parity verification, and backfill tooling.
+- Added SQL-backed Print History and Reports repositories, DB-backed report caching, SQL CSV export, and history/report parity tools.
+- Added SQL-backed Projects, assignments, manual jobs, and planned items plus explicit legacy Projects import tooling.
+- Added installer awareness for database initialization/import and stable external printer identities.
+- Added SQL persistence for printer settings, filament and hourly-rate profiles, backup settings, system events, thumbnail references, and Moonraker URLs.
+- Added SQL-only validation helpers, runtime file guards, Moonraker history import, thumbnail diagnostics, and printer diagnostics.
+
+### Changed
+- Forced History and Reports to SQL when strict SQL-only mode is selected.
+- Kept active live-job state in memory and thumbnail images in an explicit cache during SQL-only runtime.
+- Expanded explicit SQL export and Moonraker backfill workflows for installations where SQL contains more history than legacy CSV.
+
+### Fixed
+- Corrected duration/time-cost persistence and completed-job finalization using Moonraker history.
+- Hardened report-cache commits, timestamp parity, printer lookup, profile mappings, Moonraker URL handling, and external-ID uniqueness migration.
+- Prevented SQL-only Projects, Recalculate, profile, and storage paths from falling back to legacy runtime files.
 
 ## v0.2.0
 - Added System Events audit trail with filters and expandable details for warnings, deletions, and failures.
-- Added Moonraker history import (idempotent) with inferred outcomes and effective durations for cancelled jobs.
-- Added pause tracking, counts, and per-printer pause accounting settings (exclude paused time by default).
-- Improved Print History (pagination order fix, filters, column visibility, and CSV schema auto-repair).
-- Expanded Projects workflow (manual jobs, planned items, recalc tools, and totals).
-- Installer improvements (master status/install flow, cancel script fixes, and Moonraker URL detection).
+- Added Moonraker history import with inferred outcomes and effective durations for cancelled jobs.
+- Added pause tracking, counts, and per-printer pause accounting settings.
+- Improved Print History pagination, filters, column visibility, and CSV schema repair.
+- Expanded Projects with manual jobs, planned items, recalculation tools, and totals.
+- Improved installer master/client flows, cancel scripts, and Moonraker URL detection.
 
 ## v0.1.0
-- Initial public release (CSV-based print cost tracking).
+- Initial public release with CSV-based print cost tracking.

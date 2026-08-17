@@ -4,9 +4,8 @@ Curated system events / audit trail for Klipper Cost Dashboard.
 This is intentionally not a raw log viewer. Events are human-readable summaries of
 meaningful actions and warnings (deletes, failures, manual actions required, etc.).
 
-SQL-only note:
-  The event store is file-backed and is blocked in SQL-only mode to avoid runtime
-  JSON/JSONL reads/writes.
+SQL-only mode persists events in SQLite. Compatibility modes retain the bounded
+JSONL event store.
 """
 
 from __future__ import annotations

@@ -215,8 +215,8 @@ def _include_paused_time_for_printer(printer_name: str) -> bool:
     Resolve whether a printer should include paused time in hourly billing.
 
     Precedence:
-    1) Per-printer override (settings.json) when enabled.
-    2) Global default (display.json).
+    1) Per-printer override from the active storage backend when enabled.
+    2) Global display-setting default from the active storage backend.
     """
     try:
         printer_settings = _get_printer_settings(printer_name)
@@ -518,7 +518,7 @@ def get_known_printers():
 
 
 def get_configured_printers():
-    """Printers explicitly configured in settings.json (excluding hidden)."""
+    """Return active printers explicitly configured in the current backend."""
     def _norm(name) -> str:
         return str(name or "").strip()
 
@@ -535,8 +535,9 @@ def get_configured_printers():
 
 def get_discovered_printers():
     """
-    Printers found only via CSV history (not present in settings.json), excluding hidden.
-    Used for optional display in Settings.
+    Return history-only printers in compatibility modes, excluding hidden ones.
+
+    SQL-only returns active canonical SQL printers that do not have settings.
     """
     def _norm(name) -> str:
         return str(name or "").strip()

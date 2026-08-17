@@ -1591,7 +1591,7 @@ def _delete_jobs_sql(job_uids: list[str]) -> int:
 @app.route("/recalculate", methods=["GET"], endpoint="recalculate_page")
 def recalculate_page():
     """
-    Recalculate Center (Phase 1): select historical jobs by job_uid and rerun pricing.
+    Recalculate Center: select historical jobs by job_uid and rerun pricing.
 
     Data safety:
       - Never deletes rows
@@ -1680,7 +1680,7 @@ def recalculate_page():
 
 @app.route("/recalculate/run", methods=["POST"], endpoint="recalculate_run")
 def recalculate_run():
-    """Run a bulk recalc for selected job_uids (Phase 1)."""
+    """Run pricing recalculation for selected job_uids."""
     def _parse_optional_nonneg_float(raw):
         raw = (raw or "").strip()
         if not raw:
@@ -1925,7 +1925,7 @@ def recalculate_run():
 
 @app.route("/recalculate/preview", methods=["POST"], endpoint="recalculate_preview")
 def recalculate_preview():
-    """Preview a bulk recalc without writing any history (Phase 3)."""
+    """Preview pricing recalculation without writing history."""
 
     def _parse_optional_nonneg_float(raw):
         raw = (raw or "").strip()
@@ -2189,9 +2189,9 @@ def recalculate_preview():
 def projects_page():
     """
     Projects page:
-    - Projects are stored in data/projects.json
-    - Job membership is stored in data/project_assignments.json (job_uid -> project_id)
-    - Deleting a project unassigns jobs (no CSV rows are deleted)
+    - SQL-only uses canonical SQL project and assignment state.
+    - Compatibility modes retain JSON project and assignment state.
+    - Deleting a project unassigns jobs without deleting history rows.
     """
     error = None
 
@@ -2779,13 +2779,13 @@ def _settings_view(tab: str):
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "update_pause_settings":
-            # Global default is stored in display.json (display settings).
+            # The global default is stored with display settings in the active backend.
             global_include = bool(request.form.get("pause_include_paused_time_default"))
             display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
             display_settings["pause_include_paused_time_default"] = bool(global_include)
             save_display_settings(DISPLAY_FILE, DATA_DIR, display_settings)
 
-            # Per-printer overrides are stored alongside printer settings in settings.json.
+            # Per-printer overrides are stored with printer settings in the active backend.
             printers = pricing.get_configured_printers()
             settings = load_settings(SETTINGS_FILE)
             if not isinstance(settings, dict):

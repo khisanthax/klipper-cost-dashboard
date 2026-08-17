@@ -4,9 +4,9 @@ Printer identity helpers.
 Goal: treat printer identity as registry-only and never derive/create printers
 from incoming job payload fields.
 
-Canonical printer names are loaded from:
-- settings.json (configured printers)
-- install_state.json clients registry (installer-known printers)
+Canonical printer names are loaded from active SQL printer records in SQL-only
+mode. Compatibility modes also use settings.json and the install_state.json
+client registry.
 
 Additionally:
 - Any value containing ".gcode" (case-insensitive) is never treated as a printer

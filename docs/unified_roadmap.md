@@ -52,7 +52,7 @@ It is derived from the audited repository state, not from older handoff notes or
   - Major read-heavy UI surfaces can operate from SQL rather than CSV.
 - important notes:
   - This phase is effectively complete for history and reports.
-  - It is not perfectly clean across the whole app because some runtime configuration paths still preserve file-backed compatibility behavior.
+  - CSV and JSON behavior remains deliberately available in compatibility modes, while strict SQL-only routes use SQL-backed state.
 
 ## Phase 5 - Installer SQL Awareness
 
@@ -66,7 +66,7 @@ It is derived from the audited repository state, not from older handoff notes or
 
 ## Phase 6 - SQL-Only Hardening and Canonicalization
 
-This is the live execution phase.
+This phase is complete for the current release contract.
 
 ### 6.1 Guardrails
 
@@ -83,7 +83,7 @@ This is the live execution phase.
 
 ### 6.2 Remove Implicit CSV Runtime Behavior
 
-- status: mostly complete
+- status: complete
 - what is already done:
   - SQL-only blocks many file-backed reads and writes.
   - auto-create/runtime bootstrap behavior is blocked in SQL-only.
@@ -92,8 +92,8 @@ This is the live execution phase.
   - printer rename, merge, and delete now use transactional SQL-only lifecycle paths without compatibility file or installer-state access.
   - hidden SQL printer rows now represent retired historical identities and are excluded from readiness, active discovery, and incoming logging.
   - startup and representative runtime validation observes direct file opens and blocks known legacy business-state files while allowing deliberate credential/cache/export/backup exceptions.
-- what remains:
-  - future hardening can broaden verification coverage so hidden CSV/JSON runtime reads are not reintroduced in SQL-only mode.
+- future hardening:
+  - representative isolation coverage can be broadened as new runtime paths are added.
 - why it matters:
   - SQL-only is not fully pure until runtime behavior is independent of legacy files.
 
@@ -131,7 +131,7 @@ This is the live execution phase.
 
 ### 6.5 CSV Compatibility and Import/Export Role
 
-- status: mostly complete
+- status: complete for this release line
 - what is already done:
   - for this release line, CSV and dual mode remain supported compatibility runtime modes for existing installs.
   - SQL-only remains the target architecture and strict/canonical mode.
@@ -141,49 +141,63 @@ This is the live execution phase.
   - focused SQL-only guard tests now exercise representative runtime routes and fail if they touch legacy CSV/JSON file guards.
   - validation now begins before app import and detects direct access to known compatibility runtime files independently of helper-level guards.
   - credentials such as `secret.json`, caches, explicit exports, backup archives, and explicit-operation temporary files are classified filesystem exceptions rather than SQL business state.
-- what remains:
+- future policy:
   - keep classifying CSV runtime paths as compatibility-mode paths, not SQL-only bugs.
-  - future hardening can broaden focused SQL-only isolation coverage where runtime coverage is still thin.
-  - defer any future removal of CSV runtime support to a later major release decision.
+  - any removal of CSV runtime support requires a later major-release decision.
 - why it matters:
   - source-of-truth ambiguity is reduced only when compatibility CSV paths are clearly separated from strict SQL-only runtime behavior.
 
 ### 6.6 Release Hardening
 
-- status: mostly complete
+- status: complete
 - what is already done:
   - compile guards exist in CI.
   - validation tooling exists.
   - diagnostic helpers exist.
-  - multiple hardening fixes have already landed on `main`.
+  - the Phase 6 branch includes the required correctness and lifecycle hardening fixes.
   - Recalculate preview and execution now use the same stored pause-accounting input.
   - SQL-only printer rename, merge, and delete preserve DB-backed history and linked configuration without entering compatibility file/state paths.
   - Recalculate now exposes filament usage plus time, material, and total cost components in its jobs and preview tables.
   - canonical SQL reads for projects, settings, profiles, rates, printer identity, and system events surface persistence failures instead of presenting false empty state.
   - Recalculate is explicitly pricing-only for this release; Full Recompute is deferred until its semantics are deliberately designed.
-- what remains:
-  - reconcile stale documentation.
-  - run final release validation after documentation alignment.
-  - preserve Project component-cost work as a future design item using `Time Cost + Material Cost + Override/Other Cost = Total Cost` so arbitrary overrides are not assigned falsely.
+  - README, changelog, and high-impact module comments describe the implemented storage, readiness, and compatibility contracts.
+  - final release validation covers the broad test suite, SQL-only validator, readiness CLI, compile checks, and diff hygiene.
+- future work:
+  - Full Recompute remains deferred until its data and pricing semantics are designed.
+  - Project component-cost reporting remains a deliberate future design item.
 - why it matters:
   - the release is already feature-rich, but its operational contract is still sharper in code than in docs and guarantees.
 
 ## Current Position
 
-KCD is no longer a CSV-first app with experimental SQL on the side. SQL is first-class for major read paths, migration tooling, installer behavior, SQL-only enforcement, and canonical runtime configuration. The remaining Phase 6 work is documentation alignment and final release validation; Recalculate is deliberately pricing-only for this release.
+Phase 6 is complete for the current release contract. SQL-only is the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes for this release line. Recalculate is deliberately pricing-only.
 
 ## Current Active Work
 
-Align release documentation with the implemented Phase 6 SQL-only contract, then run final release validation.
+Review the validated Phase 6 branch for main-merge and release preparation.
 
-This is now the strongest next task because startup readiness, canonical SQL-only configuration, printer retirement, filesystem exceptions, and compatibility policy are implemented and validated in code.
+No merge, version selection, tag, or release publication is part of Phase 6 implementation itself.
 
 ## Next Planned Work
 
-1. Consolidate and refresh documentation so README, changelog, and module comments match the actual post-`v0.3.0` architecture and readiness workflow.
-2. Run the final release validation snapshot and resolve only true release blockers.
+1. Review and merge the validated Phase 6 branch through the normal repository workflow.
+2. Select the next official version and perform release preparation without changing the established runtime contract.
 
 ## Deferred Feature Track
+
+### Recalculate Full Recompute
+
+- status: deferred, semantics not designed
+- current contract:
+  - Recalculate performs pricing recalculation only.
+  - Full data recomputation is not a current-release feature or blocker.
+
+### Projects Component Costs
+
+- status: deferred, design direction recorded
+- future accounting direction:
+  - `Time Cost + Material Cost + Override/Other Cost = Total Cost`
+  - arbitrary manual or project overrides must not be assigned falsely to time or material.
 
 ### Modes
 
@@ -202,12 +216,11 @@ This is now the strongest next task because startup readiness, canonical SQL-onl
 ## Current Risks / Contradictions
 
 - No normal-path SQL-only dependency on legacy runtime files is currently known; focused coverage is representative rather than exhaustive.
-- README and some module comments still describe earlier or conflicting architectural states.
 - compatibility CSV runtime paths remain supported for this release line, so SQL-only guardrails must keep that compatibility surface from becoming a strict-mode dependency.
 
 ## Definition of Done for the Current Phase
 
-Phase 6 should be considered complete only when all of the following are true:
+Phase 6 is complete for the current release contract because all of the following are true:
 
 - SQL-only runtime does not perform normal-path reads from legacy runtime CSV/JSON files.
 - runtime configuration used in SQL-only is DB-backed rather than file-backed or default-only.

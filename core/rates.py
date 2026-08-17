@@ -1,7 +1,8 @@
 ﻿"""
 Hourly Rate Profiles management.
 
-Provides CRUD helpers for rate profiles stored in a JSON file, similar to filament profiles.
+Provides SQL-backed rate-profile CRUD in SQL-only mode and JSON-backed CRUD in
+compatibility modes.
 """
 import os
 import uuid

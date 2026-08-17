@@ -4,9 +4,8 @@ Backup utilities for Klipper Cost Dashboard.
 Backups are written under `data/backups/` so they survive container rebuilds
 when `./data:/app/data` is bind-mounted via docker-compose.
 
-SQL-only note:
-  Backups are file-backed and are blocked in SQL-only mode to avoid runtime
-  JSON/CSV reads/writes.
+Backup archives are an explicit filesystem exception in SQL-only mode. Automatic
+runtime archive creation remains disabled there; user-invoked backups are allowed.
 """
 
 from __future__ import annotations

@@ -2,16 +2,16 @@
 Projects feature for Klipper Cost Dashboard.
 
 Data storage:
-- Projects are stored in `data/projects.json` as a list of project objects.
-- Job membership is stored in `data/project_assignments.json` as a mapping:
-    job_uid -> project_id
+- SQL-only mode stores projects, assignments, manual jobs, and planned items in
+  SQLite.
+- Compatibility modes retain `data/projects.json` and
+  `data/project_assignments.json` support.
 
 Delete behavior:
 - Deleting a project unassigns its jobs (membership mapping entries are removed)
-  and then removes the project record. No CSV history rows are deleted.
+  and then removes the project record. No history rows are deleted.
 
-This module deliberately does not alter the CSV schema; project membership is an
-optional overlay managed by the UI.
+Project membership remains separate from history rows in every storage mode.
 """
 
 from __future__ import annotations
