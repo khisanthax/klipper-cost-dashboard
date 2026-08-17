@@ -9,9 +9,12 @@ remain allowed by policy.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import time
+from datetime import datetime, timezone
 from typing import Dict, Tuple
 
 
@@ -59,8 +62,28 @@ def _detect_changes(before: Dict[str, Tuple[bool, float]]) -> Dict[str, str]:
     return changes
 
 
-def main() -> int:
-    os.environ["KCD_STORAGE_BACKEND"] = "sql"
+def _prepare_isolated_sql_state() -> None:
+    from core import db
+
+    with db.connect_db() as conn:
+        db.apply_migrations(conn)
+        conn.execute(
+            """
+            INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value_json = excluded.value_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                "display_settings",
+                json.dumps({"pause_include_paused_time_default": False}),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
+
+
+def _run_validation() -> int:
     before = _snapshot_files()
     from core.sql_only import SqlOnlyFilesystemMonitor, SqlOnlyViolationError
 
@@ -103,6 +126,20 @@ def main() -> int:
         f"({len(allowed)} allowed filesystem access(es) observed)."
     )
     return 0
+
+
+def main() -> int:
+    os.environ["KCD_STORAGE_BACKEND"] = "sql"
+    os.environ.setdefault("KCD_API_KEY", "sql-only-validator")
+
+    original_cwd = os.getcwd()
+    with tempfile.TemporaryDirectory(prefix="kcd-sql-only-validation-") as tmpdir:
+        try:
+            os.chdir(tmpdir)
+            _prepare_isolated_sql_state()
+            return _run_validation()
+        finally:
+            os.chdir(original_cwd)
 
 
 if __name__ == "__main__":
