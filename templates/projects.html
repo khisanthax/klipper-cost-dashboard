@@ -2,6 +2,10 @@
 
 {% block content %}
 {% set show_cost_totals = display_settings.get("projects_show_cost_totals", True) if display_settings is defined else True %}
+{% macro money(value) -%}
+    {%- set amount = value|float -%}
+    {%- if amount < 0 -%}-${{ "%.2f"|format(-amount) }}{%- else -%}${{ "%.2f"|format(amount) }}{%- endif -%}
+{%- endmacro %}
 <style>
     .kcd-toggle {
         display: inline-flex;
@@ -21,6 +25,14 @@
 
     .kcd-subrow {
         background: var(--bs-gray-100);
+    }
+
+    .kcd-project-summary-table {
+        min-width: 980px;
+    }
+
+    .kcd-project-component-table {
+        min-width: 1100px;
     }
 </style>
 
@@ -106,7 +118,7 @@
         <div class="text-muted">No projects yet.</div>
         {% else %}
         <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle"
+            <table class="table table-striped table-hover align-middle kcd-project-summary-table"
                 data-kcd-resizable="true" data-kcd-table-id="projects_table">
                 <thead class="table-light">
                           <tr>
@@ -115,7 +127,12 @@
                         <th class="text-end" data-col="prints">Prints</th>
                         <th class="text-end" data-col="hours">Hours</th>
                         <th class="text-end" data-col="filament">Filament</th>
-                        <th class="text-end" data-col="cost">Cost</th>
+                        {% if show_cost_totals %}
+                        <th class="text-end" data-col="time_cost">Time Cost</th>
+                        <th class="text-end" data-col="material_cost">Material Cost</th>
+                        <th class="text-end" data-col="adjustment">Adjustment</th>
+                        <th class="text-end" data-col="total_cost">Total Cost</th>
+                        {% endif %}
                         <th data-col="notes">Notes</th>
                     </tr>
                 </thead>
@@ -142,17 +159,16 @@
                             <div class="text-muted small">{{ "%.1f"|format(p.totals.filament_g) }} g</div>
                             {% endif %}
                         </td>
-                        <td class="text-end">
-                            {% if show_cost_totals %}
-                                ${{ "%.2f"|format(p.totals.cost) }}
-                            {% else %}
-                                <span class="text-muted">—</span>
-                            {% endif %}
-                        </td>
+                        {% if show_cost_totals %}
+                        <td class="text-end">{{ money(p.totals.time_cost) }}</td>
+                        <td class="text-end">{{ money(p.totals.material_cost) }}</td>
+                        <td class="text-end">{{ money(p.totals.adjustment) }}</td>
+                        <td class="text-end fw-semibold">{{ money(p.totals.total_cost) }}</td>
+                        {% endif %}
                         <td class="text-muted">{{ p.notes }}</td>
                     </tr>
                     <tr class="kcd-subrow">
-                        <td colspan="7" class="p-0">
+                        <td colspan="{{ 10 if show_cost_totals else 6 }}" class="p-0">
                             <div class="collapse" id="proj-{{ p.id }}">
                                 <div class="p-3">
                                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
@@ -215,8 +231,8 @@
                                     <div class="text-muted">No jobs assigned yet.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        {% set _proj_cols = projects_project_jobs_visible_cols if projects_project_jobs_visible_cols is defined and projects_project_jobs_visible_cols else ["date","thumbnail","printer","filename","status","hours","filament","cost"] %}
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-table"
+                                        {% set _proj_cols = projects_project_jobs_visible_cols if projects_project_jobs_visible_cols is defined and projects_project_jobs_visible_cols else ["date","thumbnail","printer","filename","status","hours","filament","time_cost","material_cost","adjustment","total_cost"] %}
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-table kcd-project-component-table"
                                             data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
                                             <thead class="table-light">
                                                 <tr>
@@ -227,7 +243,12 @@
                                                     <th data-col="status" data-sort-type="text" class="{% if 'status' not in _proj_cols %}kcd-col-hidden{% endif %}">Status</th>
                                                     <th class="text-end{% if 'hours' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="hours" data-sort-type="number">Hours</th>
                                                     <th class="text-end{% if 'filament' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="filament" data-sort-type="number">Filament</th>
-                                                    <th class="text-end{% if 'cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="cost" data-sort-type="number">Cost</th>
+                                                    {% if show_cost_totals %}
+                                                    <th class="text-end{% if 'time_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="time_cost" data-sort-type="number">Time Cost</th>
+                                                    <th class="text-end{% if 'material_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="material_cost" data-sort-type="number">Material Cost</th>
+                                                    <th class="text-end{% if 'adjustment' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="adjustment" data-sort-type="number">Adjustment</th>
+                                                    <th class="text-end{% if 'total_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-col="total_cost" data-sort-type="number">Total Cost</th>
+                                                    {% endif %}
                                                     <th style="width: 1%;" data-col="actions" data-sortable="false"></th>
                                                 </tr>
                                             </thead>
@@ -265,13 +286,12 @@
                                                         —
                                                         {% endif %}
                                                     </td>
-                              <td class="text-end{% if 'cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.total_cost or 0 }}" data-sort-key="cost" data-col="cost">
-                                  {% if show_cost_totals %}
-                                      ${{ "%.2f"|format(j.total_cost|float) }}
-                                  {% else %}
-                                      <span class="text-muted">—</span>
-                                  {% endif %}
-                              </td>
+                             {% if show_cost_totals %}
+                             <td class="text-end{% if 'time_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.time_cost or 0 }}" data-sort-key="time_cost" data-col="time_cost">{{ money(j.time_cost) }}</td>
+                             <td class="text-end{% if 'material_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.material_cost or 0 }}" data-sort-key="material_cost" data-col="material_cost">{{ money(j.material_cost) }}</td>
+                             <td class="text-end{% if 'adjustment' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.adjustment or 0 }}" data-sort-key="adjustment" data-col="adjustment">{{ money(j.adjustment) }}</td>
+                             <td class="text-end fw-semibold{% if 'total_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.total_cost or 0 }}" data-sort-key="total_cost" data-col="total_cost">{{ money(j.total_cost) }}</td>
+                             {% endif %}
                                                      <td class="text-nowrap" data-col="actions">
                                                          <form method="post" class="m-0">
                                                              <input type="hidden" name="action" value="unassign_job">
@@ -306,46 +326,53 @@
                                     <div class="text-muted">No manual jobs for this project.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0"
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-project-component-table"
                                             data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_manual_jobs_table">
                                             <thead class="table-light">
+                                                {% set _manual_cols = projects_manual_jobs_visible_cols if projects_manual_jobs_visible_cols is defined and projects_manual_jobs_visible_cols else ["description","hours","filament_g","time_cost","material_cost","adjustment","total_cost","created"] %}
                                                 <tr>
-                                                    <th data-col="description">Description</th>
-                                                    <th class="text-end" data-col="hours">Hours</th>
-                                                    <th class="text-end" data-col="filament_g">Filament (g)</th>
-                                                    <th class="text-end" data-col="cost">Cost</th>
-                                                    <th class="text-nowrap" data-col="created">Created</th>
+                                                    <th data-col="description" class="{% if 'description' not in _manual_cols %}d-none{% endif %}">Description</th>
+                                                    <th class="text-end {% if 'hours' not in _manual_cols %}d-none{% endif %}" data-col="hours">Hours</th>
+                                                    <th class="text-end {% if 'filament_g' not in _manual_cols %}d-none{% endif %}" data-col="filament_g">Filament (g)</th>
+                                                    {% if show_cost_totals %}
+                                                    <th class="text-end {% if 'time_cost' not in _manual_cols %}d-none{% endif %}" data-col="time_cost">Time Cost</th>
+                                                    <th class="text-end {% if 'material_cost' not in _manual_cols %}d-none{% endif %}" data-col="material_cost">Material Cost</th>
+                                                    <th class="text-end {% if 'adjustment' not in _manual_cols %}d-none{% endif %}" data-col="adjustment">Adjustment</th>
+                                                    <th class="text-end {% if 'total_cost' not in _manual_cols %}d-none{% endif %}" data-col="total_cost">Total Cost</th>
+                                                    {% endif %}
+                                                    <th class="text-nowrap {% if 'created' not in _manual_cols %}d-none{% endif %}" data-col="created">Created</th>
                                                     <th style="width: 1%;" data-col="actions"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {% for mj in p.manual_jobs %}
                                                 <tr id="mj_row_{{ mj.manual_job_id }}">
-                                                    <td class="text-break">
+                                                    <td class="text-break {% if 'description' not in _manual_cols %}d-none{% endif %}" data-col="description">
                                                         <div class="fw-semibold">{{ mj.title }}</div>
                                                         {% if mj.notes %}
                                                         <div class="text-muted small">{{ mj.notes }}</div>
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-end text-nowrap">{{ "%.2f"|format(mj.hours|float) }}</td>
-                                                    <td class="text-end text-nowrap">
+                                                    <td class="text-end text-nowrap {% if 'hours' not in _manual_cols %}d-none{% endif %}" data-col="hours">{{ "%.2f"|format(mj.hours|float) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'filament_g' not in _manual_cols %}d-none{% endif %}" data-col="filament_g">
                                                         {% if mj.filament_g and mj.filament_g > 0 %}
                                                         {{ "%.1f"|format(mj.filament_g|float) }}
                                                         {% else %}
                                                         —
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-end text-nowrap">
-                                                        {% if show_cost_totals %}
-                                                            ${{ "%.2f"|format(mj.computed_cost|float) }}
-                                                            {% if mj.cost_override is not none %}
-                                                            <div class="text-muted small">Override</div>
-                                                            {% endif %}
-                                                        {% else %}
-                                                            <span class="text-muted">—</span>
+                                                    {% if show_cost_totals %}
+                                                    <td class="text-end text-nowrap {% if 'time_cost' not in _manual_cols %}d-none{% endif %}" data-col="time_cost">{{ money(mj.time_cost) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'material_cost' not in _manual_cols %}d-none{% endif %}" data-col="material_cost">{{ money(mj.material_cost) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'adjustment' not in _manual_cols %}d-none{% endif %}" data-col="adjustment">{{ money(mj.adjustment) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'total_cost' not in _manual_cols %}d-none{% endif %}" data-col="total_cost">
+                                                        {{ money(mj.total_cost) }}
+                                                        {% if mj.cost_override is not none %}
+                                                        <div class="text-muted small">Override total</div>
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-nowrap">{{ mj.created_at }}</td>
+                                                    {% endif %}
+                                                    <td class="text-nowrap {% if 'created' not in _manual_cols %}d-none{% endif %}" data-col="created">{{ mj.created_at }}</td>
                                                     <td class="text-nowrap">
                                                         <div class="d-flex gap-2">
                                                             <button type="button" class="btn btn-sm btn-outline-primary"
@@ -428,17 +455,20 @@
                                                 <div class="col-md-5">
                                                     {% if show_cost_totals %}
                                                     <div class="border rounded p-3 bg-light">
-                                                        <div class="d-flex justify-content-between">
-                                                            <div class="text-muted small">Projected total (active)</div>
-                                                            <div class="fw-semibold">${{ "%.2f"|format(p.projected.cost) }}</div>
-                                                        </div>
-                                                        <div class="d-flex justify-content-between">
-                                                            <div class="text-muted small">Actual total (tracked + manual)</div>
-                                                            <div class="fw-semibold">${{ "%.2f"|format(p.totals.cost) }}</div>
-                                                        </div>
-                                                        <div class="d-flex justify-content-between">
-                                                            <div class="text-muted small">Variance (Actual − Projected)</div>
-                                                            <div class="fw-semibold">${{ "%.2f"|format(p.totals.cost - p.projected.cost) }}</div>
+                                                        <div class="fw-semibold mb-1">Actual (tracked + manual)</div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Time Cost</span><span>{{ money(p.totals.time_cost) }}</span></div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Material Cost</span><span>{{ money(p.totals.material_cost) }}</span></div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Adjustment</span><span>{{ money(p.totals.adjustment) }}</span></div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Total Cost</span><span class="fw-semibold">{{ money(p.totals.total_cost) }}</span></div>
+                                                        <hr class="my-2">
+                                                        <div class="fw-semibold mb-1">Projected (active plans)</div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Time Cost</span><span>{{ money(p.projected.time_cost) }}</span></div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Material Cost</span><span>{{ money(p.projected.material_cost) }}</span></div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Adjustment</span><span>{{ money(p.projected.adjustment) }}</span></div>
+                                                        <div class="d-flex justify-content-between"><span class="text-muted small">Total Cost</span><span class="fw-semibold">{{ money(p.projected.total_cost) }}</span></div>
+                                                        <div class="d-flex justify-content-between mt-2">
+                                                            <div class="text-muted small">Total variance (Actual - Projected)</div>
+                                                            <div class="fw-semibold">{{ money(p.totals.total_cost - p.projected.total_cost) }}</div>
                                                         </div>
                                                         <div class="text-muted small mt-2">
                                                             Tracked: ${{ "%.2f"|format(p.actual_tracked_cost) }} · Manual: ${{ "%.2f"|format(p.actual_manual_cost) }}
@@ -458,49 +488,56 @@
                                     <div class="text-muted">No planned items for this project.</div>
                                     {% else %}
                                     <div class="table-responsive">
-                                        <table class="table table-sm table-striped table-hover align-middle mb-0"
+                                        <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-project-component-table"
                                             data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_planned_items_table">
                                             <thead class="table-light">
+                                                {% set _planned_cols = projects_planned_items_visible_cols if projects_planned_items_visible_cols is defined and projects_planned_items_visible_cols else ["filename","estimated_time","filament_g","estimated_time_cost","estimated_material_cost","estimated_adjustment","estimated_total_cost","status","created"] %}
                                                 <tr>
-                                                    <th data-col="filename">Filename</th>
-                                                    <th class="text-end" data-col="est_time">Est. Time</th>
-                                                    <th class="text-end" data-col="filament_g">Filament (g)</th>
-                                                    <th class="text-end" data-col="est_cost">Est. Cost</th>
-                                                    <th data-col="status">Status</th>
-                                                    <th class="text-nowrap" data-col="created">Created</th>
+                                                    <th data-col="filename" class="{% if 'filename' not in _planned_cols %}d-none{% endif %}">Filename</th>
+                                                    <th class="text-end {% if 'estimated_time' not in _planned_cols %}d-none{% endif %}" data-col="estimated_time">Est. Time</th>
+                                                    <th class="text-end {% if 'filament_g' not in _planned_cols %}d-none{% endif %}" data-col="filament_g">Filament (g)</th>
+                                                    {% if show_cost_totals %}
+                                                    <th class="text-end {% if 'estimated_time_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_time_cost">Est. Time Cost</th>
+                                                    <th class="text-end {% if 'estimated_material_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_material_cost">Est. Material Cost</th>
+                                                    <th class="text-end {% if 'estimated_adjustment' not in _planned_cols %}d-none{% endif %}" data-col="estimated_adjustment">Est. Adjustment</th>
+                                                    <th class="text-end {% if 'estimated_total_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_total_cost">Est. Total Cost</th>
+                                                    {% endif %}
+                                                    <th data-col="status" class="{% if 'status' not in _planned_cols %}d-none{% endif %}">Status</th>
+                                                    <th class="text-nowrap {% if 'created' not in _planned_cols %}d-none{% endif %}" data-col="created">Created</th>
                                                     <th style="width: 1%;" data-col="actions"></th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {% for pl in p.planned_items %}
                                                 <tr class="{% if pl.status != 'active' %}table-secondary{% endif %}{% if pl.status != 'active' or pl.converted_to_manual_job_id %} opacity-75{% endif %}">
-                                                    <td class="text-break">
+                                                    <td class="text-break {% if 'filename' not in _planned_cols %}d-none{% endif %}" data-col="filename">
                                                         {{ pl.filename }}
                                                         {% if pl.source %}
                                                         <div class="text-muted small">Source: {{ pl.source }}</div>
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-end text-nowrap">
+                                                    <td class="text-end text-nowrap {% if 'estimated_time' not in _planned_cols %}d-none{% endif %}" data-col="estimated_time">
                                                         {{ (pl.est_time_s // 3600)|int }}h {{ ((pl.est_time_s % 3600) // 60)|int }}m
                                                     </td>
-                                                    <td class="text-end text-nowrap">
+                                                    <td class="text-end text-nowrap {% if 'filament_g' not in _planned_cols %}d-none{% endif %}" data-col="filament_g">
                                                         {% if pl.est_filament_g is not none %}
                                                         {{ "%.1f"|format(pl.est_filament_g) }}
                                                         {% else %}
                                                         -
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-end text-nowrap">
-                                                        {% if show_cost_totals %}
-                                                            ${{ "%.2f"|format(pl.est_cost) }}
-                                                            {% if pl.est_cost_is_override %}
-                                                            <div class="text-muted small">Override</div>
-                                                            {% endif %}
-                                                        {% else %}
-                                                            <span class="text-muted">—</span>
+                                                    {% if show_cost_totals %}
+                                                    <td class="text-end text-nowrap {% if 'estimated_time_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_time_cost">{{ money(pl.estimated_time_cost) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'estimated_material_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_material_cost">{{ money(pl.estimated_material_cost) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'estimated_adjustment' not in _planned_cols %}d-none{% endif %}" data-col="estimated_adjustment">{{ money(pl.estimated_adjustment) }}</td>
+                                                    <td class="text-end text-nowrap {% if 'estimated_total_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_total_cost">
+                                                        {{ money(pl.estimated_total_cost) }}
+                                                        {% if pl.est_cost_is_override %}
+                                                        <div class="text-muted small">Override total</div>
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-nowrap">
+                                                    {% endif %}
+                                                    <td class="text-nowrap {% if 'status' not in _planned_cols %}d-none{% endif %}" data-col="status">
                                                         {% if pl.status == 'active' %}
                                                         <span class="badge bg-primary">Active</span>
                                                         {% else %}
@@ -510,7 +547,7 @@
                                                         <div class="text-muted small">Converted</div>
                                                         {% endif %}
                                                     </td>
-                                                    <td class="text-nowrap">{{ pl.created_at }}</td>
+                                                    <td class="text-nowrap {% if 'created' not in _planned_cols %}d-none{% endif %}" data-col="created">{{ pl.created_at }}</td>
                                                     <td class="text-nowrap">
                                                         <div class="d-flex gap-2">
                                                              <button type="button" class="btn btn-sm btn-outline-secondary"

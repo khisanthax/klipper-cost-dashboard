@@ -85,6 +85,53 @@ except SqlOnlyStartupReadinessError as exc:
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
+PROJECTS_UNASSIGNED_COLUMNS = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
+PROJECTS_TRACKED_COLUMNS = [
+    "date",
+    "thumbnail",
+    "printer",
+    "filename",
+    "status",
+    "hours",
+    "filament",
+    "time_cost",
+    "material_cost",
+    "adjustment",
+    "total_cost",
+]
+PROJECTS_MANUAL_COLUMNS = [
+    "description",
+    "hours",
+    "filament_g",
+    "time_cost",
+    "material_cost",
+    "adjustment",
+    "total_cost",
+    "created",
+]
+PROJECTS_PLANNED_COLUMNS = [
+    "filename",
+    "estimated_time",
+    "filament_g",
+    "estimated_time_cost",
+    "estimated_material_cost",
+    "estimated_adjustment",
+    "estimated_total_cost",
+    "status",
+    "created",
+]
+
+
+def _get_projects_visible_columns(display_settings, table_id, allowed_columns):
+    tables = display_settings.get("tables") if isinstance(display_settings, dict) else None
+    config = tables.get(table_id) if isinstance(tables, dict) else None
+    saved = config.get("visible_columns") if isinstance(config, dict) else None
+    if isinstance(saved, list):
+        normalized = ["total_cost" if column == "cost" else column for column in saved]
+        selected = [column for column in normalized if column in allowed_columns]
+        if selected:
+            return selected
+    return list(allowed_columns)
 
 
 def _safe_thumb_dir(name: str) -> str:
@@ -2388,26 +2435,30 @@ def projects_page():
                     # If slicer metadata is missing/incomplete, allow manual overrides.
                     if not meta.found or not est_time_s:
                         if manual_time_hours:
-                            try:
-                                est_time_s = int(float(manual_time_hours) * 3600.0)
-                            except (TypeError, ValueError):
-                                est_time_s = 0
+                            est_time_s = int(
+                                finite_float(
+                                    manual_time_hours,
+                                    label="Estimated time hours",
+                                    positive=True,
+                                )
+                                * 3600.0
+                            )
                             source = "Manual"
                         if not est_time_s:
                             raise ValueError(meta.error or "No slicer metadata found (missing estimated time).")
 
                     if est_filament_g is None and manual_filament_g:
-                        try:
-                            est_filament_g = float(manual_filament_g)
-                        except (TypeError, ValueError):
-                            est_filament_g = None
+                        est_filament_g = finite_float(
+                            manual_filament_g,
+                            label="Estimated filament grams",
+                            nonnegative=True,
+                        )
 
-                    est_cost_override = None
-                    if manual_cost:
-                        try:
-                            est_cost_override = float(manual_cost)
-                        except (TypeError, ValueError):
-                            est_cost_override = None
+                    est_cost_override = optional_finite_float(
+                        manual_cost,
+                        label="Estimated total cost override",
+                        nonnegative=True,
+                    )
 
                     projects.create_plan_item(
                         project_id=project_id,
@@ -2440,24 +2491,24 @@ def projects_page():
                 source = request.form.get("source", "").strip()
                 notes = request.form.get("notes", "").strip()
 
-                try:
-                    est_time_s = int(float(time_hours) * 3600.0)
-                except (TypeError, ValueError):
-                    est_time_s = 0
-
-                filament_val = None
-                if filament_g != "":
-                    try:
-                        filament_val = float(filament_g)
-                    except (TypeError, ValueError):
-                        filament_val = None
-
-                cost_val = None
-                if est_cost != "":
-                    try:
-                        cost_val = float(est_cost)
-                    except (TypeError, ValueError):
-                        cost_val = None
+                est_time_s = int(
+                    finite_float(
+                        time_hours,
+                        label="Estimated time hours",
+                        positive=True,
+                    )
+                    * 3600.0
+                )
+                filament_val = optional_finite_float(
+                    filament_g,
+                    label="Estimated filament grams",
+                    nonnegative=True,
+                )
+                cost_val = optional_finite_float(
+                    est_cost,
+                    label="Estimated total cost override",
+                    nonnegative=True,
+                )
 
                 projects.update_plan_item(
                     plan_id,
@@ -2545,12 +2596,16 @@ def projects_page():
     for pid, p in projects_map.items():
         jobs = project_jobs.get(pid, [])
         manual_jobs = manual_jobs_by_project.get(pid, [])
+        for job in jobs:
+            components = projects.compute_tracked_job_cost_components(job)
+            job.update(components)
         totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs, project=p)
         plans = plans_by_project.get(pid, [])
         projection = projects.compute_project_projection(plans, project=p)
 
         manual_jobs_view = []
         for mj in manual_jobs:
+            components = projects.compute_manual_job_cost_components(mj, project=p)
             manual_jobs_view.append(
                 {
                     "manual_job_id": mj.manual_job_id,
@@ -2558,7 +2613,8 @@ def projects_page():
                     "hours": mj.hours,
                     "filament_g": mj.filament_g,
                     "cost_override": mj.cost_override,
-                    "computed_cost": projects.compute_manual_job_cost(mj, project=p),
+                    "computed_cost": components["total_cost"],
+                    **components,
                     "created_at": mj.created_at,
                     "updated_at": mj.updated_at,
                     "notes": mj.notes,
@@ -2577,7 +2633,7 @@ def projects_page():
 
         plans_view = []
         for pl in sorted(plans, key=lambda x: x.created_at or "", reverse=True):
-            effective_cost = projects.compute_planned_item_cost(pl, p)
+            components = projects.compute_planned_item_cost_components(pl, p)
             plans_view.append(
                 {
                     "plan_id": pl.plan_id,
@@ -2585,7 +2641,11 @@ def projects_page():
                     "created_at": pl.created_at,
                     "est_time_s": pl.est_time_s,
                     "est_filament_g": pl.est_filament_g,
-                    "est_cost": effective_cost,
+                    "est_cost": components["total_cost"],
+                    "estimated_time_cost": components["time_cost"],
+                    "estimated_material_cost": components["material_cost"],
+                    "estimated_adjustment": components["adjustment"],
+                    "estimated_total_cost": components["total_cost"],
                     "status": pl.status,
                     "source": pl.source,
                     "converted_to_manual_job_id": pl.converted_to_manual_job_id,
@@ -2696,12 +2756,22 @@ def projects_page():
     projects_unassigned_visible_cols = get_visible_columns_for_table(
         display_settings,
         "projects_unassigned",
-        ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"],
+        PROJECTS_UNASSIGNED_COLUMNS,
     )
-    projects_project_jobs_visible_cols = get_visible_columns_for_table(
+    projects_project_jobs_visible_cols = _get_projects_visible_columns(
         display_settings,
         "projects_project_jobs",
-        ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"],
+        PROJECTS_TRACKED_COLUMNS,
+    )
+    projects_manual_jobs_visible_cols = _get_projects_visible_columns(
+        display_settings,
+        "projects_manual_jobs",
+        PROJECTS_MANUAL_COLUMNS,
+    )
+    projects_planned_items_visible_cols = _get_projects_visible_columns(
+        display_settings,
+        "projects_planned_items",
+        PROJECTS_PLANNED_COLUMNS,
     )
 
     return render_template(
@@ -2713,6 +2783,8 @@ def projects_page():
         display_settings=display_settings,
         projects_unassigned_visible_cols=projects_unassigned_visible_cols,
         projects_project_jobs_visible_cols=projects_project_jobs_visible_cols,
+        projects_manual_jobs_visible_cols=projects_manual_jobs_visible_cols,
+        projects_planned_items_visible_cols=projects_planned_items_visible_cols,
         projects=project_rows,
         unassigned_jobs=unassigned_jobs_sorted,
         unassigned_jobs_page=unassigned_jobs_page,
@@ -3067,9 +3139,14 @@ def _settings_view(tab: str):
                     "job_uid",
                 ]
             elif table_id == "projects_unassigned":
-                allowed = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
+                allowed = PROJECTS_UNASSIGNED_COLUMNS
             elif table_id == "projects_project_jobs":
-                allowed = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
+                allowed = PROJECTS_TRACKED_COLUMNS
+                cols = ["total_cost" if column == "cost" else column for column in cols]
+            elif table_id == "projects_manual_jobs":
+                allowed = PROJECTS_MANUAL_COLUMNS
+            elif table_id == "projects_planned_items":
+                allowed = PROJECTS_PLANNED_COLUMNS
             else:
                 allowed = [h for h in HEADERS if h != "job_uid"]
                 table_id = "history"
@@ -3388,15 +3465,23 @@ def _settings_view(tab: str):
         "total",
         "job_uid",
     ]
-    projects_unassigned_allowed_cols = ["thumbnail", "date", "printer", "filename", "status", "hours", "filament", "cost"]
-    projects_project_jobs_allowed_cols = ["date", "thumbnail", "printer", "filename", "status", "hours", "filament", "cost"]
+    projects_unassigned_allowed_cols = PROJECTS_UNASSIGNED_COLUMNS
+    projects_project_jobs_allowed_cols = PROJECTS_TRACKED_COLUMNS
+    projects_manual_jobs_allowed_cols = PROJECTS_MANUAL_COLUMNS
+    projects_planned_items_allowed_cols = PROJECTS_PLANNED_COLUMNS
 
     recalc_selected_columns = get_visible_columns_for_table(display_settings, "recalc_jobs", recalc_allowed_cols)
     projects_unassigned_selected_columns = get_visible_columns_for_table(
         display_settings, "projects_unassigned", projects_unassigned_allowed_cols
     )
-    projects_project_jobs_selected_columns = get_visible_columns_for_table(
+    projects_project_jobs_selected_columns = _get_projects_visible_columns(
         display_settings, "projects_project_jobs", projects_project_jobs_allowed_cols
+    )
+    projects_manual_jobs_selected_columns = _get_projects_visible_columns(
+        display_settings, "projects_manual_jobs", projects_manual_jobs_allowed_cols
+    )
+    projects_planned_items_selected_columns = _get_projects_visible_columns(
+        display_settings, "projects_planned_items", projects_planned_items_allowed_cols
     )
 
     # Load profile data
@@ -3440,6 +3525,10 @@ def _settings_view(tab: str):
         projects_unassigned_selected_columns=projects_unassigned_selected_columns,
         projects_project_jobs_allowed_cols=projects_project_jobs_allowed_cols,
         projects_project_jobs_selected_columns=projects_project_jobs_selected_columns,
+        projects_manual_jobs_allowed_cols=projects_manual_jobs_allowed_cols,
+        projects_manual_jobs_selected_columns=projects_manual_jobs_selected_columns,
+        projects_planned_items_allowed_cols=projects_planned_items_allowed_cols,
+        projects_planned_items_selected_columns=projects_planned_items_selected_columns,
         display_settings=display_settings,
         profiles=all_profiles,
         printer_mappings=printer_mappings,
