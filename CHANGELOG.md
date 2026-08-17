@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.0 - 2026-08-16
 
 ### Added
 - Added reusable SQL-only readiness validation shared by startup, `/health`, and `python -m kcd db readiness`.
