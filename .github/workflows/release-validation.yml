@@ -41,6 +41,11 @@ jobs:
           docker run --rm -e KCD_API_KEY=ci-secret kcd-release-ci python -c "import app"
           docker run --rm kcd-release-ci python -m kcd --help
           docker run --rm kcd-release-ci sh -c 'python -m kcd db readiness; code=$?; test "$code" -eq 0 -o "$code" -eq 2'
-          docker run --rm kcd-release-ci python tools/kcd_backup.py --help
+          backup_dir=$(mktemp -d)
+          trap 'rm -rf "$backup_dir"' EXIT
+          docker run --rm -v "$backup_dir:/app/data" kcd-release-ci python tools/kcd_backup.py --keep 1
+          backup_archive=$(find "$backup_dir/backups" -maxdepth 1 -name 'kcd_backup_*.tar.gz' -print -quit)
+          test -n "$backup_archive"
+          test "$(stat -c %a "$backup_archive")" = 600
           docker run --rm kcd-release-ci test -f /app/tools/validate_sql_only.py
           docker run --rm -e KCD_API_KEY=ci-secret kcd-release-ci python tools/validate_sql_only.py
