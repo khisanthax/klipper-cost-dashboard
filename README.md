@@ -220,6 +220,26 @@ python -m kcd cache info
 python -m kcd cache clear
 ```
 
+## Ephemeral demo foundation (not public-ready)
+
+This branch includes the Phase 0-3 foundation for SQL-only, request-scoped demo
+workspaces. It does not include complete public route restrictions, abuse controls,
+the final Basic Demo dataset, simulated printers, deployment, or public UX. Do not
+expose it to the internet yet.
+
+Configuration and lifecycle behavior are documented in `docs/demo/`. Start from
+`docs/demo/demo.env.example`; demo startup fails unless the absolute data root and
+compatible immutable seed exist and both storage/report backends are `sql`.
+
+Generate a minimal development seed without committing a binary database:
+
+```bash
+python tools/create_demo_seed.py --data-root /absolute/path/to/demo-data --seed-name basic-v1
+```
+
+Normal installations need no new variable: unset `KCD_RUNTIME_MODE` retains the
+existing csv, dual, sql, reports, authentication, migration, and backup contracts.
+
 ## Printer Retirement
 
 Deleting a printer retires it from active configuration. KCD no longer accepts
