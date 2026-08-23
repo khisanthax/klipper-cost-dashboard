@@ -43,7 +43,7 @@ jobs:
           docker run --rm kcd-release-ci sh -c 'python -m kcd db readiness; code=$?; test "$code" -eq 0 -o "$code" -eq 2'
           backup_dir=$(mktemp -d)
           trap 'rm -rf "$backup_dir"' EXIT
-          docker run --rm -v "$backup_dir:/app/data" kcd-release-ci python tools/kcd_backup.py --keep 1
+          docker run --rm --user "$(id -u):$(id -g)" -v "$backup_dir:/app/data" kcd-release-ci python tools/kcd_backup.py --keep 1
           backup_archive=$(find "$backup_dir/backups" -maxdepth 1 -name 'kcd_backup_*.tar.gz' -print -quit)
           test -n "$backup_archive"
           test "$(stat -c %a "$backup_archive")" = 600
