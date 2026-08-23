@@ -231,6 +231,13 @@ def create_backup_archive(*, keep: Optional[int] = None) -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"kcd_backup_{ts}.tar.gz"
     out_path = os.path.join(BACKUPS_DIR, filename)
+    archive_fd, temporary_archive = tempfile.mkstemp(
+        prefix=f".{filename}.",
+        suffix=".tmp",
+        dir=BACKUPS_DIR,
+    )
+    os.close(archive_fd)
+    published = False
 
     data_dir_abs = os.path.abspath(DATA_DIR)
 
@@ -253,7 +260,7 @@ def create_backup_archive(*, keep: Optional[int] = None) -> str:
             if has_sqlite:
                 _create_sqlite_snapshot(source_db, snapshot_path)
 
-            with tarfile.open(out_path, "w:gz") as tf:
+            with tarfile.open(temporary_archive, "w:gz") as tf:
                 tf.add(data_dir_abs, arcname="data", filter=_filter)
                 if has_sqlite:
                     tf.add(snapshot_path, arcname="data/kcd.db")
@@ -262,9 +269,17 @@ def create_backup_archive(*, keep: Optional[int] = None) -> str:
                 csv_abs = os.path.abspath(CSV_FILE)
                 if os.path.exists(csv_abs) and not csv_abs.startswith(data_dir_abs + os.sep):
                     tf.add(csv_abs, arcname=os.path.join("data", os.path.basename(csv_abs)))
+
+            # mkstemp keeps the archive private while it is built. Publish it
+            # atomically, then enforce the final credential-bearing file mode.
+            os.replace(temporary_archive, out_path)
+            published = True
+            os.chmod(out_path, 0o600)
     except Exception:
         try:
-            if os.path.exists(out_path):
+            if os.path.exists(temporary_archive):
+                os.remove(temporary_archive)
+            if published and os.path.exists(out_path):
                 os.remove(out_path)
         finally:
             raise
