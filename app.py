@@ -71,17 +71,21 @@ from core.readiness import (
     SqlOnlyStartupReadinessError,
 )
 from core.numeric import finite_float, optional_finite_float, NumericValidationError
+from core.demo.flask_integration import install_workspace_runtime
+from core.runtime import is_demo_runtime
 
 app = Flask(__name__)
+install_workspace_runtime(app)
 app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
 
 if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
     app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
-try:
-    enforce_sql_only_startup_readiness()
-except SqlOnlyStartupReadinessError as exc:
-    app.logger.error(str(exc))
-    raise
+if not is_demo_runtime():
+    try:
+        enforce_sql_only_startup_readiness()
+    except SqlOnlyStartupReadinessError as exc:
+        app.logger.error(str(exc))
+        raise
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
@@ -158,6 +162,8 @@ def get_job_thumbnail_url(
     *,
     job_uid: str | None = None,
 ) -> str | None:
+    if is_demo_runtime():
+        return None
     cache_path = thumbs.get_cached_thumbnail_path(printer_name, filename, size_hint=size_hint)
     if not cache_path:
         return None
@@ -347,7 +353,7 @@ def _sort_history_rows(rows: list[dict]) -> list[dict]:
 @app.before_request
 def _kcd_auto_backup_hook():
     # Best-effort auto backup. This is intentionally lightweight: it only runs when due.
-    if request.method != "GET":
+    if is_demo_runtime() or request.method != "GET":
         return
     if request.path.startswith("/static"):
         return

@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from core.config import DATA_DIR
+from core.workspace_context import (
+    WorkspaceContext, get_workspace_context, register_connection, unregister_connection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,26 +35,43 @@ class ManagedConnection(sqlite3.Connection):
         finally:
             self.close()
 
+    def close(self):
+        unregister_connection(self)
+        return super().close()
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _db_path() -> str:
+def _db_path(context: Optional[WorkspaceContext] = None) -> str:
+    selected = context or get_workspace_context()
+    if selected is not None:
+        return str(selected.database_path)
     return os.path.join(DATA_DIR, "kcd.db")
 
 
-def _ensure_data_dir() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+def _ensure_data_dir(context: Optional[WorkspaceContext] = None) -> None:
+    selected = context or get_workspace_context()
+    path = selected.workspace_root if selected is not None else DATA_DIR
+    os.makedirs(path, exist_ok=True)
 
 
-def connect_db() -> sqlite3.Connection:
-    _ensure_data_dir()
-    conn = sqlite3.connect(_db_path(), factory=ManagedConnection)
+def connect_db(context: Optional[WorkspaceContext] = None) -> sqlite3.Connection:
+    # Preserve the no-argument seam used by existing installations and tests.
+    # Explicit context is reserved for seed/lifecycle utilities.
+    if context is None:
+        _ensure_data_dir()
+        path = _db_path()
+    else:
+        _ensure_data_dir(context)
+        path = _db_path(context)
+    conn = sqlite3.connect(path, factory=ManagedConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    register_connection(conn)
     return conn
 
 

@@ -8,6 +8,7 @@ import os
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
 from core.sql_only import is_sql_only
+from core.runtime import is_demo_runtime
 
 # File for persisting live job state (SQL-only uses in-memory only)
 LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
@@ -53,6 +54,8 @@ def start_job(printer_name, filename, start_time=None, estimated_duration=None,
     Returns:
         dict: The created job state
     """
+    if is_demo_runtime():
+        raise RuntimeError("Live printer state is disabled in demo mode.")
     if start_time is None:
         start_time = time.time()
     
