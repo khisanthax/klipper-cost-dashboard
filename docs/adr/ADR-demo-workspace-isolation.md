@@ -12,7 +12,7 @@ KCD supports csv, dual, and sql modes with process-wide configuration. Compatibi
 
 ### A. Shared process with request-scoped `WorkspaceContext`
 
-Strong data isolation is achievable by selecting a database and mutable paths before repository access, tracking connections through teardown, and failing when demo context is absent. Reset is an atomic directory replacement after connection closure. Resource and deployment cost are low, and existing business logic changes only at the central storage boundary. Testing burden centers on request/context leakage, cleanup races, and blocked global features. Accidental production fallback is controlled by explicit demo startup validation and no-context exceptions.
+Strong data isolation is achievable by selecting a database and mutable paths before repository access, tracking connections through teardown, and failing when demo context is absent. A per-workspace cross-process request lock excludes reset/cleanup while a request is active; reset is an atomic directory replacement after connection closure. Resource and deployment cost are low, and existing business logic changes only at the central storage boundary. Testing burden centers on request/context leakage, cleanup races, and blocked global features. Accidental production fallback is controlled by explicit demo startup validation and no-context exceptions.
 
 ### B. Process/container per visitor
 

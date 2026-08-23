@@ -36,6 +36,10 @@ class WorkspaceExpired(WorkspaceError):
     pass
 
 
+class WorkspaceBusy(WorkspaceError):
+    pass
+
+
 class UnsafeWorkspacePath(WorkspaceError):
     pass
 
@@ -61,7 +65,7 @@ class _ExclusiveFileLock:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.write(self.fd, str(os.getpid()).encode("ascii"))
         except FileExistsError as exc:
-            raise WorkspaceError("Workspace lifecycle operation is already in progress.") from exc
+            raise WorkspaceBusy("Workspace lifecycle operation is already in progress.") from exc
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -193,6 +197,13 @@ class DemoWorkspaceManager:
             storage_backend="sql",
         )
 
+    def workspace_lock(self, record: WorkspaceRecord) -> _ExclusiveFileLock:
+        if not record.workspace_id or any(ch not in "0123456789abcdef" for ch in record.workspace_id):
+            raise UnsafeWorkspacePath("Registry contains an unsafe workspace identifier.")
+        return _ExclusiveFileLock(
+            self.configuration.workspaces_root / f".{record.workspace_id}.lock"
+        )
+
     def create_workspace(self) -> WorkspaceSession:
         seed_version = self.validate_seed()
         workspace_id = uuid.uuid4().hex
@@ -259,14 +270,19 @@ class DemoWorkspaceManager:
 
     def reset_workspace(self, session: WorkspaceSession) -> WorkspaceSession:
         close_request_connections()
-        record = self.registry.transition(session.record.workspace_id, "active", "resetting")
+        record = session.record
         root = session.context.workspace_root
-        lock_path = self.configuration.workspaces_root / f".{record.workspace_id}.lock"
-        temporary = Path(tempfile.mkdtemp(prefix=".resetting-", dir=self.configuration.workspaces_root))
+        temporary: Optional[Path] = None
         previous = self.configuration.workspaces_root / f".{record.workspace_id}.previous"
         replaced = False
+        transitioned = False
         try:
-            with _ExclusiveFileLock(lock_path):
+            with self.workspace_lock(record):
+                record = self.registry.transition(record.workspace_id, "active", "resetting")
+                transitioned = True
+                temporary = Path(tempfile.mkdtemp(
+                    prefix=".resetting-", dir=self.configuration.workspaces_root
+                ))
                 shutil.rmtree(temporary)
                 self._clone_seed(temporary)
                 os.replace(root, previous)
@@ -286,19 +302,24 @@ class DemoWorkspaceManager:
         except Exception as exc:
             if not replaced and previous.exists() and not root.exists():
                 os.replace(previous, root)
-            try:
-                self.registry.transition(record.workspace_id, "resetting", "error", error=str(exc))
-            except Exception:
-                pass
+            if transitioned:
+                try:
+                    self.registry.transition(record.workspace_id, "resetting", "error", error=str(exc))
+                except Exception:
+                    pass
             raise
         finally:
-            if temporary.exists():
+            if temporary is not None and temporary.exists():
                 shutil.rmtree(temporary)
 
     def expire_workspace(self, record: WorkspaceRecord) -> WorkspaceRecord:
         return self.registry.transition(record.workspace_id, "active", "expired")
 
-    def delete_workspace(self, record: WorkspaceRecord) -> None:
+    def delete_workspace(self, record: WorkspaceRecord, *, acquire_lock: bool = True) -> None:
+        if acquire_lock:
+            with self.workspace_lock(record):
+                self.delete_workspace(record, acquire_lock=False)
+            return
         if record.state != "deleting":
             record = self.registry.transition(record.workspace_id, record.state, "deleting")
         path = self.configuration.workspaces_root / record.relative_storage_path
@@ -315,10 +336,15 @@ class DemoWorkspaceManager:
             return ids
         for record in selected:
             try:
-                expired = self.registry.claim_expired(record.workspace_id, self._now())
-                if expired is None:
-                    continue
-                self.delete_workspace(expired)
+                with self.workspace_lock(record):
+                    expired = self.registry.claim_expired(record.workspace_id, self._now())
+                    if expired is None:
+                        continue
+                    self.delete_workspace(expired, acquire_lock=False)
+            except WorkspaceBusy:
+                # An in-flight request or lifecycle operation owns the lock.
+                # Leave the still-active record for the next cleanup pass.
+                continue
             except Exception as exc:
                 current = self.registry.get(record.workspace_id)
                 if current and current.state != "error":

@@ -4,7 +4,9 @@ from __future__ import annotations
 from flask import Flask, g, jsonify, request
 
 from core.demo.config import load_demo_configuration
-from core.demo.manager import DemoWorkspaceManager, WorkspaceExpired, WorkspaceNotFound
+from core.demo.manager import (
+    DemoWorkspaceManager, WorkspaceError, WorkspaceExpired, WorkspaceNotFound,
+)
 from core.runtime import is_demo_runtime
 from core.workspace_context import (
     bind_workspace_context, close_request_connections, normal_workspace_context,
@@ -45,7 +47,10 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
         @app.post("/demo/foundation/reset", endpoint="demo_foundation_reset")
         def reset_demo_foundation_session():
             session = g.demo_workspace_session
-            refreshed = manager.reset_workspace(session)
+            try:
+                refreshed = manager.reset_workspace(session)
+            except WorkspaceError:
+                return jsonify({"status": "error", "error": "Workspace is busy."}), 409
             g.demo_workspace_session = refreshed
             g.workspace_context = refreshed.context
             return jsonify({"status": "reset"})
@@ -76,6 +81,13 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
             return jsonify({"status": "error", "error": "The demo session has expired."}), 410
         g.demo_workspace_session = session
         g.workspace_context = session.context
+        if request.endpoint != "demo_foundation_reset":
+            try:
+                workspace_lock = manager.workspace_lock(session.record)  # type: ignore[union-attr]
+                workspace_lock.__enter__()
+            except WorkspaceError:
+                return jsonify({"status": "error", "error": "Workspace is busy."}), 409
+            g.demo_workspace_lock = workspace_lock
         g.workspace_context_token = bind_workspace_context(session.context)
         manager.touch_workspace(session.record)  # type: ignore[union-attr]
         return None
@@ -86,5 +98,8 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
         token = getattr(g, "workspace_context_token", None)
         if token is not None:
             reset_workspace_context(token)
+        workspace_lock = getattr(g, "demo_workspace_lock", None)
+        if workspace_lock is not None:
+            workspace_lock.__exit__(None, None, None)
 
     return manager

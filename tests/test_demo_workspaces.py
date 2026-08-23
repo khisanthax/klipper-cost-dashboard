@@ -255,6 +255,9 @@ class DemoWorkspaceTests(unittest.TestCase):
         self.clock.advance(hours=25)
         self.assertEqual(self.manager.cleanup_expired_workspaces(dry_run=True), [session.record.workspace_id])
         self.assertTrue(session.context.workspace_root.exists())
+        with self.manager.workspace_lock(session.record):
+            self.manager.cleanup_expired_workspaces()
+            self.assertIsNotNone(self.manager.registry.get(session.record.workspace_id))
         self.manager.cleanup_expired_workspaces()
         self.assertFalse(session.context.workspace_root.exists())
         self.assertIsNone(self.manager.registry.get(session.record.workspace_id))
@@ -275,6 +278,8 @@ class DemoFlaskIsolationTests(unittest.TestCase):
         self.app = Flask(__name__)
         self.manager = install_workspace_runtime(self.app)
         self.leaked_connections = []
+        self.hold_started = threading.Event()
+        self.hold_release = threading.Event()
 
         @self.app.route("/test/state", methods=["GET", "POST"])
         def state():
@@ -303,6 +308,12 @@ class DemoFlaskIsolationTests(unittest.TestCase):
             self.leaked_connections.append(connection)
             return jsonify({"status": "opened"})
 
+        @self.app.get("/test/hold")
+        def hold():
+            self.hold_started.set()
+            self.hold_release.wait(timeout=5)
+            return jsonify({"status": "released"})
+
         self.app.testing = True
 
     def tearDown(self):
@@ -323,12 +334,31 @@ class DemoFlaskIsolationTests(unittest.TestCase):
         self.assertIn("A only", a.get("/test/state").get_json()["names"])
         self.assertNotIn("A only", b.get("/test/state").get_json()["names"])
         self.assertIn("B only", b.get("/test/state").get_json()["names"])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(lambda client: client.get("/test/state"), (a, b)))
+        self.assertTrue(all(response.status_code == 200 for response in responses))
         guessed = self.app.test_client()
         guessed.set_cookie("kcd_demo_session", self.manager.registry.all()[0].workspace_id)
         self.assertEqual(guessed.get("/test/state").status_code, 401)
         self.assertEqual(a.post("/demo/foundation/reset").status_code, 200)
         self.assertNotIn("A only", a.get("/test/state").get_json()["names"])
         self.assertIn("B only", b.get("/test/state").get_json()["names"])
+
+    def test_reset_refuses_to_race_an_active_request(self):
+        creator = self.app.test_client()
+        creator.post("/demo/foundation/session")
+        token = creator.get_cookie("kcd_demo_session").value
+        holder = self.app.test_client()
+        resetter = self.app.test_client()
+        holder.set_cookie("kcd_demo_session", token)
+        resetter.set_cookie("kcd_demo_session", token)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            active = pool.submit(holder.get, "/test/hold")
+            self.assertTrue(self.hold_started.wait(timeout=2))
+            self.assertEqual(resetter.post("/demo/foundation/reset").status_code, 409)
+            self.hold_release.set()
+            self.assertEqual(active.result(timeout=3).status_code, 200)
+        self.assertEqual(resetter.post("/demo/foundation/reset").status_code, 200)
 
     def test_connections_close_and_context_does_not_leak(self):
         client = self.app.test_client()
