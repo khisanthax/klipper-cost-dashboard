@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Fixed direct Docker invocation of `python tools/kcd_backup.py` without requiring a `PYTHONPATH` override.
+- Hardened backup archives to owner-only `0600` permissions because they may contain credentials.
+
 ## v0.5.0 - 2026-08-17
 
 ### Added
