@@ -73,6 +73,10 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
         app.config["MAX_CONTENT_LENGTH"] = manager.configuration.max_request_bytes
         app.debug = False
 
+        @app.context_processor
+        def _demo_template_context():
+            return {"kcd_demo_mode": True}
+
         @app.post("/demo/foundation/session", endpoint="demo_foundation_create")
         def create_demo_foundation_session():
             session = manager.create_workspace()
@@ -215,6 +219,11 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
             g.demo_workspace_session = session
             g.workspace_context = session.context
             if rule.classification == DemoPolicyClass.WORKSPACE_MUTATE:
+                if manager.workspace_storage_bytes(session.context) >= manager.configuration.max_workspace_bytes:
+                    raise DemoSecurityError(
+                        409, "quota_exceeded",
+                        "This demo workspace has reached its storage limit.",
+                    )
                 reserve_quota(action, session, workspace_lease, manager)
 
         g.workspace_context_token = bind_workspace_context(session.context)
@@ -225,6 +234,7 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
     def _secure_demo_response(response):
         if not is_demo_runtime():
             return response
+        g.demo_request_succeeded = response.status_code < 400
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
         response.headers["X-Frame-Options"] = "DENY"
@@ -281,6 +291,6 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
             reset_workspace_context(token)
         workspace_lease = getattr(g, "demo_workspace_lease", None)
         if workspace_lease is not None:
-            workspace_lease.release()
+            workspace_lease.release(successful=bool(getattr(g, "demo_request_succeeded", False)))
 
     return manager

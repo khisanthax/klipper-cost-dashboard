@@ -22,6 +22,7 @@ from core import db as db_module
 from core.demo.flask_integration import install_workspace_runtime
 from core.demo.config import load_demo_configuration
 from core.demo.network import DemoNetworkBlocked, require_outbound_network
+from core.demo.manager import SeedValidationError
 from core.demo.registry import DemoWorkspaceRegistry
 from core.demo.security import (
     APPLICATION_ROUTE_POLICIES, DemoPolicyClass, csrf_token,
@@ -198,6 +199,21 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             with self.assertRaises(RuntimeConfigurationError):
                 load_demo_configuration()
 
+    def test_normal_mode_bypasses_demo_policy_network_limits_and_configuration(self):
+        with mock.patch.dict(os.environ, {
+            "KCD_RUNTIME_MODE": "normal",
+            "KCD_DEMO_MAX_REQUEST_BYTES": "invalid-in-normal-mode",
+        }, clear=False):
+            app = Flask("normal-boundary-bypass")
+
+            @app.get("/ordinary")
+            def ordinary():
+                require_outbound_network()
+                return "normal"
+
+            self.assertIsNone(install_workspace_runtime(app))
+            self.assertEqual(app.test_client().get("/ordinary").get_data(as_text=True), "normal")
+
     def test_allowed_reads_forms_and_method_safety(self):
         client = self.client()
         self.assertEqual(client.get("/safe").status_code, 200)
@@ -366,6 +382,12 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             200,
         )
 
+        other = self.client()
+        self.assertEqual(
+            self.post_form(other, {"action": "create_project", "name": "other-workspace"}).status_code,
+            200,
+        )
+
     def test_concurrent_near_limit_cannot_bypass_quota(self):
         self.manager.configuration = replace(self.manager.configuration, max_projects=1)
         first = self.client()
@@ -389,6 +411,32 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
             max_pages = int(conn.execute("PRAGMA max_page_count").fetchone()[0])
         self.assertLessEqual(max_pages * page_size, self.manager.configuration.max_workspace_bytes)
+
+    def test_seed_and_mutation_storage_limits_fail_closed(self):
+        seed_bytes = sum(
+            path.stat().st_size
+            for path in self.manager.configuration.seed_root.rglob("*")
+            if path.is_file()
+        )
+        self.manager.configuration = replace(
+            self.manager.configuration, max_workspace_bytes=seed_bytes - 1
+        )
+        with self.assertRaises(SeedValidationError):
+            self.manager.validate_seed()
+
+        self.manager.configuration = replace(
+            self.manager.configuration, max_workspace_bytes=25 * 1024 * 1024
+        )
+        client = self.client()
+        token = client.get_cookie("kcd_demo_session").value
+        session = self.manager.resolve_workspace(token)
+        current_bytes = self.manager.workspace_storage_bytes(session.context)
+        self.manager.configuration = replace(
+            self.manager.configuration, max_workspace_bytes=current_bytes
+        )
+        response = self.post_form(client, {"action": "change", "name": "blocked"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.side_effects, 0)
 
     def test_error_redaction_and_security_headers(self):
         client = self.client()
@@ -414,6 +462,8 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
         html = client.get("/explode").get_data(as_text=True)
         self.assertNotIn(token, html)
         self.assertNotIn(str(session.context.database_path), html)
+        self.manager.configuration = replace(self.manager.configuration, expect_https=True)
+        self.assertIn("max-age=", client.get("/safe").headers["Strict-Transport-Security"])
 
     def test_health_is_minimal(self):
         response = self.app.test_client().get("/health")
@@ -432,17 +482,24 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             "created=client.post('/demo/foundation/session')\n"
             "raw=client.get_cookie('kcd_demo_session').value\n"
             "headers={'X-CSRF-Token': csrf_token(raw)}\n"
-            "reads=[client.get(path).status_code for path in ('/','/reports','/projects','/settings/profiles')]\n"
+            "pages={path:client.get(path) for path in ('/','/reports','/projects','/settings/profiles','/settings/printers','/settings/other')}\n"
+            "reads=[pages[path].status_code for path in ('/','/reports','/projects','/settings/profiles')]\n"
+            "ui={'moonraker':b'Moonraker URL' in pages['/settings/printers'].data,'diagnostics':b'Diagnostics' in pages['/settings/printers'].data,'backup':b'Backup now' in pages['/settings/other'].data,'upload':b'<input type=\"file\"' in pages['/projects'].data}\n"
             "with mock.patch.object(target, 'create_backup_archive', side_effect=AssertionError('route ran')) as blocked:\n"
             "    danger=client.post('/settings/other', data={'action':'backup_now'}, headers=headers)\n"
+            "with mock.patch.object(target.storage_backend, 'write_job', side_effect=AssertionError('route ran')) as write_job:\n"
+            "    printer=client.post('/log-print', json={'printer':'x'}, headers={'X-API-Key':'secret','X-CSRF-Token':csrf_token(raw)})\n"
+            "download=client.get('/download-csv?path=../../outside')\n"
             "safe=client.post('/settings/profiles', data={'action':'add_filament_profile','profile_name':'Phase4','filament_mode':'per_kg','filament_rate':'20','grams_per_meter':'3'}, headers=headers)\n"
             "session=target.app.extensions['kcd_demo_manager'].resolve_workspace(raw)\n"
             "with closing(db_module.connect_db(session.context)) as conn:\n"
             "    count=conn.execute(\"SELECT COUNT(*) FROM filament_profiles WHERE name='Phase4'\").fetchone()[0]\n"
-            "print(json.dumps({'created':created.status_code,'reads':reads,'blocked':danger.status_code,'blocked_calls':blocked.call_count,'safe':safe.status_code,'count':count,'missing':target.app.extensions['kcd_demo_policy'].missing_routes(target.app)}))\n"
+            "print(json.dumps({'created':created.status_code,'reads':reads,'ui':ui,'blocked':danger.status_code,'blocked_calls':blocked.call_count,'printer':printer.status_code,'printer_calls':write_job.call_count,'download':download.status_code,'safe':safe.status_code,'count':count,'missing':target.app.extensions['kcd_demo_policy'].missing_routes(target.app)}))\n"
         )
         environment = os.environ.copy()
-        environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        environment["PYTHONPATH"] = os.pathsep.join(filter(None, (
+            str(Path(__file__).resolve().parents[1]), environment.get("PYTHONPATH", ""),
+        )))
         completed = subprocess.run(
             [sys.executable, "-c", code],
             cwd=self.tmp.name,
@@ -456,8 +513,12 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
         self.assertEqual(result, {
             "created": 201,
             "reads": [200, 200, 200, 200],
+            "ui": {"moonraker": False, "diagnostics": False, "backup": False, "upload": False},
             "blocked": 403,
             "blocked_calls": 0,
+            "printer": 403,
+            "printer_calls": 0,
+            "download": 403,
             "safe": 302,
             "count": 1,
             "missing": [],
@@ -483,7 +544,9 @@ class CrossProcessRateLimitTests(unittest.TestCase):
             environment = os.environ.copy()
             environment["RATE_DB"] = str(path)
             environment["RATE_NOW"] = now
-            environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+            environment["PYTHONPATH"] = os.pathsep.join(filter(None, (
+                str(Path(__file__).resolve().parents[1]), environment.get("PYTHONPATH", ""),
+            )))
 
             def run():
                 return subprocess.run(

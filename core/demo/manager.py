@@ -104,7 +104,7 @@ class WorkspaceRequestLease:
                     exc_info=True,
                 )
 
-    def release(self) -> None:
+    def release(self, *, successful: bool = False) -> None:
         if self._released:
             return
         self._released = True
@@ -114,15 +114,16 @@ class WorkspaceRequestLease:
         with self._reservation_lock:
             reservations = tuple(self._reservation_ids)
             self._reservation_ids.clear()
-        for reservation_id in reservations:
-            try:
-                self.manager.registry.release_quota_reservation(reservation_id)
-            except sqlite3.Error:
-                logger.warning(
-                    "Demo quota reservation release failed for workspace %s; "
-                    "the bounded reservation will expire automatically",
-                    self.workspace_id[:12],
-                )
+        if not successful:
+            for reservation_id in reservations:
+                try:
+                    self.manager.registry.release_quota_reservation(reservation_id)
+                except sqlite3.Error:
+                    logger.warning(
+                        "Demo quota reservation release failed for workspace %s; "
+                        "the bounded reservation will expire automatically",
+                        self.workspace_id[:12],
+                    )
         try:
             self.manager.registry.release_lease(self.lease_id)
         except sqlite3.Error:
@@ -143,7 +144,7 @@ class WorkspaceRequestLease:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        self.release()
+        self.release(successful=exc_type is None)
 
 
 class DemoWorkspaceManager:
@@ -206,6 +207,9 @@ class DemoWorkspaceManager:
         db_path = seed / "kcd.db"
         if not db_path.is_file():
             raise SeedValidationError("Configured demo seed is missing kcd.db.")
+        seed_bytes = sum(path.stat().st_size for path in seed.rglob("*") if path.is_file())
+        if seed_bytes > self.configuration.max_workspace_bytes:
+            raise SeedValidationError("Demo seed exceeds the configured workspace storage limit.")
         try:
             uri = f"file:{db_path.as_posix()}?mode=ro&immutable=1"
             conn = sqlite3.connect(uri, uri=True)
@@ -255,6 +259,20 @@ class DemoWorkspaceManager:
             raise WorkspaceError("Workspace database is invalid.") from exc
         if not row or str(row[0]).lower() != "ok":
             raise WorkspaceError("Workspace database failed integrity_check.")
+
+    def workspace_storage_bytes(self, context: WorkspaceContext) -> int:
+        """Return the contained workspace's current mutable storage usage."""
+        root = self._contained(self.configuration.workspaces_root, context.workspace_root)
+        self._assert_no_symlinks(root)
+        total = 0
+        for path in root.rglob("*"):
+            try:
+                if path.is_file():
+                    total += path.stat().st_size
+            except FileNotFoundError:
+                # SQLite may remove a transient WAL/SHM file during a parallel read.
+                continue
+        return total
 
     def _context(self, record: WorkspaceRecord) -> WorkspaceContext:
         if Path(record.relative_storage_path).name != record.relative_storage_path:

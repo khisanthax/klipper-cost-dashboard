@@ -119,6 +119,7 @@ class DemoWorkspaceRegistry:
                     reservation_id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL,
                     entity TEXT NOT NULL,
+                    slot_number INTEGER NOT NULL,
                     expires_at TEXT NOT NULL,
                     FOREIGN KEY (workspace_id) REFERENCES demo_workspaces(workspace_id)
                         ON DELETE CASCADE
@@ -129,6 +130,13 @@ class DemoWorkspaceRegistry:
                     ON demo_quota_reservations(expires_at);
                 """
             )
+            quota_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(demo_quota_reservations)")
+            }
+            if "slot_number" not in quota_columns:
+                conn.execute(
+                    "ALTER TABLE demo_quota_reservations ADD COLUMN slot_number INTEGER NOT NULL DEFAULT 1"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30, factory=RegistryConnection)
@@ -314,21 +322,28 @@ class DemoWorkspaceRegistry:
                 "DELETE FROM demo_quota_reservations WHERE expires_at <= ?",
                 (now.astimezone(timezone.utc).isoformat(),),
             )
-            pending = int(conn.execute(
-                """SELECT COUNT(*) AS count FROM demo_quota_reservations
-                   WHERE workspace_id=? AND entity=?""",
+            conn.execute(
+                """DELETE FROM demo_quota_reservations
+                   WHERE workspace_id=? AND entity=? AND slot_number <= ?""",
+                (workspace_id, entity, current_count),
+            )
+            reserved_high_water = int(conn.execute(
+                """SELECT COALESCE(MAX(slot_number), 0) AS slot_number
+                   FROM demo_quota_reservations WHERE workspace_id=? AND entity=?""",
                 (workspace_id, entity),
-            ).fetchone()["count"])
-            if current_count + pending >= limit:
+            ).fetchone()["slot_number"])
+            slot_number = max(current_count, reserved_high_water) + 1
+            if slot_number > limit:
                 return False
             conn.execute(
                 """INSERT INTO demo_quota_reservations
-                   (reservation_id, workspace_id, entity, expires_at)
-                   VALUES (?, ?, ?, ?)""",
+                   (reservation_id, workspace_id, entity, slot_number, expires_at)
+                   VALUES (?, ?, ?, ?, ?)""",
                 (
                     reservation_id,
                     workspace_id,
                     entity,
+                    slot_number,
                     expires_at.astimezone(timezone.utc).isoformat(),
                 ),
             )
