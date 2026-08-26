@@ -36,3 +36,9 @@ Lease lifetime defaults to 120 seconds with a 30-second heartbeat. A killed subp
 ## Remaining boundary
 
 Registry leases protect request versus lifecycle replacement. They do not serialize ordinary SQLite writes with one another; SQLite retains its normal short transaction and busy-timeout behavior. Long-running work must keep heartbeat scheduling viable. A host suspended beyond the lease duration could make an in-flight worker's lease appear stale after resume; deployment supervision should terminate stale workers before cleanup. Full route authorization, CSRF, rate limits, abuse controls, and public deployment hardening remain Phase 4 and Phase 7 work.
+
+## Validation record
+
+Windows 11 development validation used Python 3.13.3: the full suite passed 179 tests with two symlink-capability skips, as expected on that host. Linux validation used Ubuntu 24.04.2 LTS under WSL2, kernel `6.18.33.2-microsoft-standard-WSL2`, Python 3.12.3, and `/tmp` on ext4. The source was exported from commit `f600a78` into a clean temporary directory and dependencies were installed into that directory.
+
+On Linux, `python3 -m unittest discover -s tests` passed all 179 tests with zero skips. A verbose focused run passed all 29 demo workspace and concurrency tests, including seed and workspace symlink rejection, cleanup containment, atomic reset rollback, connection teardown, same/different-workspace concurrency, lifecycle exclusion, and cross-process crash recovery. `python3 -m compileall -q app.py core installer kcd tools`, `python3 tools/validate_sql_only.py`, and `git diff --check` all passed; the SQL-only validator observed zero legacy filesystem accesses.
