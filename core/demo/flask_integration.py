@@ -83,11 +83,22 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
         g.workspace_context = session.context
         if request.endpoint != "demo_foundation_reset":
             try:
-                workspace_lock = manager.workspace_lock(session.record)  # type: ignore[union-attr]
-                workspace_lock.__enter__()
-            except WorkspaceError:
-                return jsonify({"status": "error", "error": "Workspace is busy."}), 409
-            g.demo_workspace_lock = workspace_lock
+                workspace_lease = manager.acquire_request_lease(  # type: ignore[union-attr]
+                    session.record
+                )
+            except WorkspaceExpired:
+                return jsonify({"status": "error", "error": "The demo session has expired."}), 410
+            g.demo_workspace_lease = workspace_lease
+            try:
+                # Revalidate after the atomic lease acquisition. Lifecycle state
+                # transitions refuse active leases in the same registry transaction.
+                session = manager.resolve_workspace(token)  # type: ignore[union-attr]
+            except WorkspaceNotFound:
+                return jsonify({"status": "error", "error": "A valid demo session is required."}), 401
+            except WorkspaceExpired:
+                return jsonify({"status": "error", "error": "The demo session has expired."}), 410
+            g.demo_workspace_session = session
+            g.workspace_context = session.context
         g.workspace_context_token = bind_workspace_context(session.context)
         manager.touch_workspace(session.record)  # type: ignore[union-attr]
         return None
@@ -98,8 +109,8 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
         token = getattr(g, "workspace_context_token", None)
         if token is not None:
             reset_workspace_context(token)
-        workspace_lock = getattr(g, "demo_workspace_lock", None)
-        if workspace_lock is not None:
-            workspace_lock.__exit__(None, None, None)
+        workspace_lease = getattr(g, "demo_workspace_lease", None)
+        if workspace_lease is not None:
+            workspace_lease.release()
 
     return manager

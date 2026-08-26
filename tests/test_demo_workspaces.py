@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import os
@@ -19,7 +20,7 @@ from core.demo.config import DemoConfiguration, load_demo_configuration
 from core.demo.flask_integration import install_workspace_runtime
 from core.demo.manager import (
     DemoWorkspaceManager, SeedValidationError, UnsafeWorkspacePath,
-    WorkspaceExpired, WorkspaceNotFound,
+    WorkspaceExpired, WorkspaceNotFound, WorkspaceSession,
 )
 from core.demo.registry import InvalidStateTransition
 from core.runtime import RuntimeConfigurationError, runtime_mode
@@ -108,8 +109,13 @@ class DemoWorkspaceTests(unittest.TestCase):
         self.assertIsNotNone(record.created_at.tzinfo)
         with self.manager.registry._connect() as conn:
             indexes = {row[1] for row in conn.execute("PRAGMA index_list(demo_workspaces)")}
+            lease_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list(demo_workspace_leases)")
+            }
         self.assertIn("idx_demo_token", indexes)
         self.assertIn("idx_demo_expiration", indexes)
+        self.assertIn("idx_demo_lease_workspace", lease_indexes)
+        self.assertIn("idx_demo_lease_expiration", lease_indexes)
         with self.assertRaises(sqlite3.IntegrityError):
             duplicate = record.__class__(
                 "different", record.session_token_hash, record.created_at, record.updated_at,
@@ -129,6 +135,11 @@ class DemoWorkspaceTests(unittest.TestCase):
         b = self.manager.create_workspace()
         self.assertNotEqual(a.token, b.token)
         self.assertNotEqual(a.context.database_path, b.context.database_path)
+        for field in (
+            "workspace_root", "reports_cache_path", "exports_path",
+            "temporary_path", "uploads_path",
+        ):
+            self.assertNotEqual(getattr(a.context, field), getattr(b.context, field))
         self.assertEqual(self.scalar(a.context, "SELECT COUNT(*) FROM printers"), 1)
         self.assertEqual(self.scalar(b.context, "SELECT COUNT(*) FROM printers"), 1)
         with closing(db_module.connect_db(a.context)) as conn:
@@ -198,6 +209,33 @@ class DemoWorkspaceTests(unittest.TestCase):
         with self.assertRaises(WorkspaceExpired):
             self.manager.resolve_workspace(absolute.token)
 
+    def test_cleanup_one_workspace_preserves_the_other(self):
+        seed_hash = hashlib.sha256((self.seed / "kcd.db").read_bytes()).hexdigest()
+        a = self.manager.create_workspace()
+        b = self.manager.create_workspace()
+        with closing(db_module.connect_db(b.context)) as conn:
+            conn.execute(
+                "INSERT INTO printers(name,created_at,updated_at) VALUES('B survives','x','x')"
+            )
+            conn.execute(
+                "INSERT INTO report_cache VALUES('b','all',1,'b',1,'{\"owner\":\"B\"}')"
+            )
+            conn.commit()
+        with self.manager.registry._connect() as conn:
+            conn.execute(
+                "UPDATE demo_workspaces SET idle_expires_at=? WHERE workspace_id=?",
+                ((self.clock() - timedelta(seconds=1)).isoformat(), a.record.workspace_id),
+            )
+        self.assertEqual(self.manager.cleanup_expired_workspaces(), [a.record.workspace_id])
+        self.assertIsNone(self.manager.registry.get(a.record.workspace_id))
+        self.assertFalse(a.context.workspace_root.exists())
+        self.assertEqual(self.scalar(b.context, "SELECT COUNT(*) FROM printers"), 2)
+        self.assertEqual(
+            self.scalar(b.context, "SELECT payload_json FROM report_cache"),
+            '{"owner":"B"}',
+        )
+        self.assertEqual(hashlib.sha256((self.seed / "kcd.db").read_bytes()).hexdigest(), seed_hash)
+
     def test_invalid_seed_and_path_safety(self):
         (self.seed / "kcd.db").unlink()
         with self.assertRaises(SeedValidationError):
@@ -223,15 +261,82 @@ class DemoWorkspaceTests(unittest.TestCase):
         )
         with self.assertRaises(UnsafeWorkspacePath):
             manager._context(absolute)
-        outside = Path(self.tmp.name) / "outside"
+    def test_workspace_symlink_escape_is_rejected(self):
+        session = self.manager.create_workspace()
+        outside = Path(self.tmp.name) / "outside-workspace"
         outside.mkdir()
-        link = manager.configuration.workspaces_root / "escape"
+        link = session.context.workspace_root / "escape"
         try:
             link.symlink_to(outside, target_is_directory=True)
         except OSError:
             self.skipTest("Symlink creation unavailable")
         with self.assertRaises(UnsafeWorkspacePath):
-            manager.validate_workspace_path(link)
+            self.manager.validate_workspace_path(session.context.workspace_root)
+
+    def test_seed_symlink_is_rejected(self):
+        outside_db = Path(self.tmp.name) / "outside-seed.db"
+        (self.seed / "kcd.db").replace(outside_db)
+        try:
+            (self.seed / "kcd.db").symlink_to(outside_db)
+        except OSError:
+            self.skipTest("Symlink creation unavailable")
+        with self.assertRaises(UnsafeWorkspacePath):
+            self.manager.validate_seed()
+
+    def test_cleanup_containment_preserves_outside_directory(self):
+        session = self.manager.create_workspace()
+        outside = Path(self.tmp.name) / "outside-cleanup"
+        outside.mkdir()
+        marker = outside / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        now = self.clock()
+        malicious = replace(
+            session.record,
+            workspace_id="malicious-cleanup",
+            session_token_hash="f" * 64,
+            relative_storage_path="../outside-cleanup",
+            idle_expires_at=now - timedelta(seconds=1),
+        )
+        self.manager.registry.insert(malicious)
+        self.manager.cleanup_expired_workspaces()
+        self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(self.manager.registry.get(malicious.workspace_id).state, "error")
+
+    def test_reset_uses_registry_path_and_restores_after_replace_failure(self):
+        session = self.manager.create_workspace()
+        with closing(db_module.connect_db(session.context)) as conn:
+            conn.execute(
+                "INSERT INTO printers(name,created_at,updated_at) VALUES('keep','x','x')"
+            )
+            conn.commit()
+        outside = Path(self.tmp.name) / "outside-reset"
+        outside.mkdir()
+        marker = outside / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        forged = WorkspaceSession(
+            session.token,
+            replace(session.context, workspace_root=outside, database_path=outside / "kcd.db"),
+            session.record,
+        )
+        real_replace = os.replace
+
+        def fail_new_workspace(source, target):
+            source_path = Path(source)
+            target_path = Path(target)
+            if source_path.name.startswith(".resetting-") and target_path == session.context.workspace_root:
+                raise OSError("injected atomic replacement failure")
+            return real_replace(source, target)
+
+        with mock.patch("core.demo.manager.os.replace", side_effect=fail_new_workspace):
+            with self.assertRaises(OSError):
+                self.manager.reset_workspace(forged)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(
+            self.scalar(session.context, "SELECT COUNT(*) FROM printers WHERE name='keep'"), 1
+        )
+        self.assertEqual(
+            self.manager.registry.get(session.record.workspace_id).state, "error"
+        )
 
     def test_simultaneous_creations_are_distinct(self):
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -252,12 +357,19 @@ class DemoWorkspaceTests(unittest.TestCase):
             bad.initialize()
 
         session = self.manager.create_workspace()
-        self.clock.advance(hours=25)
+        lease = self.manager.acquire_request_lease(session.record, heartbeat=False)
+        with self.manager.registry._connect() as conn:
+            conn.execute(
+                "UPDATE demo_workspaces SET idle_expires_at=? WHERE workspace_id=?",
+                ((self.clock() - timedelta(seconds=1)).isoformat(), session.record.workspace_id),
+            )
         self.assertEqual(self.manager.cleanup_expired_workspaces(dry_run=True), [session.record.workspace_id])
         self.assertTrue(session.context.workspace_root.exists())
-        with self.manager.workspace_lock(session.record):
+        try:
             self.manager.cleanup_expired_workspaces()
             self.assertIsNotNone(self.manager.registry.get(session.record.workspace_id))
+        finally:
+            lease.release()
         self.manager.cleanup_expired_workspaces()
         self.assertFalse(session.context.workspace_root.exists())
         self.assertIsNone(self.manager.registry.get(session.record.workspace_id))
@@ -344,6 +456,52 @@ class DemoFlaskIsolationTests(unittest.TestCase):
         self.assertNotIn("A only", a.get("/test/state").get_json()["names"])
         self.assertIn("B only", b.get("/test/state").get_json()["names"])
 
+    def test_session_cookie_and_token_redaction_contract(self):
+        client = self.app.test_client()
+        response = client.post("/demo/foundation/session")
+        self.assertEqual(response.get_json(), {"status": "created"})
+        header = response.headers["Set-Cookie"]
+        self.assertIn("HttpOnly", header)
+        self.assertIn("SameSite=Lax", header)
+        self.assertIn("Path=/", header)
+        self.assertIn("Max-Age=259200", header)
+        self.assertNotIn("Secure", header)
+        token = client.get_cookie("kcd_demo_session").value
+        record = self.manager.registry.all()[0]
+        self.assertNotEqual(record.session_token_hash, token)
+        self.assertEqual(record.session_token_hash, self.manager.hash_token(token))
+        self.assertNotIn(token, response.get_data(as_text=True))
+        self.assertNotIn(record.workspace_id, response.get_data(as_text=True))
+
+        lease = self.manager.acquire_request_lease(record, heartbeat=False)
+        with mock.patch.object(
+            self.manager.registry,
+            "release_lease",
+            side_effect=sqlite3.OperationalError("injected release failure"),
+        ):
+            with self.assertLogs("core.demo.manager", level="WARNING") as captured:
+                lease.release()
+        log_output = "\n".join(captured.output)
+        self.assertNotIn(token, log_output)
+        self.assertNotIn(record.workspace_id, log_output)
+
+    def test_secure_cookie_can_be_required(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "secure-demo"
+            root.mkdir()
+            build_seed(root)
+            with mock.patch.dict(os.environ, {
+                "KCD_RUNTIME_MODE": "demo",
+                "KCD_DEMO_DATA_ROOT": str(root),
+                "KCD_STORAGE_BACKEND": "sql",
+                "KCD_REPORTS_BACKEND": "sql",
+                "KCD_DEMO_COOKIE_SECURE": "1",
+            }, clear=False):
+                secure_app = Flask("secure-cookie-test")
+                install_workspace_runtime(secure_app)
+                response = secure_app.test_client().post("/demo/foundation/session")
+        self.assertIn("Secure", response.headers["Set-Cookie"])
+
     def test_reset_refuses_to_race_an_active_request(self):
         creator = self.app.test_client()
         creator.post("/demo/foundation/session")
@@ -387,6 +545,30 @@ class RuntimeConfigurationTests(unittest.TestCase):
             with self.assertRaises(RuntimeConfigurationError):
                 load_demo_configuration()
 
+    def test_normal_runtime_does_not_initialize_demo_components(self):
+        for value in (None, "normal"):
+            with self.subTest(runtime=value), tempfile.TemporaryDirectory() as temp:
+                demo_root = Path(temp) / "must-not-exist"
+                environment = {"KCD_DEMO_DATA_ROOT": str(demo_root)}
+                if value is not None:
+                    environment["KCD_RUNTIME_MODE"] = value
+                with mock.patch.dict(os.environ, environment, clear=True):
+                    app = Flask(f"normal-{value}")
+                    manager = install_workspace_runtime(app)
 
+                    @app.get("/normal-probe")
+                    def normal_probe():
+                        return jsonify({"mode": g.workspace_context.runtime_mode})
+
+                    response = app.test_client().get("/normal-probe")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.get_json(), {"mode": "normal"})
+                    self.assertIsNone(manager)
+                    self.assertNotIn("kcd_demo_manager", app.extensions)
+                    self.assertNotIn(
+                        "/demo/foundation/session",
+                        {rule.rule for rule in app.url_map.iter_rules()},
+                    )
+                    self.assertFalse(demo_root.exists())
 if __name__ == "__main__":
     unittest.main()

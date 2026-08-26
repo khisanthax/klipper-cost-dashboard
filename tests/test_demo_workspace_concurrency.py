@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -51,8 +53,7 @@ def build_seed(data_root: Path) -> Path:
     return seed
 
 
-class DemoConcurrencyCharacterizationTests(unittest.TestCase):
-    """Characterize the foundation lock before the Phase 3.5 reader/writer fix."""
+class DemoWorkspaceConcurrencyTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -139,28 +140,28 @@ class DemoConcurrencyCharacterizationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response
 
-    def test_same_workspace_overlapping_reads_currently_conflict(self):
+    def test_same_workspace_overlapping_reads_succeed(self):
         first = self._new_client()
         second = self._copy_session(first)
         pool, active = self._held_request(first)
         try:
-            self.assertEqual(second.get("/probe/read").status_code, 409)
+            self.assertEqual(second.get("/probe/read").status_code, 200)
         finally:
             self._finish_held(pool, active)
 
-    def test_same_workspace_read_and_mutation_currently_conflict(self):
+    def test_same_workspace_read_and_mutation_succeed(self):
         reader = self._new_client()
         writer = self._copy_session(reader)
         pool, active = self._held_request(reader)
         try:
             self.assertEqual(
                 writer.post("/probe/mutate", json={"name": "Writer"}).status_code,
-                409,
+                200,
             )
         finally:
             self._finish_held(pool, active)
 
-    def test_same_workspace_mutations_currently_conflict(self):
+    def test_same_workspace_mutations_succeed(self):
         first = self._new_client()
         second = self._copy_session(first)
         pool, active = self._held_request(
@@ -169,7 +170,7 @@ class DemoConcurrencyCharacterizationTests(unittest.TestCase):
         try:
             self.assertEqual(
                 second.post("/probe/mutate", json={"name": "Second"}).status_code,
-                409,
+                200,
             )
         finally:
             self._finish_held(pool, active)
@@ -203,7 +204,11 @@ class DemoConcurrencyCharacterizationTests(unittest.TestCase):
         record = self.manager.resolve_workspace(token).record
         pool, active = self._held_request(active_client)
         try:
-            self.clock.advance(hours=25)
+            with self.manager.registry._connect() as conn:
+                conn.execute(
+                    "UPDATE demo_workspaces SET idle_expires_at=? WHERE workspace_id=?",
+                    ((self.clock() - timedelta(seconds=1)).isoformat(), record.workspace_id),
+                )
             self.assertEqual(
                 self.manager.cleanup_expired_workspaces(), [record.workspace_id]
             )
@@ -213,19 +218,23 @@ class DemoConcurrencyCharacterizationTests(unittest.TestCase):
         self.manager.cleanup_expired_workspaces()
         self.assertIsNone(self.manager.registry.get(record.workspace_id))
 
-    def test_expiration_can_mark_active_request_but_delete_conflicts(self):
+    def test_expiration_and_delete_conflict_with_active_request(self):
         active_client = self._new_client()
         token = active_client.get_cookie("kcd_demo_session").value
         record = self.manager.resolve_workspace(token).record
         pool, active = self._held_request(active_client)
         try:
-            expired = self.manager.expire_workspace(record)
-            self.assertEqual(expired.state, "expired")
             with self.assertRaises(WorkspaceBusy):
-                self.manager.delete_workspace(expired)
+                self.manager.expire_workspace(record)
+            self.assertEqual(self.manager.registry.get(record.workspace_id).state, "active")
+            with self.assertRaises(WorkspaceBusy):
+                self.manager.delete_workspace(record)
         finally:
             self._finish_held(pool, active)
-        self.manager.delete_workspace(self.manager.registry.get(record.workspace_id))
+        expired = self.manager.expire_workspace(
+            self.manager.registry.get(record.workspace_id)
+        )
+        self.manager.delete_workspace(expired)
 
     def test_two_resets_are_controlled(self):
         first = self._new_client()
@@ -260,11 +269,78 @@ class DemoConcurrencyCharacterizationTests(unittest.TestCase):
         self.manager.registry.transition(deleting_record.workspace_id, "active", "deleting")
         self.assertEqual(deleting.get("/probe/read").status_code, 410)
 
-    def test_teardown_releases_lock_after_exception(self):
+    def test_teardown_releases_lease_after_exception(self):
         client = self._new_client()
         peer = self._copy_session(client)
         self.assertEqual(client.get("/probe/error").status_code, 500)
         self.assertEqual(peer.get("/probe/read").status_code, 200)
+
+    def test_cross_process_leases_and_crash_recovery(self):
+        client = self._new_client()
+        token = client.get_cookie("kcd_demo_session").value
+        record = self.manager.resolve_workspace(token).record
+
+        def start_holder():
+            code = (
+                "from datetime import datetime\n"
+                "import os\n"
+                "from core.demo import DemoWorkspaceManager, load_demo_configuration\n"
+                "now = datetime.fromisoformat(os.environ['KCD_TEST_NOW'])\n"
+                "manager = DemoWorkspaceManager(load_demo_configuration(), clock=lambda: now)\n"
+                "manager.initialize()\n"
+                "record = manager.registry.get(os.environ['KCD_TEST_WORKSPACE_ID'])\n"
+                "lease = manager.acquire_request_lease(record, heartbeat=False)\n"
+                "try:\n"
+                "    print('READY', flush=True)\n"
+                "    input()\n"
+                "finally:\n"
+                "    lease.release()\n"
+            )
+            env = os.environ.copy()
+            env["KCD_TEST_NOW"] = self.clock().isoformat()
+            env["KCD_TEST_WORKSPACE_ID"] = record.workspace_id
+            process = subprocess.Popen(
+                [sys.executable, "-c", code],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                line = pool.submit(process.stdout.readline).result(timeout=3)
+            if line.strip() != "READY":
+                process.kill()
+                process.wait(timeout=3)
+                self.fail(process.stderr.read() or f"unexpected holder output: {line!r}")
+            return process
+
+        holder = start_holder()
+        local_lease = self.manager.acquire_request_lease(record, heartbeat=False)
+        try:
+            with self.assertRaises(WorkspaceBusy):
+                self.manager.reset_workspace(self.manager.resolve_workspace(token))
+        finally:
+            local_lease.release()
+            holder.kill()
+            holder.wait(timeout=3)
+            for stream in (holder.stdin, holder.stdout, holder.stderr):
+                if stream is not None:
+                    stream.close()
+
+        self.assertEqual(
+            self.manager.registry.active_lease_count(record.workspace_id, self.clock()),
+            1,
+        )
+        self.clock.advance(seconds=self.manager.configuration.request_lease_seconds + 1)
+        self.assertEqual(
+            self.manager.registry.active_lease_count(record.workspace_id, self.clock()),
+            0,
+        )
+        self.assertEqual(
+            self.manager.reset_workspace(self.manager.resolve_workspace(token)).record.state,
+            "active",
+        )
 
 
 if __name__ == "__main__":

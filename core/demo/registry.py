@@ -13,7 +13,7 @@ TRANSITIONS = {
     "creating": {"active", "error", "deleting"},
     "active": {"resetting", "expired", "deleting", "error"},
     "resetting": {"active", "error"},
-    "expired": {"deleting"},
+    "expired": {"deleting", "error"},
     "deleting": {"error"},
     "error": {"deleting"},
 }
@@ -24,6 +24,10 @@ class RegistryError(RuntimeError):
 
 
 class InvalidStateTransition(RegistryError):
+    pass
+
+
+class ActiveWorkspaceLease(RegistryError):
     pass
 
 
@@ -90,6 +94,18 @@ class DemoWorkspaceRegistry:
                     ON demo_workspaces(idle_expires_at, absolute_expires_at);
                 CREATE INDEX IF NOT EXISTS idx_demo_state
                     ON demo_workspaces(state);
+                CREATE TABLE IF NOT EXISTS demo_workspace_leases (
+                    lease_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    acquired_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    FOREIGN KEY (workspace_id) REFERENCES demo_workspaces(workspace_id)
+                        ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_demo_lease_workspace
+                    ON demo_workspace_leases(workspace_id);
+                CREATE INDEX IF NOT EXISTS idx_demo_lease_expiration
+                    ON demo_workspace_leases(expires_at);
                 """
             )
 
@@ -162,6 +178,102 @@ class DemoWorkspaceRegistry:
             raise RegistryError("Workspace disappeared after state transition.")
         return record
 
+    @staticmethod
+    def _purge_expired_leases(conn: sqlite3.Connection, now: datetime) -> None:
+        conn.execute(
+            "DELETE FROM demo_workspace_leases WHERE expires_at <= ?",
+            (now.astimezone(timezone.utc).isoformat(),),
+        )
+
+    def acquire_lease(
+        self,
+        workspace_id: str,
+        lease_id: str,
+        *,
+        acquired_at: datetime,
+        expires_at: datetime,
+    ) -> bool:
+        now = acquired_at.astimezone(timezone.utc)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._purge_expired_leases(conn, now)
+            row = conn.execute(
+                """SELECT state, idle_expires_at, absolute_expires_at
+                   FROM demo_workspaces WHERE workspace_id=?""",
+                (workspace_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row["state"] != "active"
+                or now >= min(_utc(row["idle_expires_at"]), _utc(row["absolute_expires_at"]))
+            ):
+                return False
+            conn.execute(
+                """INSERT INTO demo_workspace_leases
+                   (lease_id, workspace_id, acquired_at, expires_at)
+                   VALUES (?, ?, ?, ?)""",
+                (lease_id, workspace_id, now.isoformat(),
+                 expires_at.astimezone(timezone.utc).isoformat()),
+            )
+            return True
+
+    def renew_lease(self, lease_id: str, expires_at: datetime) -> bool:
+        with self._connect() as conn:
+            result = conn.execute(
+                "UPDATE demo_workspace_leases SET expires_at=? WHERE lease_id=?",
+                (expires_at.astimezone(timezone.utc).isoformat(), lease_id),
+            )
+            return result.rowcount == 1
+
+    def release_lease(self, lease_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM demo_workspace_leases WHERE lease_id=?", (lease_id,))
+
+    def active_lease_count(self, workspace_id: str, now: datetime) -> int:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._purge_expired_leases(conn, now)
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM demo_workspace_leases WHERE workspace_id=?",
+                (workspace_id,),
+            ).fetchone()
+            return int(row["count"])
+
+    def transition_if_unleased(
+        self,
+        workspace_id: str,
+        expected: str,
+        target: str,
+        *,
+        now: datetime,
+        error: Optional[str] = None,
+    ) -> WorkspaceRecord:
+        if target not in TRANSITIONS.get(expected, set()):
+            raise InvalidStateTransition(f"Invalid workspace transition {expected} -> {target}")
+        now = now.astimezone(timezone.utc)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._purge_expired_leases(conn, now)
+            count = conn.execute(
+                "SELECT COUNT(*) AS count FROM demo_workspace_leases WHERE workspace_id=?",
+                (workspace_id,),
+            ).fetchone()["count"]
+            if int(count):
+                raise ActiveWorkspaceLease("Workspace has active request leases.")
+            result = conn.execute(
+                """UPDATE demo_workspaces SET state=?, updated_at=?, last_error=?
+                   WHERE workspace_id=? AND state=?""",
+                (target, now.isoformat(), error, workspace_id, expected),
+            )
+            if result.rowcount != 1:
+                raise InvalidStateTransition(
+                    f"Workspace is no longer in expected state {expected}."
+                )
+        record = self.get(workspace_id)
+        if record is None:
+            raise RegistryError("Workspace disappeared after state transition.")
+        return record
+
     def activate_after_reset(self, workspace_id: str, seed_version: str, idle_expires_at: datetime) -> WorkspaceRecord:
         now = self.clock().astimezone(timezone.utc)
         with self._connect() as conn:
@@ -202,6 +314,13 @@ class DemoWorkspaceRegistry:
         value = now.astimezone(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            self._purge_expired_leases(conn, now)
+            count = conn.execute(
+                "SELECT COUNT(*) AS count FROM demo_workspace_leases WHERE workspace_id=?",
+                (workspace_id,),
+            ).fetchone()["count"]
+            if int(count):
+                raise ActiveWorkspaceLease("Workspace has active request leases.")
             result = conn.execute(
                 """UPDATE demo_workspaces SET state='expired', updated_at=?
                    WHERE workspace_id=? AND state='active'

@@ -6,17 +6,22 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+import logging
 import os
 from pathlib import Path
 import secrets
 import shutil
 import sqlite3
 import tempfile
+import threading
 from typing import Callable, Optional
 import uuid
 
 from core.demo.config import DemoConfiguration
-from core.demo.registry import DemoWorkspaceRegistry, WorkspaceRecord
+from core.demo.registry import (
+    ActiveWorkspaceLease, DemoWorkspaceRegistry, InvalidStateTransition,
+    WorkspaceRecord,
+)
 from core.workspace_context import WorkspaceContext, close_request_connections
 
 
@@ -55,26 +60,64 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class _ExclusiveFileLock:
-    def __init__(self, path: Path):
-        self.path = path
-        self.fd: Optional[int] = None
+logger = logging.getLogger(__name__)
+
+
+class WorkspaceRequestLease:
+    """Renewable registry lease protecting one active HTTP request."""
+
+    def __init__(self, manager, workspace_id: str, lease_id: str, *, heartbeat: bool):
+        self.manager = manager
+        self.workspace_id = workspace_id
+        self.lease_id = lease_id
+        self._stop = threading.Event()
+        self._released = False
+        self._thread: Optional[threading.Thread] = None
+        if heartbeat:
+            self._thread = threading.Thread(
+                target=self._heartbeat,
+                name=f"kcd-demo-lease-{workspace_id[:8]}",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def _heartbeat(self) -> None:
+        interval = self.manager.configuration.request_lease_heartbeat_seconds
+        ttl = self.manager.configuration.request_lease_seconds
+        while not self._stop.wait(interval):
+            try:
+                expires = self.manager._now() + timedelta(seconds=ttl)
+                if not self.manager.registry.renew_lease(self.lease_id, expires):
+                    return
+            except sqlite3.Error:
+                logger.warning(
+                    "Demo request lease heartbeat failed for workspace %s",
+                    self.workspace_id[:12],
+                    exc_info=True,
+                )
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+        try:
+            self.manager.registry.release_lease(self.lease_id)
+        except sqlite3.Error:
+            logger.warning(
+                "Demo request lease release failed for workspace %s; "
+                "the bounded lease will expire automatically",
+                self.workspace_id[:12],
+                exc_info=True,
+            )
 
     def __enter__(self):
-        try:
-            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            os.write(self.fd, str(os.getpid()).encode("ascii"))
-        except FileExistsError as exc:
-            raise WorkspaceBusy("Workspace lifecycle operation is already in progress.") from exc
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if self.fd is not None:
-            os.close(self.fd)
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+        self.release()
 
 
 class DemoWorkspaceManager:
@@ -197,12 +240,38 @@ class DemoWorkspaceManager:
             storage_backend="sql",
         )
 
-    def workspace_lock(self, record: WorkspaceRecord) -> _ExclusiveFileLock:
-        if not record.workspace_id or any(ch not in "0123456789abcdef" for ch in record.workspace_id):
-            raise UnsafeWorkspacePath("Registry contains an unsafe workspace identifier.")
-        return _ExclusiveFileLock(
-            self.configuration.workspaces_root / f".{record.workspace_id}.lock"
+    def acquire_request_lease(
+        self, record: WorkspaceRecord, *, heartbeat: bool = True
+    ) -> WorkspaceRequestLease:
+        lease_id = uuid.uuid4().hex
+        now = self._now()
+        expires = now + timedelta(seconds=self.configuration.request_lease_seconds)
+        if not self.registry.acquire_lease(
+            record.workspace_id,
+            lease_id,
+            acquired_at=now,
+            expires_at=expires,
+        ):
+            raise WorkspaceExpired("Demo workspace is not active.")
+        return WorkspaceRequestLease(
+            self, record.workspace_id, lease_id, heartbeat=heartbeat
         )
+
+    def _transition_if_unleased(
+        self, record: WorkspaceRecord, target: str, *, error: Optional[str] = None
+    ) -> WorkspaceRecord:
+        try:
+            return self.registry.transition_if_unleased(
+                record.workspace_id,
+                record.state,
+                target,
+                now=self._now(),
+                error=error,
+            )
+        except ActiveWorkspaceLease as exc:
+            raise WorkspaceBusy("Workspace has active requests.") from exc
+        except InvalidStateTransition as exc:
+            raise WorkspaceBusy("Workspace lifecycle state changed concurrently.") from exc
 
     def create_workspace(self) -> WorkspaceSession:
         seed_version = self.validate_seed()
@@ -248,10 +317,6 @@ class DemoWorkspaceManager:
         if record.state != "active":
             raise WorkspaceExpired("Demo workspace is not active.")
         if now >= min(record.idle_expires_at, record.absolute_expires_at):
-            try:
-                self.registry.transition(record.workspace_id, "active", "expired")
-            except Exception:
-                pass
             raise WorkspaceExpired("Demo workspace has expired.")
         return WorkspaceSession(token, self._context(record), record)
 
@@ -271,28 +336,30 @@ class DemoWorkspaceManager:
     def reset_workspace(self, session: WorkspaceSession) -> WorkspaceSession:
         close_request_connections()
         record = session.record
-        root = session.context.workspace_root
+        # Registry data is the only authority for a lifecycle filesystem target.
+        # Never trust a caller-supplied context, even though normal callers get
+        # their immutable context from this manager.
+        root = self._context(record).workspace_root
         temporary: Optional[Path] = None
         previous = self.configuration.workspaces_root / f".{record.workspace_id}.previous"
         replaced = False
         transitioned = False
         try:
-            with self.workspace_lock(record):
-                record = self.registry.transition(record.workspace_id, "active", "resetting")
-                transitioned = True
-                temporary = Path(tempfile.mkdtemp(
-                    prefix=".resetting-", dir=self.configuration.workspaces_root
-                ))
-                shutil.rmtree(temporary)
-                self._clone_seed(temporary)
-                os.replace(root, previous)
-                try:
-                    os.replace(temporary, root)
-                    replaced = True
-                except Exception:
-                    os.replace(previous, root)
-                    raise
-                shutil.rmtree(previous)
+            record = self._transition_if_unleased(record, "resetting")
+            transitioned = True
+            temporary = Path(tempfile.mkdtemp(
+                prefix=".resetting-", dir=self.configuration.workspaces_root
+            ))
+            shutil.rmtree(temporary)
+            self._clone_seed(temporary)
+            os.replace(root, previous)
+            try:
+                os.replace(temporary, root)
+                replaced = True
+            except Exception:
+                os.replace(previous, root)
+                raise
+            shutil.rmtree(previous)
             now = self._now()
             refreshed = self.registry.activate_after_reset(
                 record.workspace_id, self.configuration.seed_name,
@@ -313,15 +380,11 @@ class DemoWorkspaceManager:
                 shutil.rmtree(temporary)
 
     def expire_workspace(self, record: WorkspaceRecord) -> WorkspaceRecord:
-        return self.registry.transition(record.workspace_id, "active", "expired")
+        return self._transition_if_unleased(record, "expired")
 
-    def delete_workspace(self, record: WorkspaceRecord, *, acquire_lock: bool = True) -> None:
-        if acquire_lock:
-            with self.workspace_lock(record):
-                self.delete_workspace(record, acquire_lock=False)
-            return
+    def delete_workspace(self, record: WorkspaceRecord) -> None:
         if record.state != "deleting":
-            record = self.registry.transition(record.workspace_id, record.state, "deleting")
+            record = self._transition_if_unleased(record, "deleting")
         path = self.configuration.workspaces_root / record.relative_storage_path
         self._contained(self.configuration.workspaces_root, path)
         if path.exists():
@@ -336,13 +399,12 @@ class DemoWorkspaceManager:
             return ids
         for record in selected:
             try:
-                with self.workspace_lock(record):
-                    expired = self.registry.claim_expired(record.workspace_id, self._now())
-                    if expired is None:
-                        continue
-                    self.delete_workspace(expired, acquire_lock=False)
-            except WorkspaceBusy:
-                # An in-flight request or lifecycle operation owns the lock.
+                expired = self.registry.claim_expired(record.workspace_id, self._now())
+                if expired is None:
+                    continue
+                self.delete_workspace(expired)
+            except ActiveWorkspaceLease:
+                # An in-flight request owns a live lease.
                 # Leave the still-active record for the next cleanup pass.
                 continue
             except Exception as exc:

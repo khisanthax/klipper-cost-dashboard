@@ -17,6 +17,8 @@ class DemoConfiguration:
     touch_interval_seconds: int
     cookie_name: str = "kcd_demo_session"
     cookie_secure: bool = True
+    request_lease_seconds: int = 120
+    request_lease_heartbeat_seconds: int = 30
 
     @property
     def seeds_root(self) -> Path:
@@ -76,6 +78,13 @@ def load_demo_configuration() -> DemoConfiguration:
             "KCD_DEMO_ABSOLUTE_TTL_HOURS must be at least the idle TTL."
         )
     secure = str(os.getenv("KCD_DEMO_COOKIE_SECURE", "1") or "1").strip().lower()
+    lease_seconds = _positive_int("KCD_DEMO_REQUEST_LEASE_SECONDS", 120)
+    heartbeat_seconds = _positive_int("KCD_DEMO_REQUEST_LEASE_HEARTBEAT_SECONDS", 30)
+    if heartbeat_seconds >= lease_seconds:
+        raise RuntimeConfigurationError(
+            "KCD_DEMO_REQUEST_LEASE_HEARTBEAT_SECONDS must be less than "
+            "KCD_DEMO_REQUEST_LEASE_SECONDS."
+        )
     return DemoConfiguration(
         data_root=root.resolve(),
         seed_name=seed_name,
@@ -83,4 +92,6 @@ def load_demo_configuration() -> DemoConfiguration:
         absolute_ttl_hours=absolute,
         touch_interval_seconds=_positive_int("KCD_DEMO_TOUCH_INTERVAL_SECONDS", 300),
         cookie_secure=secure not in {"0", "false", "no", "off"},
+        request_lease_seconds=lease_seconds,
+        request_lease_heartbeat_seconds=heartbeat_seconds,
     )
