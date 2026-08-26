@@ -5,7 +5,8 @@ Status: policy inventory for Phase 4 enforcement. “Foundation” means enforce
 | Surface | Route or operation | Current behavior | Demo policy | Enforcement layer | Phase | Notes / risk |
 | --- | --- | --- | --- | --- | --- | --- |
 | Session | `POST /demo/foundation/session` | Creates isolated clone/cookie | Allowed | Manager + Flask boundary | Foundation | Rate limiting and polished UX deferred |
-| Session | `POST /demo/foundation/reset` | Atomic seed restore | Allowed | Manager + Flask boundary | Foundation | Requires valid active session |
+| Session | `POST /demo/foundation/reset` | Atomic seed restore | Allowed | Manager + Flask boundary | Foundation | Requires valid active session; returns controlled 409 while ordinary requests hold leases |
+| Request boundary | Concurrent ordinary requests | Previously one O_EXCL owner per workspace | Allowed | Registry lease + Flask teardown | Foundation | Same-workspace requests coexist; lifecycle state still excludes new requests |
 | Health | `GET /health` | Runtime/readiness details | Read-only | Flask route | 4 | Reduce visitor-visible internals |
 | Dashboard/history | `GET/POST /` | List, filter, recalc/delete history | Allowed | Request-scoped SQL + route policy | 4 | Verify every POST action explicitly |
 | Reports | `GET /reports` | SQL/CSV reports and DB cache | Allowed | Request-scoped SQL | Foundation/4 | Cache lives in workspace DB |

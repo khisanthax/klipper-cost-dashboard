@@ -29,7 +29,7 @@ Decision: **pass for shared-process, request-scoped SQL workspaces**, provided r
 | OS temporary files | backup/export/lifecycle | OS temp or normal data | Mixed | Lifecycle temp is under workspace root; context has temp path | Block unrefactored operations |
 | Registry | demo manager | `<demo-root>/registry/demo_registry.db` | Shared control plane by design | N/A | Separate from visitor DB; transactions/indexes tested |
 | Seeds | demo manager | `<demo-root>/seeds/<version>` | Global immutable | Read-only source | Symlinks rejected; SQLite read-only integrity/schema validation; hash tested |
-| Workspace lifecycle locks | demo manager | workspaces root, internal ID only | Cross-process filesystem primitive | Per workspace | O_EXCL lock plus registry states; no user paths |
+| Request/lifecycle coordination | demo manager + registry | control DB rows keyed by internal workspace ID | Shared control plane, per-workspace leases | Per workspace | Renewable shared request leases plus atomic exclusive state transitions; stale leases expire; no user paths |
 | Flask current workspace | integration | `flask.g` + `ContextVar` | Request-local | Yes | Sequential and two-client isolation tested; no env rewriting |
 
 ## Import-time and process assumptions
