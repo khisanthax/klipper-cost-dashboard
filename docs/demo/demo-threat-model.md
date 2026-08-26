@@ -31,5 +31,5 @@ Assets are each visitor database and mutable directory, immutable seeds, the sha
 - A process suspended beyond the renewable lease interval is subject to the documented lease-recovery assumption.
 - Inline scripts/styles prevent a broad strict CSP without template refactoring.
 - The foundation session is a temporary bearer identity, not user authentication or persistent account security.
-- Phase 5 seed content must pass the no-remote-destination and quota checks. Phase 6 simulation must never weaken network deny.
+- The Phase 5 `basic-v1` seed passes manifest, quota, integrity, foreign-key, and no-remote-destination checks. Future seed versions must preserve that contract. Phase 6 simulation must never weaken network deny.
 - Logging/metrics aggregation, alerting, DDoS protection, image minimization, secret injection, read-only filesystem policy, and operational cleanup scheduling remain later deployment work.

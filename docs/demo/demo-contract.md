@@ -1,6 +1,6 @@
 # KCD ephemeral demo contract
 
-Status: foundational, not public-ready. Phase 4 adds the application security boundary and abuse controls described here; deployment isolation and later demo phases remain required before exposure.
+Status: foundational, not public-ready. Phases 4 and 5 add the application security boundary and deterministic Basic Demo content; simulation, visitor UX, deployment isolation, and public operations remain required before exposure.
 
 ## Workspace behavior
 
@@ -20,6 +20,6 @@ The eventual demo may allow add/edit/delete for demo printers, filament profiles
 
 ## Restricted operations
 
-Demo mode must block real Moonraker/Klipper connections, installer actions, SSH, arbitrary remote URLs, private-network probing, shell/updater/container actions, backup or arbitrary-file restore, host-path selection, Docker-socket access, real API-key administration, and cross-workspace access. Printer-client routes, thumbnail network fetching, backups, diagnostics, Moonraker import/testing, and shared exports are blocked by the current foundation; Phase 4 owns complete policy enforcement.
+Demo mode blocks real Moonraker/Klipper connections, installer actions, SSH, arbitrary remote URLs, private-network probing, shell/updater/container actions, backup or arbitrary-file restore, host-path selection, Docker-socket access, real API-key administration, and cross-workspace access. Printer-client routes, thumbnail network fetching, backups, diagnostics, Moonraker import/testing, and shared exports are blocked by the Phase 4 boundary.
 
 Normal mode remains the default. With `KCD_RUNTIME_MODE` unset, csv/dual/sql storage, reports selection, authentication, migrations, backup paths, and existing relative `data/` paths retain their current contracts.
