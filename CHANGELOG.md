@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.5.1 - 2026-08-23
 
 ### Fixed
 - Fixed direct Docker invocation of `python tools/kcd_backup.py` without requiring a `PYTHONPATH` override.
