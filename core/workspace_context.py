@@ -26,6 +26,7 @@ class WorkspaceContext:
     uploads_path: Path
     seed_version: Optional[str]
     storage_backend: str
+    max_storage_bytes: Optional[int] = None
 
 
 _current_context: ContextVar[Optional[WorkspaceContext]] = ContextVar(

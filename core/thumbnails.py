@@ -21,6 +21,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from core.demo.network import require_outbound_network
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.config import DATA_DIR, SETTINGS_FILE
@@ -215,6 +217,7 @@ def resolve_moonraker_base_url(printer_name: str) -> Optional[str]:
 
 def _http_get_json_with_status(url: str) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
     try:
+        require_outbound_network()
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
             status = getattr(resp, "status", None)
@@ -232,6 +235,7 @@ def _http_get_json(url: str) -> Optional[Dict[str, Any]]:
 
 def _http_get_bytes(url: str) -> Optional[bytes]:
     try:
+        require_outbound_network()
         req = urllib.request.Request(url, headers={"Accept": "*/*"})
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT_SECONDS) as resp:
             return resp.read()

@@ -72,7 +72,7 @@ from core.readiness import (
 )
 from core.numeric import finite_float, optional_finite_float, NumericValidationError
 from core.demo.flask_integration import install_workspace_runtime
-from core.runtime import is_demo_runtime
+from core.runtime import RuntimeConfigurationError, is_demo_runtime
 
 app = Flask(__name__)
 install_workspace_runtime(app)
@@ -3619,6 +3619,17 @@ def download_csv():
 # ============================================================================
 # APPLICATION STARTUP
 # ============================================================================
+
+if is_demo_runtime():
+    _missing_demo_policies = app.extensions["kcd_demo_policy"].missing_routes(app)
+    if _missing_demo_policies:
+        raise RuntimeConfigurationError(
+            "Demo route policy is incomplete: "
+            + ", ".join(
+                f"{method} {rule} ({endpoint})"
+                for endpoint, method, rule in _missing_demo_policies
+            )
+        )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

@@ -71,6 +71,11 @@ def connect_db(context: Optional[WorkspaceContext] = None) -> sqlite3.Connection
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    selected = context or get_workspace_context()
+    if selected is not None and selected.max_storage_bytes is not None:
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        max_pages = max(1, int(selected.max_storage_bytes) // page_size)
+        conn.execute(f"PRAGMA max_page_count={max_pages}")
     register_connection(conn)
     return conn
 

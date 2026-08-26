@@ -106,6 +106,27 @@ class DemoWorkspaceRegistry:
                     ON demo_workspace_leases(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_demo_lease_expiration
                     ON demo_workspace_leases(expires_at);
+                CREATE TABLE IF NOT EXISTS demo_rate_buckets (
+                    scope_hash TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    window_start INTEGER NOT NULL,
+                    request_count INTEGER NOT NULL,
+                    PRIMARY KEY (scope_hash, category, window_start)
+                );
+                CREATE INDEX IF NOT EXISTS idx_demo_rate_expiration
+                    ON demo_rate_buckets(window_start);
+                CREATE TABLE IF NOT EXISTS demo_quota_reservations (
+                    reservation_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    entity TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    FOREIGN KEY (workspace_id) REFERENCES demo_workspaces(workspace_id)
+                        ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_demo_quota_workspace_entity
+                    ON demo_quota_reservations(workspace_id, entity);
+                CREATE INDEX IF NOT EXISTS idx_demo_quota_expiration
+                    ON demo_quota_reservations(expires_at);
                 """
             )
 
@@ -238,6 +259,95 @@ class DemoWorkspaceRegistry:
                 (workspace_id,),
             ).fetchone()
             return int(row["count"])
+
+    def consume_rate(
+        self,
+        scope_hash: str,
+        category: str,
+        *,
+        limit: int,
+        window_seconds: int,
+        now: datetime,
+    ) -> tuple[bool, int]:
+        """Atomically consume one fixed-window allowance."""
+        timestamp = int(now.astimezone(timezone.utc).timestamp())
+        window_start = timestamp - (timestamp % window_seconds)
+        retry_after = max(1, window_start + window_seconds - timestamp)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM demo_rate_buckets WHERE window_start < ?",
+                (timestamp - 86400,),
+            )
+            row = conn.execute(
+                """SELECT request_count FROM demo_rate_buckets
+                   WHERE scope_hash=? AND category=? AND window_start=?""",
+                (scope_hash, category, window_start),
+            ).fetchone()
+            count = int(row["request_count"]) if row else 0
+            if count >= limit:
+                return False, retry_after
+            conn.execute(
+                """INSERT INTO demo_rate_buckets
+                   (scope_hash, category, window_start, request_count)
+                   VALUES (?, ?, ?, 1)
+                   ON CONFLICT(scope_hash, category, window_start)
+                   DO UPDATE SET request_count=request_count+1""",
+                (scope_hash, category, window_start),
+            )
+        return True, retry_after
+
+    def acquire_quota_reservation(
+        self,
+        reservation_id: str,
+        workspace_id: str,
+        entity: str,
+        *,
+        current_count: int,
+        limit: int,
+        expires_at: datetime,
+        now: datetime,
+    ) -> bool:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM demo_quota_reservations WHERE expires_at <= ?",
+                (now.astimezone(timezone.utc).isoformat(),),
+            )
+            pending = int(conn.execute(
+                """SELECT COUNT(*) AS count FROM demo_quota_reservations
+                   WHERE workspace_id=? AND entity=?""",
+                (workspace_id, entity),
+            ).fetchone()["count"])
+            if current_count + pending >= limit:
+                return False
+            conn.execute(
+                """INSERT INTO demo_quota_reservations
+                   (reservation_id, workspace_id, entity, expires_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    reservation_id,
+                    workspace_id,
+                    entity,
+                    expires_at.astimezone(timezone.utc).isoformat(),
+                ),
+            )
+        return True
+
+    def renew_quota_reservation(self, reservation_id: str, expires_at: datetime) -> bool:
+        with self._connect() as conn:
+            result = conn.execute(
+                "UPDATE demo_quota_reservations SET expires_at=? WHERE reservation_id=?",
+                (expires_at.astimezone(timezone.utc).isoformat(), reservation_id),
+            )
+            return result.rowcount == 1
+
+    def release_quota_reservation(self, reservation_id: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM demo_quota_reservations WHERE reservation_id=?",
+                (reservation_id,),
+            )
 
     def transition_if_unleased(
         self,

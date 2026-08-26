@@ -19,6 +19,27 @@ class DemoConfiguration:
     cookie_secure: bool = True
     request_lease_seconds: int = 120
     request_lease_heartbeat_seconds: int = 30
+    max_request_bytes: int = 1024 * 1024
+    max_text_length: int = 256
+    max_notes_length: int = 4096
+    max_list_length: int = 1000
+    rate_general_limit: int = 300
+    rate_general_window_seconds: int = 300
+    rate_mutation_limit: int = 60
+    rate_mutation_window_seconds: int = 300
+    rate_lifecycle_limit: int = 5
+    rate_lifecycle_window_seconds: int = 600
+    rate_invalid_session_limit: int = 60
+    rate_invalid_session_window_seconds: int = 300
+    max_printers: int = 10
+    max_filament_profiles: int = 50
+    max_hourly_profiles: int = 25
+    max_projects: int = 100
+    max_history_records: int = 1000
+    max_workspace_bytes: int = 25 * 1024 * 1024
+    max_export_bytes: int = 10 * 1024 * 1024
+    trust_proxy: bool = False
+    expect_https: bool = False
 
     @property
     def seeds_root(self) -> Path:
@@ -46,6 +67,15 @@ def _positive_int(name: str, default: int) -> int:
     if value <= 0:
         raise RuntimeConfigurationError(f"{name} must be a positive integer.")
     return value
+
+
+def _boolean(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeConfigurationError(f"{name} must be a boolean value.")
 
 
 def load_demo_configuration() -> DemoConfiguration:
@@ -77,7 +107,7 @@ def load_demo_configuration() -> DemoConfiguration:
         raise RuntimeConfigurationError(
             "KCD_DEMO_ABSOLUTE_TTL_HOURS must be at least the idle TTL."
         )
-    secure = str(os.getenv("KCD_DEMO_COOKIE_SECURE", "1") or "1").strip().lower()
+    secure = _boolean("KCD_DEMO_COOKIE_SECURE", True)
     lease_seconds = _positive_int("KCD_DEMO_REQUEST_LEASE_SECONDS", 120)
     heartbeat_seconds = _positive_int("KCD_DEMO_REQUEST_LEASE_HEARTBEAT_SECONDS", 30)
     if heartbeat_seconds >= lease_seconds:
@@ -91,7 +121,28 @@ def load_demo_configuration() -> DemoConfiguration:
         idle_ttl_hours=idle,
         absolute_ttl_hours=absolute,
         touch_interval_seconds=_positive_int("KCD_DEMO_TOUCH_INTERVAL_SECONDS", 300),
-        cookie_secure=secure not in {"0", "false", "no", "off"},
+        cookie_secure=secure,
         request_lease_seconds=lease_seconds,
         request_lease_heartbeat_seconds=heartbeat_seconds,
+        max_request_bytes=_positive_int("KCD_DEMO_MAX_REQUEST_BYTES", 1024 * 1024),
+        max_text_length=_positive_int("KCD_DEMO_MAX_TEXT_LENGTH", 256),
+        max_notes_length=_positive_int("KCD_DEMO_MAX_NOTES_LENGTH", 4096),
+        max_list_length=_positive_int("KCD_DEMO_MAX_LIST_LENGTH", 1000),
+        rate_general_limit=_positive_int("KCD_DEMO_RATE_GENERAL_LIMIT", 300),
+        rate_general_window_seconds=_positive_int("KCD_DEMO_RATE_GENERAL_WINDOW_SECONDS", 300),
+        rate_mutation_limit=_positive_int("KCD_DEMO_RATE_MUTATION_LIMIT", 60),
+        rate_mutation_window_seconds=_positive_int("KCD_DEMO_RATE_MUTATION_WINDOW_SECONDS", 300),
+        rate_lifecycle_limit=_positive_int("KCD_DEMO_RATE_LIFECYCLE_LIMIT", 5),
+        rate_lifecycle_window_seconds=_positive_int("KCD_DEMO_RATE_LIFECYCLE_WINDOW_SECONDS", 600),
+        rate_invalid_session_limit=_positive_int("KCD_DEMO_RATE_INVALID_SESSION_LIMIT", 60),
+        rate_invalid_session_window_seconds=_positive_int("KCD_DEMO_RATE_INVALID_SESSION_WINDOW_SECONDS", 300),
+        max_printers=_positive_int("KCD_DEMO_MAX_PRINTERS", 10),
+        max_filament_profiles=_positive_int("KCD_DEMO_MAX_FILAMENT_PROFILES", 50),
+        max_hourly_profiles=_positive_int("KCD_DEMO_MAX_HOURLY_PROFILES", 25),
+        max_projects=_positive_int("KCD_DEMO_MAX_PROJECTS", 100),
+        max_history_records=_positive_int("KCD_DEMO_MAX_HISTORY_RECORDS", 1000),
+        max_workspace_bytes=_positive_int("KCD_DEMO_MAX_WORKSPACE_BYTES", 25 * 1024 * 1024),
+        max_export_bytes=_positive_int("KCD_DEMO_MAX_EXPORT_BYTES", 10 * 1024 * 1024),
+        trust_proxy=_boolean("KCD_DEMO_TRUST_PROXY", False),
+        expect_https=_boolean("KCD_DEMO_EXPECT_HTTPS", False),
     )

@@ -72,6 +72,8 @@ class WorkspaceRequestLease:
         self.lease_id = lease_id
         self._stop = threading.Event()
         self._released = False
+        self._reservation_ids: set[str] = set()
+        self._reservation_lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
         if heartbeat:
             self._thread = threading.Thread(
@@ -89,6 +91,12 @@ class WorkspaceRequestLease:
                 expires = self.manager._now() + timedelta(seconds=ttl)
                 if not self.manager.registry.renew_lease(self.lease_id, expires):
                     return
+                with self._reservation_lock:
+                    reservations = tuple(self._reservation_ids)
+                for reservation_id in reservations:
+                    self.manager.registry.renew_quota_reservation(
+                        reservation_id, expires
+                    )
             except sqlite3.Error:
                 logger.warning(
                     "Demo request lease heartbeat failed for workspace %s",
@@ -103,6 +111,18 @@ class WorkspaceRequestLease:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=1)
+        with self._reservation_lock:
+            reservations = tuple(self._reservation_ids)
+            self._reservation_ids.clear()
+        for reservation_id in reservations:
+            try:
+                self.manager.registry.release_quota_reservation(reservation_id)
+            except sqlite3.Error:
+                logger.warning(
+                    "Demo quota reservation release failed for workspace %s; "
+                    "the bounded reservation will expire automatically",
+                    self.workspace_id[:12],
+                )
         try:
             self.manager.registry.release_lease(self.lease_id)
         except sqlite3.Error:
@@ -112,6 +132,12 @@ class WorkspaceRequestLease:
                 self.workspace_id[:12],
                 exc_info=True,
             )
+
+    def add_quota_reservation(self, reservation_id: str) -> None:
+        with self._reservation_lock:
+            if self._released:
+                raise WorkspaceExpired("Request lease has already ended.")
+            self._reservation_ids.add(reservation_id)
 
     def __enter__(self):
         return self
@@ -185,6 +211,10 @@ class DemoWorkspaceManager:
             conn = sqlite3.connect(uri, uri=True)
             integrity = conn.execute("PRAGMA integrity_check").fetchone()
             versions = {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
+            remote_printers = int(conn.execute(
+                """SELECT COUNT(*) FROM printers
+                   WHERE moonraker_url IS NOT NULL AND TRIM(moonraker_url) != ''"""
+            ).fetchone()[0])
         except sqlite3.Error as exc:
             raise SeedValidationError("Demo seed database is invalid or schema-incompatible.") from exc
         finally:
@@ -192,6 +222,8 @@ class DemoWorkspaceManager:
                 conn.close()
         if not integrity or str(integrity[0]).lower() != "ok":
             raise SeedValidationError("Demo seed database failed SQLite integrity_check.")
+        if remote_printers:
+            raise SeedValidationError("Demo seed contains active remote printer destinations.")
         from core import db as db_module
         required = {Path(name).stem for name in db_module._list_migration_files()}
         missing = sorted(required - versions)
@@ -238,6 +270,7 @@ class DemoWorkspaceManager:
             exports_path=root / "exports", temporary_path=root / "temp",
             uploads_path=root / "uploads", seed_version=record.seed_version,
             storage_backend="sql",
+            max_storage_bytes=self.configuration.max_workspace_bytes,
         )
 
     def acquire_request_lease(

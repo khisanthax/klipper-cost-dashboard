@@ -18,6 +18,7 @@ from flask import Flask, g, jsonify, request
 from core import db as db_module
 from core.demo.flask_integration import install_workspace_runtime
 from core.demo.manager import WorkspaceBusy
+from core.demo.security import DemoPolicyClass, csrf_token
 from core.workspace_context import WorkspaceContext
 
 
@@ -106,6 +107,11 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
         def probe_error():
             raise RuntimeError("deterministic request failure")
 
+        policy = self.app.extensions["kcd_demo_policy"]
+        policy.register("probe_read", "GET", DemoPolicyClass.WORKSPACE_READ)
+        policy.register("probe_mutate", "POST", DemoPolicyClass.WORKSPACE_MUTATE)
+        policy.register("probe_error", "GET", DemoPolicyClass.WORKSPACE_READ)
+
         self.app.testing = False
 
     def tearDown(self):
@@ -125,8 +131,14 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
         target.set_cookie("kcd_demo_session", source.get_cookie("kcd_demo_session").value)
         return target
 
+    @staticmethod
+    def _csrf(client):
+        return {"X-CSRF-Token": csrf_token(client.get_cookie("kcd_demo_session").value)}
+
     def _held_request(self, client, path="/probe/read?hold=1", method="get", **kwargs):
         pool = ThreadPoolExecutor(max_workers=1)
+        if method != "get":
+            kwargs.setdefault("headers", self._csrf(client))
         future = pool.submit(getattr(client, method), path, **kwargs)
         self.assertTrue(self.hold_started.wait(timeout=2), "held request did not start")
         return pool, future
@@ -155,7 +167,7 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
         pool, active = self._held_request(reader)
         try:
             self.assertEqual(
-                writer.post("/probe/mutate", json={"name": "Writer"}).status_code,
+                writer.post("/probe/mutate", json={"name": "Writer"}, headers=self._csrf(writer)).status_code,
                 200,
             )
         finally:
@@ -169,7 +181,7 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
         )
         try:
             self.assertEqual(
-                second.post("/probe/mutate", json={"name": "Second"}).status_code,
+                second.post("/probe/mutate", json={"name": "Second"}, headers=self._csrf(second)).status_code,
                 200,
             )
         finally:
@@ -182,7 +194,7 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
         try:
             self.assertEqual(second.get("/probe/read").status_code, 200)
             self.assertEqual(
-                second.post("/probe/mutate", json={"name": "Second workspace"}).status_code,
+                second.post("/probe/mutate", json={"name": "Second workspace"}, headers=self._csrf(second)).status_code,
                 200,
             )
         finally:
@@ -193,10 +205,10 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
         resetter = self._copy_session(active_client)
         pool, active = self._held_request(active_client)
         try:
-            self.assertEqual(resetter.post("/demo/foundation/reset").status_code, 409)
+            self.assertEqual(resetter.post("/demo/foundation/reset", headers=self._csrf(resetter)).status_code, 409)
         finally:
             self._finish_held(pool, active)
-        self.assertEqual(resetter.post("/demo/foundation/reset").status_code, 200)
+        self.assertEqual(resetter.post("/demo/foundation/reset", headers=self._csrf(resetter)).status_code, 200)
 
     def test_cleanup_skips_active_request_then_deletes(self):
         active_client = self._new_client()
@@ -250,9 +262,9 @@ class DemoWorkspaceConcurrencyTests(unittest.TestCase):
 
         with mock.patch.object(self.manager, "_clone_seed", side_effect=held_clone):
             with ThreadPoolExecutor(max_workers=1) as pool:
-                active = pool.submit(first.post, "/demo/foundation/reset")
+                active = pool.submit(first.post, "/demo/foundation/reset", headers=self._csrf(first))
                 self.assertTrue(self.reset_started.wait(timeout=2))
-                self.assertEqual(second.post("/demo/foundation/reset").status_code, 410)
+                self.assertEqual(second.post("/demo/foundation/reset", headers=self._csrf(second)).status_code, 410)
                 self.reset_release.set()
                 self.assertEqual(active.result(timeout=3).status_code, 200)
 

@@ -23,6 +23,7 @@ from core.demo.manager import (
     WorkspaceExpired, WorkspaceNotFound, WorkspaceSession,
 )
 from core.demo.registry import InvalidStateTransition
+from core.demo.security import DemoPolicyClass, csrf_token
 from core.runtime import RuntimeConfigurationError, runtime_mode
 from core.workspace_context import WorkspaceContext, WorkspaceContextError
 
@@ -411,7 +412,11 @@ class DemoFlaskIsolationTests(unittest.TestCase):
                         (cache_key, "all", 1, "fp", 1, request.json.get("payload", "{}") if request.is_json else "{}"),
                     )
                     conn.commit()
-            return jsonify({"names": names, "db": str(context.database_path) if self.app.testing else "scoped"})
+            return jsonify({
+                "names": names,
+                "db": hashlib.sha256(str(context.database_path).encode("utf-8")).hexdigest()
+                if self.app.testing else "scoped",
+            })
 
         @self.app.get("/test/leak")
         def leak():
@@ -426,7 +431,17 @@ class DemoFlaskIsolationTests(unittest.TestCase):
             self.hold_release.wait(timeout=5)
             return jsonify({"status": "released"})
 
+        policy = self.app.extensions["kcd_demo_policy"]
+        policy.register("state", "GET", DemoPolicyClass.WORKSPACE_READ)
+        policy.register("state", "POST", DemoPolicyClass.WORKSPACE_MUTATE)
+        policy.register("leak", "GET", DemoPolicyClass.WORKSPACE_READ)
+        policy.register("hold", "GET", DemoPolicyClass.WORKSPACE_READ)
+
         self.app.testing = True
+
+    @staticmethod
+    def _csrf(client):
+        return {"X-CSRF-Token": csrf_token(client.get_cookie("kcd_demo_session").value)}
 
     def tearDown(self):
         self.env.stop()
@@ -441,8 +456,8 @@ class DemoFlaskIsolationTests(unittest.TestCase):
         a_initial = a.get("/test/state").get_json()
         b_initial = b.get("/test/state").get_json()
         self.assertNotEqual(a_initial["db"], b_initial["db"])
-        a.post("/test/state", json={"name": "A only"})
-        b.post("/test/state", json={"name": "B only"})
+        a.post("/test/state", json={"name": "A only"}, headers=self._csrf(a))
+        b.post("/test/state", json={"name": "B only"}, headers=self._csrf(b))
         self.assertIn("A only", a.get("/test/state").get_json()["names"])
         self.assertNotIn("A only", b.get("/test/state").get_json()["names"])
         self.assertIn("B only", b.get("/test/state").get_json()["names"])
@@ -452,7 +467,7 @@ class DemoFlaskIsolationTests(unittest.TestCase):
         guessed = self.app.test_client()
         guessed.set_cookie("kcd_demo_session", self.manager.registry.all()[0].workspace_id)
         self.assertEqual(guessed.get("/test/state").status_code, 401)
-        self.assertEqual(a.post("/demo/foundation/reset").status_code, 200)
+        self.assertEqual(a.post("/demo/foundation/reset", headers=self._csrf(a)).status_code, 200)
         self.assertNotIn("A only", a.get("/test/state").get_json()["names"])
         self.assertIn("B only", b.get("/test/state").get_json()["names"])
 
@@ -513,10 +528,10 @@ class DemoFlaskIsolationTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=1) as pool:
             active = pool.submit(holder.get, "/test/hold")
             self.assertTrue(self.hold_started.wait(timeout=2))
-            self.assertEqual(resetter.post("/demo/foundation/reset").status_code, 409)
+            self.assertEqual(resetter.post("/demo/foundation/reset", headers=self._csrf(resetter)).status_code, 409)
             self.hold_release.set()
             self.assertEqual(active.result(timeout=3).status_code, 200)
-        self.assertEqual(resetter.post("/demo/foundation/reset").status_code, 200)
+        self.assertEqual(resetter.post("/demo/foundation/reset", headers=self._csrf(resetter)).status_code, 200)
 
     def test_connections_close_and_context_does_not_leak(self):
         client = self.app.test_client()
