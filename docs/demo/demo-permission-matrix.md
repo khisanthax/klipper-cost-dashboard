@@ -1,39 +1,55 @@
 # Demo permission matrix
 
-Status: policy inventory for Phase 4 enforcement. “Foundation” means enforcement already exists in this batch.
+Status: Phase 4 application policy. Every registered endpoint/method combination is listed. “Guard” means enforcement occurs before route code. All workspace mutations require session-bound CSRF, same-origin validation, the general and mutation rate classes, input validation, a request lease, and applicable quota reservation. Errors are visitor-safe HTML or structured JSON with redaction.
 
-| Surface | Route or operation | Current behavior | Demo policy | Enforcement layer | Phase | Notes / risk |
-| --- | --- | --- | --- | --- | --- | --- |
-| Session | `POST /demo/foundation/session` | Creates isolated clone/cookie | Allowed | Manager + Flask boundary | Foundation | Rate limiting and polished UX deferred |
-| Session | `POST /demo/foundation/reset` | Atomic seed restore | Allowed | Manager + Flask boundary | Foundation | Requires valid active session; returns controlled 409 while ordinary requests hold leases |
-| Request boundary | Concurrent ordinary requests | Previously one O_EXCL owner per workspace | Allowed | Registry lease + Flask teardown | Foundation | Same-workspace requests coexist; lifecycle state still excludes new requests |
-| Health | `GET /health` | Runtime/readiness details | Read-only | Flask route | 4 | Reduce visitor-visible internals |
-| Dashboard/history | `GET/POST /` | List, filter, recalc/delete history | Allowed | Request-scoped SQL + route policy | 4 | Verify every POST action explicitly |
-| Reports | `GET /reports` | SQL/CSV reports and DB cache | Allowed | Request-scoped SQL | Foundation/4 | Cache lives in workspace DB |
-| Projects | `GET/POST /projects` | Project/job/manual/plan CRUD | Allowed | Request-scoped SQL + route policy | Foundation/4 | Validate all form actions |
-| Recalculate | `GET /recalculate`, `POST /recalculate/preview`, `POST /recalculate/run` | Preview/mutate job costs | Allowed | Request-scoped SQL + CSRF/policy | 4 | JSONL audit path must remain disabled in SQL demo |
-| Settings | `GET/POST /settings*` safe pricing/profile/display actions | SQL configuration CRUD | Allowed | Request-scoped SQL + action allowlist | 4 | Foundation blocks known unsafe actions |
-| Settings | printer rename/delete/profile mapping | SQL printer configuration | Allowed | Request-scoped SQL | 4 | No real endpoint configuration |
-| Settings | `backup_now`, backup scheduling | Creates archives under normal data | Blocked server-side | Flask action policy | Foundation | No shared backup path |
-| Settings | Moonraker save/test/import actions | Stores/probes arbitrary URL | Blocked server-side | Flask action policy | Foundation | SSRF/private-network risk |
-| Diagnostics | `GET /printer-diagnostics` | Probes configured Moonraker | Hidden + blocked | Flask boundary | Foundation | Network disclosure/SSRF |
-| Printer client API | `/log-print`, `/job-start`, `/job-update`, `/job-pause`, `/job-resume`, `/job-cancel`, `/job-end` | API-key authenticated real-printer mutations | Blocked server-side | Flask boundary | Foundation | Simulated provider replaces later |
-| Thumbnails | `/thumb/...` and Moonraker fetch/cache | Shared disk + remote fetch + memory cache | Hidden + blocked | Flask boundary/helper | Foundation | Future provider must namespace cache |
-| Export | `GET /download-csv` | Writes temporary CSV under normal data | Blocked now; namespaced later | Flask boundary | Foundation/4 | Later send workspace-scoped ephemeral file |
-| Static/templates | `/static/*`, templates | Global immutable code assets | Read-only | Web server | 4 | No visitor writes |
-| API credentials | `KCD_API_KEY`, `secret.json` administration | Global printer-client credential | Hidden + blocked | Startup + routes | Foundation/4 | Demo never creates normal `secret.json` |
-| Reports cache CLI | `python -m kcd cache info/clear` | Active normal DB | Not applicable to visitors | Operator CLI | 4 | Demo operator commands need explicit context if exposed |
-| Demo CLI | `python -m kcd demo list` | Lists internal short IDs/state | Not applicable | Operator CLI | Foundation | Never prints tokens |
-| Demo CLI | `python -m kcd demo cleanup [--dry-run]` | Safe expiration cleanup | Not applicable | Operator CLI | Foundation | Scheduler deferred |
-| Demo CLI | `python -m kcd demo validate` | Validates seed/registry/workspaces | Not applicable | Operator CLI | Foundation | Read-only except registry initialization |
-| DB CLI | `db init/import/verify/backfill/readiness` | Mutates or audits installation data | Hidden + blocked | Deployment/CLI boundary | 4/7 | Must never target visitor data implicitly |
-| Reports/history parity | CLI parity/regeneration | Reads/writes CSV/report artifacts | Hidden + blocked | Deployment/CLI boundary | 4/7 | Normal installation tooling only |
-| Export CLI | `export csv --out` | Operator-selected path | Hidden + blocked | Deployment/CLI boundary | 4/7 | Host-path selection |
-| Installer | `install.py`, `installer/*` | Systemd/client/remote installation | Hidden + blocked | Image/deployment boundary | 4/7 | Shell, SSH, filesystem, service mutation |
-| Backup tool | `tools/kcd_backup.py`, restore workflows | Archives/restores persistent data | Hidden + blocked | Image/deployment boundary | 4/7 | Restore is never visitor-accessible |
-| SQL validator/migration tools | `tools/validate_sql_only.py`, import/backfill scripts | Diagnostic/migration filesystem work | Not applicable | Image/deployment boundary | 7 | Operators only |
-| Updater/container operations | installer/updater, Docker Compose/restart | Mutates code/process/container | Hidden + blocked | Deployment + no socket | 7 | Docker socket must not be mounted |
-| Background auto-backup | GET request hook | May create shared archive | Blocked | Runtime-mode guard | Foundation | Scheduler absent in SQL demo |
-| Live job state | `core.live._jobs` / `live_jobs.json` | Process-global or file-backed | Blocked; simulation later | Runtime guard + route block | Foundation/6 | Never shared between visitors |
-| Temporary/report artifacts | `tempfile`, parity/recalc/export files | Mixed OS temp and normal data | Blocked or workspace-scoped | Context path + route policy | 4 | Only namespaced paths may be enabled |
-| Uploads/assets | future uploaded files | No supported public upload surface now | Hidden | Route policy + context path | 4/5 | Validate type/size and containment later |
+| Endpoint | Rule | Method | Current behavior / data | Network / file behavior | Demo class | Enforcement | CSRF | Rate / quota | Error / test |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `demo_foundation_create` | `/demo/foundation/session` | POST | Clone immutable seed; set opaque cookie | Workspace-local clone | Public safe | Guard + manager | Bootstrap exempt; origin checked | Invalid-session | Safe JSON; session/cookie tests |
+| `demo_foundation_reset` | `/demo/foundation/reset` | POST | Restore current workspace | Atomic contained replacement | Workspace lifecycle | Guard + exclusive transition | Required | General + lifecycle | 409 busy; reset/concurrency tests |
+| `health` | `/health` | GET | Minimal availability only | None | Public safe | Guard replaces detailed route | No | None | `{status: available}` test |
+| `static` | `/static/<path>` | GET | Immutable packaged assets | Packaged static read | Public safe | Explicit policy | No | None | Headers/policy completeness |
+| `index` | `/` | GET | Dashboard/history from workspace SQL | No network; thumbnail fetch disabled | Workspace read | Guard + context | No | General | Actual-app read/isolation tests |
+| `index` | `/` | POST | Complete/delete/recalculate history | Workspace SQL only | Workspace mutate | Action allowlist | Required | General + mutation; history capped because creation blocked | CSRF/A-B tests |
+| `reports_page` | `/reports` | GET | Workspace reports/cache | Cache in workspace DB | Workspace read | Guard + context | No | General | Actual-app/cache isolation |
+| `system_events_page` | `/system-events` | GET | Workspace-local audit events | Workspace DB | Workspace read | Guard + context | No | General | Policy completeness |
+| `recalculate_page` | `/recalculate` | GET | Workspace history/pricing view | Workspace DB | Workspace read | Guard + context | No | General | Actual policy/read tests |
+| `recalculate_preview` | `/recalculate/preview` | POST | Read-only cost preview | Workspace DB | Workspace mutate (unsafe method) | Explicit policy + validation | Required | General + mutation | CSRF/input tests |
+| `recalculate_run` | `/recalculate/run` | POST | Update selected workspace jobs | Workspace DB; no JSONL in SQL demo | Workspace mutate | Explicit policy | Required | General + mutation | Existing recalc regressions |
+| `projects_page` | `/projects` | GET | Workspace projects/jobs/plans | Workspace DB | Workspace read | Guard + context | No | General | Actual-app read |
+| `projects_page` | `/projects` | POST | Approved project, assignment, manual/plan mutations | Workspace DB; multipart/G-code upload denied | Workspace mutate | Action allowlist; `upload_plan_gcode` blocked | Required | General + mutation; project create reservation | Quota/upload/CSRF tests |
+| `settings_page` | `/settings` | GET | Safe workspace settings | Workspace DB; no probe | Workspace read | Guard + context | No | General | Actual policy |
+| `settings_page` | `/settings` | POST | Approved local settings/profile/printer actions | Workspace DB; backup/Moonraker blocked | Workspace mutate | Settings action allowlist | Required | General + mutation; profile reservations | Block-before-call test |
+| `settings_printers_page` | `/settings/printers` | GET | Local printer display/pricing | Stored remote destinations forbidden | Workspace read | Guard + context | No | General | Actual policy |
+| `settings_printers_page` | `/settings/printers` | POST | Rename/merge/delete/pricing/mappings | No active host/URL fields accepted | Workspace mutate | Settings action allowlist + network-field deny | Required | General + mutation; no create-printer surface | Network-input tests |
+| `settings_profiles_page` | `/settings/profiles` | GET | Filament/hourly profiles | Workspace DB | Workspace read | Guard + context | No | General | Actual-app read |
+| `settings_profiles_page` | `/settings/profiles` | POST | Profile CRUD/mappings | Workspace DB | Workspace mutate | Settings action allowlist | Required | Profile quota reservations | Actual mutation/quota tests |
+| `settings_other_page` | `/settings/other` | GET | Display settings; backup/export controls hidden | Workspace DB; no export/backup controls | Workspace read | Guard + context + template flag | No | General | Actual-app UI assertion |
+| `settings_other_page` | `/settings/other` | POST | Column visibility only | Backup actions blocked | Workspace mutate | Settings action allowlist | Required | General + mutation | Backup side-effect mock |
+| `settings_pause_page` | `/settings/pause` | GET | Pause pricing settings | Workspace DB | Workspace read | Guard + context | No | General | Policy completeness |
+| `settings_pause_page` | `/settings/pause` | POST | Pause pricing settings | Workspace DB | Workspace mutate | Settings action allowlist | Required | General + mutation | Numeric/normal regression |
+| `log_print` | `/log-print` | POST | Real printer history API | Printer client/API key | Blocked demo | Guard before API-key/route | N/A | Invalid-session | 403 JSON; network/side-effect tests |
+| `job_start` | `/job-start` | POST | Real live-job mutation | Real client state | Blocked demo | Guard before auth/route | N/A | Invalid-session | 403 JSON |
+| `job_update` | `/job-update` | POST | Real live-job mutation | Real client state | Blocked demo | Guard before auth/route | N/A | Invalid-session | 403 JSON |
+| `job_pause` | `/job-pause` | POST | Real live-job mutation | Real client state | Blocked demo | Guard before auth/route | N/A | Invalid-session | 403 JSON |
+| `job_resume` | `/job-resume` | POST | Real live-job mutation | Real client state | Blocked demo | Guard before auth/route | N/A | Invalid-session | 403 JSON |
+| `job_cancel` | `/job-cancel` | POST | Real live-job mutation | Real client state | Blocked demo | Guard before auth/route | N/A | Invalid-session | 403 JSON |
+| `job_end` | `/job-end` | POST | Real live-job mutation | Real client state | Blocked demo | Guard before auth/route | N/A | Invalid-session | 403 JSON |
+| `thumb_cache` | `/thumb/<printer>/<file>` | GET | Cached/remote printer thumbnail | Shared path and outbound fetch capable | Blocked demo | Guard; network primitive also denied | No | Invalid-session | Zero-call network test |
+| `download_csv` | `/download-csv` | GET | Writes/serves normal export path | Shared file/send_file | Blocked demo | Guard before file generation | No | Invalid-session; export rate deferred | Zero-side-effect/policy test |
+| `printer_diagnostics_page` | `/printer-diagnostics` | GET | Host/printer diagnostics | Moonraker probes and configuration disclosure | Operator only | Guard before route | No | Invalid-session | Zero-network policy test |
+
+## Multiplexed action policy
+
+Approved index actions: `complete_rows`, `recalc_costs`, `delete_rows`, `delete`.
+
+Approved project actions: display update; project create/update/delete; assign/unassign/recalculate; manual-job create/update/delete; planned-item update/fulfill/delete/convert. `upload_plan_gcode` is blocked.
+
+Approved settings actions: local printer delete/rename/merge/pricing; pause and column settings; filament/hourly profile CRUD and mappings. `backup_now`, backup scheduling, Moonraker save/test/import, and unknown actions are blocked before route code. A URL-like value or network-capable field name is independently rejected.
+
+Operator CLI commands (`kcd demo list/cleanup/validate`, database migration/import/verify, installer, backup/restore, updater, shell and container operations) have no visitor HTTP mapping and remain operator-only. Adding any mapping without an explicit policy fails startup/tests.
+
+## Inventory notes
+
+The Phase 4 URL-map audit found 33 endpoint/method combinations: 3 public safe, 10 workspace read, 9 workspace mutate, 1 workspace lifecycle, 1 operator only, and 9 blocked demo. There are no conditionally registered visitor routes and no state-changing GET route. Flask's 400/403/404/405/413 handlers and the demo security/unexpected-error handlers are centralized in the request boundary; they are response handlers rather than URL-map entries. Unknown URLs receive the safe 404 handler, while a newly registered URL-map entry fails the startup completeness check until explicitly classified.
+
+Installer, updater, backup/restore, database import/migration, registry/seed administration, cleanup, shell/subprocess, service/container, and host-path tools exist only as operator-side CLI or deployment code. They have no HTTP mapping. The policy explicitly blocks the HTTP surfaces that can reach printer clients, exports, backups, diagnostics, remote thumbnails, or Moonraker behavior before route logic runs.

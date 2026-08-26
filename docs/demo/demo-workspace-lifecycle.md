@@ -12,6 +12,8 @@ Cleanup first selects due active records, then transactionally rechecks expirati
 
 Request teardown closes tracked SQLite connections before releasing its lease. The lease defaults to 120 seconds and renews every 30 seconds; both values are configurable, with heartbeat required to be shorter than lifetime. A worker crash therefore blocks lifecycle work only until its bounded lease expires. Lifecycle calls do not wait, so reset returns controlled HTTP `409` while an ordinary request is active; cleanup skips the workspace. A request arriving after `resetting`, `expired`, `deleting`, or `error` receives controlled session-state HTTP `410`. Two resets are controlled by the state transition: one proceeds and the other receives `410`. There are no unbounded lock waits.
 
+Phase 4 rate counters and quota reservations share the registry but not visitor data. A quota slot is attached to and renewed with its request lease. Failed-request slots are released; successful slots remain briefly so stale concurrent counts cannot bypass a limit, then reconcile against the committed count or expire. Lifecycle operations remain governed by the original request lease: reset does not require or consume an entity reservation and can recover a quota-full workspace from the immutable seed.
+
 Operator commands:
 
 ```text

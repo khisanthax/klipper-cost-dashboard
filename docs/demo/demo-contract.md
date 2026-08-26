@@ -1,6 +1,6 @@
 # KCD ephemeral demo contract
 
-Status: foundational, not public-ready. This contract describes the target public demo; Phase 4 must complete route enforcement and abuse controls before exposure.
+Status: foundational, not public-ready. Phase 4 adds the application security boundary and abuse controls described here; deployment isolation and later demo phases remain required before exposure.
 
 ## Workspace behavior
 
