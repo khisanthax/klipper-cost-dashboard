@@ -1,9 +1,13 @@
 import json
 import os
 import sqlite3
+import stat
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 from contextlib import closing
 from unittest.mock import patch
 
@@ -82,6 +86,38 @@ class BackupConsistencyTests(unittest.TestCase):
         self.assertEqual(schema, "0006_system_events")
         self.assertEqual(job, ("backup-job", 4.25))
 
+    def test_archive_permission_hardening_is_applied(self):
+        with patch.object(self.backup.os, "chmod", wraps=os.chmod) as chmod:
+            archive = self.backup.create_backup_archive()
+        chmod.assert_called_once_with(archive, 0o600)
+
+    @unittest.skipIf(os.name == "nt", "Windows does not expose POSIX permission bits")
+    def test_archive_permissions_are_owner_only(self):
+        archive = self.backup.create_backup_archive()
+        self.assertEqual(stat.S_IMODE(os.stat(archive).st_mode), 0o600)
+
+    def test_chmod_failure_removes_published_archive(self):
+        with patch.object(self.backup.os, "chmod", side_effect=OSError("chmod failed")):
+            with self.assertRaisesRegex(OSError, "chmod failed"):
+                self.backup.create_backup_archive()
+        self.assertEqual(os.listdir(self.backups_dir), [])
+
+    def test_retention_still_removes_old_archives(self):
+        old_paths = []
+        for index in range(3):
+            path = os.path.join(self.backups_dir, f"kcd_backup_20000101_00000{index}.tar.gz")
+            with open(path, "wb") as handle:
+                handle.write(b"old")
+            os.utime(path, (index + 1, index + 1))
+            old_paths.append(path)
+
+        archive = self.backup.create_backup_archive(keep=2)
+
+        retained = sorted(os.listdir(self.backups_dir))
+        self.assertEqual(len(retained), 2)
+        self.assertIn(os.path.basename(archive), retained)
+        self.assertFalse(os.path.exists(old_paths[0]))
+
     def test_snapshot_failure_removes_partial_archive(self):
         self._seed_sql_state()
         with patch.object(self.backup, "_create_sqlite_snapshot", side_effect=RuntimeError("snapshot failed")):
@@ -108,6 +144,44 @@ class BackupConsistencyTests(unittest.TestCase):
                 os.environ.pop("KCD_STORAGE_BACKEND", None)
             else:
                 os.environ["KCD_STORAGE_BACKEND"] = previous_backend
+
+
+class BackupToolInvocationTests(unittest.TestCase):
+    def test_help_runs_outside_repository_without_pythonpath(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "tools" / "kcd_backup.py"
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        with tempfile.TemporaryDirectory() as working_dir:
+            result = subprocess.run(
+                [sys.executable, str(script), "--help"],
+                cwd=working_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Create a KCD backup archive", result.stdout)
+
+    def test_backup_runs_outside_repository_without_pythonpath(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "tools" / "kcd_backup.py"
+        env = os.environ.copy()
+        env.pop("PYTHONPATH", None)
+        env["KCD_API_KEY"] = "isolated-backup-test-key"
+        with tempfile.TemporaryDirectory() as working_dir:
+            result = subprocess.run(
+                [sys.executable, str(script), "--keep", "1"],
+                cwd=working_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            archives = list(Path(working_dir, "data", "backups").glob("kcd_backup_*.tar.gz"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(archives), 1)
 
 
 if __name__ == "__main__":

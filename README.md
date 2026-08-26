@@ -232,6 +232,8 @@ identity; pricing must then be configured before SQL-only readiness succeeds.
 
 `Backup now` and `python tools/kcd_backup.py` create a transactionally consistent
 SQLite snapshot and exclude live WAL/SHM files and nested backup archives.
+Archives are created with owner-only `0600` permissions because they may contain
+credentials.
 Automatic backup scheduling is unavailable in strict SQL-only mode and is
 disabled visibly in Settings. Backup archives include `secret.json` when present,
 so protect them as credentials-bearing files.

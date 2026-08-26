@@ -20,7 +20,9 @@ class ReleaseValidationWorkflowTests(unittest.TestCase):
         self.assertIn("docker build --tag kcd-release-ci .", workflow)
         self.assertIn("python -m kcd --help", workflow)
         self.assertIn("python -m kcd db readiness", workflow)
-        self.assertIn("python tools/kcd_backup.py --help", workflow)
+        self.assertIn("python tools/kcd_backup.py --keep 1", workflow)
+        self.assertIn('--user "$(id -u):$(id -g)"', workflow)
+        self.assertIn("stat -c %a", workflow)
         self.assertIn("/app/tools/validate_sql_only.py", workflow)
 
 
