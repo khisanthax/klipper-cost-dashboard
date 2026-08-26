@@ -1,4 +1,4 @@
-"""Ephemeral demo workspace foundation (not a public-safety boundary)."""
+"""Ephemeral demo workspace and application-security foundation."""
 
 from core.demo.config import DemoConfiguration, load_demo_configuration
 from core.demo.manager import DemoWorkspaceManager, WorkspaceSession

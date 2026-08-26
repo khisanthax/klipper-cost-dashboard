@@ -2,24 +2,43 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
-from datetime import datetime, timezone
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 
-# Avoid normal-mode import side effects. This tool still uses an explicit context.
-os.environ.setdefault("KCD_RUNTIME_MODE", "demo")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from core import db as db_module  # noqa: E402
-from core.workspace_context import WorkspaceContext  # noqa: E402
+BASIC_SEED_NAME = "basic-v1"
+
+
+def _seed_support():
+    """Import seed support without leaking a runtime-mode change to callers."""
+    previous = os.environ.get("KCD_RUNTIME_MODE")
+    os.environ["KCD_RUNTIME_MODE"] = "demo"
+    try:
+        from core.demo.basic_seed import (
+            build_basic_seed_database, validate_basic_seed, write_seed_manifest,
+        )
+    finally:
+        if previous is None:
+            os.environ.pop("KCD_RUNTIME_MODE", None)
+        else:
+            os.environ["KCD_RUNTIME_MODE"] = previous
+    return build_basic_seed_database, validate_basic_seed, write_seed_manifest
 
 
 def create_seed(data_root: Path, seed_name: str) -> Path:
-    root = data_root.expanduser().resolve()
-    if not root.is_absolute() or root.is_symlink():
+    build_basic_seed_database, validate_basic_seed, write_seed_manifest = _seed_support()
+    supplied_root = data_root.expanduser()
+    if not supplied_root.is_absolute() or supplied_root.is_symlink():
         raise ValueError("data root must be an absolute, non-symlinked directory")
+    if not supplied_root.exists() or not supplied_root.is_dir():
+        raise ValueError("data root must already exist as a directory")
+    root = supplied_root.resolve(strict=True)
     if Path(seed_name).name != seed_name or seed_name in {"", ".", ".."}:
         raise ValueError("seed name must be a simple directory name")
     seeds = root / "seeds"
@@ -28,25 +47,10 @@ def create_seed(data_root: Path, seed_name: str) -> Path:
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite existing seed: {destination}")
     temporary = Path(tempfile.mkdtemp(prefix=".seed-", dir=seeds))
-    context = WorkspaceContext(
-        "demo", "seed-builder", temporary, temporary / "kcd.db", temporary / "cache",
-        temporary / "exports", temporary / "temp", temporary / "uploads", seed_name, "sql",
-    )
     try:
-        with closing(db_module.connect_db(context)) as conn:
-            db_module.apply_migrations(conn)
-            now = datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat()
-            conn.execute(
-                "INSERT INTO printers(name, created_at, updated_at) VALUES(?,?,?)",
-                ("Demo Printer", now, now),
-            )
-            conn.execute(
-                "INSERT INTO projects(project_uid,name,created_at,updated_at) VALUES(?,?,?,?)",
-                ("basic-project", "Basic Project", now, now),
-            )
-            conn.commit()
-        for name in ("cache", "exports", "temp", "uploads"):
-            (temporary / name).mkdir()
+        result = build_basic_seed_database(temporary, seed_name)
+        write_seed_manifest(temporary, seed_name, result)
+        validate_basic_seed(temporary, expected_seed_name=seed_name)
         os.replace(temporary, destination)
         return destination
     except Exception:
@@ -58,7 +62,7 @@ def create_seed(data_root: Path, seed_name: str) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, required=True)
-    parser.add_argument("--seed-name", default="basic-v1")
+    parser.add_argument("--seed-name", default=BASIC_SEED_NAME)
     args = parser.parse_args()
     print(create_seed(args.data_root, args.seed_name))
     return 0

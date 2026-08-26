@@ -235,6 +235,17 @@ class DemoWorkspaceManager:
             raise SeedValidationError(
                 "Demo seed database is missing required migrations: " + ", ".join(missing)
             )
+        manifest_path = seed / "seed-manifest.json"
+        if manifest_path.exists():
+            try:
+                from core.demo.basic_seed import validate_basic_seed
+                validate_basic_seed(
+                    seed,
+                    self.configuration,
+                    expected_seed_name=self.configuration.seed_name,
+                )
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise SeedValidationError("Demo seed manifest validation failed.") from exc
         return self.configuration.seed_name
 
     def _clone_seed(self, target: Path) -> None:
