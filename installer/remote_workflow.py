@@ -28,7 +28,7 @@ def remote_operation(host, operation, payload):
         if operation == "discover":
             source = "import json; from installer.discovery import discover_local; print(json.dumps(discover_local()))"
         else:
-            source = "import json,sys; from installer.workflow import repair_client; print(json.dumps(repair_client(**json.load(sys.stdin))))"
+            source = "import json,sys,os; payload=json.load(sys.stdin); os.environ['KCD_API_KEY']=payload['key']; from installer.workflow import repair_client; print(json.dumps(repair_client(**payload)))"
         command = ("cd "+shlex.quote(remote)+" && tar -xf source.tar && KCD_INSTALLER_SKIP_DOCKER=1 python3 -c "+shlex.quote(source))
         run = subprocess.run(["ssh", "-o", "BatchMode=yes", host, command], input=json.dumps(payload), capture_output=True, text=True, timeout=90)
         if run.returncode:

@@ -1465,7 +1465,7 @@ def master_setup(master_and_client: bool = False) -> None:
     sql_state = _detect_sql_state()
     sql_enabled = False
     if sql_state.get("status") == "sql_capable":
-        println("[sql] SQL-capable install detected (CSV may also exist; running dual/compat mode).")
+        println("[sql] Existing SQL database detected; preserving the selected runtime storage contract.")
         sql_enabled = True
     elif sql_state.get("status") == "sql_needs_migration":
         println("[sql] SQLite DB detected but schema outdated; applying migrations...")
@@ -1480,7 +1480,7 @@ def master_setup(master_and_client: bool = False) -> None:
             sql_enabled = _ensure_sql_capable(import_from_csv=False)
 
     if sql_enabled:
-        println("[sql] SQL compatibility mode enabled: dual writes with automatic SQL Reports reads.")
+        println("[sql] Strict SQL-only storage selected." if is_sql_only() else "[sql] SQL compatibility mode enabled: dual writes with automatic SQL Reports reads.")
         try:
             s = load_settings(SETTINGS_FILE)
             if isinstance(s, dict):

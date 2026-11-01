@@ -25,7 +25,7 @@ def main():
         base='http://127.0.0.1:'+str(port)
         env={**os.environ,'KCD_DATA_DIR':str(Path(tmp)/'data'),'KCD_STORAGE_BACKEND':'sql','KCD_REPORTS_BACKEND':'sql','KCD_INSTALLER_SKIP_DOCKER':'1','KCD_API_KEY':'isolated-source-service-key'}
         def terminal(answers):
-            command=['sudo','-E',sys.executable,'install.py']
+            command=['sudo','env',*[key+'='+env[key] for key in ('KCD_DATA_DIR','KCD_STORAGE_BACKEND','KCD_REPORTS_BACKEND','KCD_INSTALLER_SKIP_DOCKER','KCD_API_KEY')],sys.executable,'install.py']
             result=subprocess.run(command,cwd=source,env=env,input='\n'.join(answers)+'\n',text=True,capture_output=True,timeout=180)
             assert env['KCD_API_KEY'] not in result.stdout+result.stderr
             with open(artifacts/'systemd-terminal.txt','a') as stream:stream.write(result.stdout+result.stderr)
