@@ -123,9 +123,13 @@ def _apply_insert_hook_or_auto(lines, start_index, end_index, patterns_for_auto)
     # Work on a slice for readability, but remember indices are in the outer list.
     macro_block = lines[start_index:end_index]
 
+    gcode_offset = next((i for i, line in enumerate(macro_block) if line.strip().startswith("gcode:")), len(macro_block))
+
     # 1) Look for the generic hook
     hook_index = None
     for i, line in enumerate(macro_block):
+        if i <= gcode_offset:
+            continue
         if KCD_INSERT_HOOK in line:
             hook_index = i
             break
@@ -144,6 +148,8 @@ def _apply_insert_hook_or_auto(lines, start_index, end_index, patterns_for_auto)
         insertion_index = None
         macro_block = lines[start_index:end_index]  # refresh reference
         for i, line in enumerate(macro_block):
+            if i <= gcode_offset:
+                continue
             stripped = line.strip()
             for pattern in patterns_for_auto:
                 if re.search(pattern, stripped, re.IGNORECASE):

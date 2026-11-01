@@ -1,5 +1,6 @@
 """Inspect active macro hooks; preview targeted changes before explicit apply."""
 import difflib
+import configparser
 from pathlib import Path
 import re
 import tempfile
@@ -57,6 +58,7 @@ def macro_plan(config_dir, filename=None, macro=None, event=None, *, apply=False
             after = re.sub(r'^([ \t]*)'+re.escape(hook)+r'[ \t]*$',
                 lambda m: m[1]+"{% if 'gcode_macro "+hook+"' in printer %}\n"+m[1]+"    "+hook+"\n"+m[1]+"{% endif %}",after,flags=re.M)
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=str(path), tofile=str(path)))
+    configparser.RawConfigParser(strict=False, interpolation=None).read_string(after)
     if apply and diff:
         atomic_write(path, after, path.stat().st_mode & 0o777)
     return {"applied": bool(apply and diff), "diff": diff, "status": message}

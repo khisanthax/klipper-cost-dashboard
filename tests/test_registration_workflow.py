@@ -218,12 +218,13 @@ class DiscoveryTests(unittest.TestCase):
     def test_shared_pause_macro_gets_guarded_hook(self):
         from installer.macro_plan import macro_plan
         with tempfile.TemporaryDirectory() as tmp:
-            p=Path(tmp)/'printer.cfg';p.write_text('[gcode_macro PAUSE]\ngcode:\n    PAUSE_BASE\n')
+            p=Path(tmp)/'printer.cfg';p.write_text('[gcode_macro PAUSE]\nrename_existing: PAUSE_BASE\ngcode:\n    PAUSE_BASE\n')
             result=macro_plan(tmp,'printer.cfg','PAUSE','pause',apply=True)
             text=p.read_text()
             self.assertIn("{% if 'gcode_macro KCD_JOB_PAUSE' in printer %}",text)
             self.assertIn('    PAUSE_BASE',text)
             self.assertIn('{% endif %}\n',text)
+            self.assertLess(text.index('gcode:'),text.index("{% if 'gcode_macro KCD_JOB_PAUSE'"))
             self.assertFalse(macro_plan(tmp,'printer.cfg','PAUSE','pause',apply=True)['applied'])
 
     def test_include_overrides_select_effective_definition_in_linear_order(self):
