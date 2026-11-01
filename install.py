@@ -5,6 +5,14 @@ Print Cost Dashboard Installer
 
 Refactored to use modular installer package.
 """
+# Discovery must not initialize a Master database or create credentials.
+import sys
+if __name__ == "__main__" and len(sys.argv)>1:
+    from installer.bootstrap import configure_runtime
+    configure_runtime()
+    from installer.cli import main as cli_main
+    raise SystemExit(cli_main())
+
 from installer.bootstrap import configure_runtime
 
 configure_runtime()

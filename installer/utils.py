@@ -390,16 +390,21 @@ def _perform_master_install(
         return False
 
     println(f"[{len(steps) + 3}/{len(steps) + 3}] Enabling and starting service...")
-    _run_cmd("systemctl daemon-reload")
+    if _run_cmd("systemctl daemon-reload") != 0:
+        return False
     if _run_cmd(f"systemctl enable --now {service_name}") != 0:
         return False
 
-    status = _service_is_active(service_name)
-    println(f"Service status : {status}")
-    println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
-    ok, detail = _check_url(url)
-    println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
-    return True
+    for attempt in range(10):
+        status = _service_is_active(service_name)
+        listening = _check_port_open(port)
+        ok, detail = _check_url(url)
+        if status == "active" and listening and ok:
+            return True
+        if attempt < 9:
+            __import__('time').sleep(1)
+    println(f"Master verification failed: service={status}, listening={listening}, URL check={detail}. Service/config retained for repair.")
+    return False
 
 
 def _master_install_or_status(
@@ -1488,7 +1493,7 @@ def master_setup(master_and_client: bool = False) -> None:
         install_client_local()
 
 
-def install_client_local() -> None:
+def install_client_local(printer_name=None) -> None:
     from .discovery import discover_local
     from .workflow import repair_client
     candidates = discover_local()
@@ -1496,11 +1501,16 @@ def install_client_local() -> None:
     for index, candidate in enumerate(candidates, 1):
         println(f"  {index}) {candidate['config_dir']} [{candidate['classification']}] identity={candidate['printer_name'] or 'unset'} port={candidate['moonraker_port'] or 'unknown'}")
     println("  0) Enter a custom directory")
-    selected = prompt_choice("Select configuration: ", range(len(candidates)+1))
+    selected = prompt_choice("Select configuration (b to cancel): ", range(len(candidates)+1), cancel_inputs=["b"])
+    if selected is None:
+        return
     candidate = candidates[selected-1] if selected else {}
     directory = candidate.get("config_dir") or _safe_input("Config directory containing printer.cfg: ").strip()
     existing_name = candidate.get("printer_name", "")
-    name = _safe_input(f"Printer identity [{existing_name}]: ").strip() or existing_name
+    if printer_name and existing_name and printer_name!=existing_name:
+        println("Selected configuration belongs to a different identity; update cancelled without changes.")
+        return
+    name = printer_name or _safe_input(f"Printer identity [{existing_name}]: ").strip() or existing_name
     if not name:
         println("Identity is required. A clone must use its own identity; relocation keeps the existing identity.")
         return
@@ -1525,7 +1535,7 @@ def install_client_local() -> None:
         println(f"Client install/repair failed: {exc}")
 
 
-def install_client_remote() -> None:
+def install_client_remote(printer_name=None) -> None:
     from .remote_workflow import remote_operation
     println("\n=== Remote client installation / repair ===")
     host = _safe_input("SSH alias or user@host: ").strip()
@@ -1534,10 +1544,12 @@ def install_client_remote() -> None:
         for index, c in enumerate(candidates, 1):
             println(f"  {index}) {c['config_dir']} [{c['classification']}] identity={c['printer_name'] or 'unset'} port={c['moonraker_port'] or 'unknown'}")
         println("  0) Custom configuration directory")
-        selected = prompt_choice("Select configuration: ", range(len(candidates)+1))
+        selected = prompt_choice("Select configuration (b to cancel): ", range(len(candidates)+1), cancel_inputs=["b"])
+        if selected is None:
+            return
         candidate = candidates[selected-1] if selected else {}
         directory = candidate.get("config_dir") or _safe_input("Remote config directory: ").strip()
-        name = _safe_input(f"Printer identity [{candidate.get('printer_name', '')}]: ").strip() or candidate.get("printer_name", "")
+        name = printer_name or _safe_input(f"Printer identity [{candidate.get('printer_name', '')}]: ").strip() or candidate.get("printer_name", "")
         master = _safe_input("Master URL reachable from the remote printer: ").strip()
         key = prompt_secret("Master API key", _load_secret_api_key())
         moonraker = _safe_input("Moonraker URL reachable from Master (include actual port): ").strip()
@@ -1648,7 +1660,8 @@ gcode:
     {% set params = printer_name ~ "|" ~ fname ~ "|" ~ dur ~ "|" ~ filament %}
     RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{params}"
 """
-    return template.replace("__PRINTER_DIR__", printer_dir).replace("__PRINTER_NAME__", printer_name)
+    template=re.sub(r'__PRINTER_DIR__/([A-Za-z0-9_]+\.sh)',lambda m:shlex.quote(printer_dir.rstrip('/\\')+'/'+m[1]),template)
+    return template.replace("__PRINTER_NAME__", printer_name)
 
 
 def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: str) -> None:
@@ -1720,8 +1733,8 @@ def uninstall_client_remote(printer_name: str) -> None:
 
 
 def update_client_local(printer_name: str) -> None:
-    install_client_local()
+    install_client_local(printer_name=printer_name)
 
 
 def update_client_remote(printer_name: str) -> None:
-    install_client_remote()
+    install_client_remote(printer_name=printer_name)

@@ -82,10 +82,17 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
         raise ValueError("Moonraker discovery failed; verify its API, network address and authorization")
     if probe["config_dir"] != str(Path(config_dir).resolve()):
         raise ValueError("Moonraker serves a different config directory; select the matching instance/port")
+    existing=next((client for client in status.get('clients',[]) if client.get('printer_name')==name),None)
+    if existing and existing.get('hidden') and not reactivate:
+        raise ValueError('Printer is retired; explicit reactivation is required')
+    if existing and existing.get('moonraker_url') and existing['moonraker_url']!=moonraker and not relocate:
+        raise ValueError('Endpoint changed; explicit relocation is required to preserve this identity')
     plan = client_plan(config_dir, name, master, key)
     changes = []
     for path, (content, mode) in plan.items():
         old = path.read_text() if path.exists() else ""
+        if old==content and path.exists() and (__import__('os').name=='nt' or (__import__('os').stat(path).st_mode & 0o777)==mode):
+            continue
         if path.suffix == ".sh":
             changes.append(f"{path}: {'update' if path.exists() else 'create'} private client script (credential omitted)")
         else:
@@ -96,7 +103,7 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
     payload = {"printer_name": name, "moonraker_url": moonraker, "metadata": metadata,
                "relocate": relocate, "reactivate": reactivate}
     if not apply:
-        return {"applied": False, "changes": changes, "master_backend": status["backend"]}
+        return {"applied": False, "changes": changes, "master_backend": status["backend"], "macro_action":"Client files only. Inspect active print-event hooks with macro-plan; registration is validated only on apply."}
     # Registration is atomic on Master. A later file failure remains repairable;
     # it never destroys an existing identity, price, or job.
     registration = master_request(master, key, payload)

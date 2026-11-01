@@ -43,6 +43,7 @@ jobs:
           python tools/browser_history_regression.py
           python tools/browser_pricing_regression.py
           python tools/browser_thumbnail_regression.py
+          python tools/smoke_production.py --installer-acceptance --installer-ssh
 
       - name: Preserve browser screenshots
         if: always()
