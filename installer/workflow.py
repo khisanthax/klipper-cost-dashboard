@@ -53,6 +53,12 @@ def client_plan(config_dir, name, master, key):
         config = re.sub(r'^(\s*variable_printer_name:)\s*.*$', lambda m: m[1]+' "'+name+'"', config, flags=re.M)
         config = re.sub(r'^(command:\s*)(\S*/)(kcd_job_\w+\.sh|send_print_cost\.sh)',
                         lambda m: m[1]+str(directory)+"/"+m[3], config, flags=re.M)
+        # Upgrade older managed integrations by appending only absent helper
+        # definitions. Existing start/end logic and custom settings are retained.
+        rendered = utils._render_print_cost_cfg(str(directory), name)
+        for section in re.finditer(r'^\[(gcode_shell_command kcd_job_\w+|gcode_macro KCD_JOB_\w+)\]\n.*?(?=^\[|\Z)', rendered, re.M | re.S):
+            if not re.search(r'^\['+re.escape(section[1])+r'\]', config, re.M | re.I):
+                config += "\n" + section[0]
     plan = {current: (config, 0o644)}
     for filename, generator in [("kcd_job_start.sh", utils.generate_job_start_script),
              ("kcd_job_cancel.sh", utils.generate_job_cancel_script),

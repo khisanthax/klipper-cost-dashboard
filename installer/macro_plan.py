@@ -50,6 +50,11 @@ def macro_plan(config_dir, filename=None, macro=None, event=None, *, apply=False
         if not ok:
             raise ValueError(message)
         after = candidate.read_text()
+        if event in {"cancel", "pause", "resume"}:
+            # mainsail.cfg is often a symlink shared by several printer
+            # instances. Unconfigured instances must not call missing KCD macros.
+            after = re.sub(r'^([ \t]*)'+re.escape(hook)+r'[ \t]*$',
+                lambda m: m[1]+"{% if 'gcode_macro "+hook+"' in printer %}\n"+m[1]+"    "+hook+"\n"+m[1]+"{% endif %}",after,flags=re.M)
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=str(path), tofile=str(path)))
     if apply and diff:
         atomic_write(path, after, path.stat().st_mode & 0o777)
