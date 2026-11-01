@@ -51,8 +51,8 @@ def client_plan(config_dir, name, master, key):
         if not re.search(r'^\s*variable_printer_name:', config, re.M):
             raise ValueError("Legacy print_cost.cfg needs manual migration; refusing to replace custom macros")
         config = re.sub(r'^(\s*variable_printer_name:)\s*.*$', lambda m: m[1]+' "'+name+'"', config, flags=re.M)
-        config = re.sub(r'^(command:\s*)(?:bash\s+)?(\S*/)(kcd_job_\w+\.sh|send_print_cost\.sh)',
-                        lambda m: m[1]+"bash "+str(directory)+"/"+m[3], config, flags=re.M)
+        config = re.sub(r"""^(command:\s*)(?:bash\s+)?((?:'[^']*/|"[^"]*/|/[^\r\n]*?/|[A-Za-z]:[^\r\n]*?/))(kcd_job_\w+\.sh|send_print_cost\.sh)['"]?""",
+                        lambda m: m[1]+"bash "+__import__('shlex').quote(str(directory)+"/"+m[3]), config, flags=re.M)
         # Upgrade older managed integrations by appending only absent helper
         # definitions. Existing start/end logic and custom settings are retained.
         rendered = utils._render_print_cost_cfg(str(directory), name)
@@ -69,6 +69,9 @@ def client_plan(config_dir, name, master, key):
     if current.resolve() not in files:
         printer = directory / "printer.cfg"
         plan[printer] = ("[include print_cost.cfg]\n"+printer.read_text(), 0o644)
+    for path in plan:
+        if not path.resolve().is_relative_to(directory):
+            raise ValueError('Managed file escapes the selected config directory; repair its symlink explicitly')
     return plan
 
 
@@ -109,8 +112,6 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
     registration = master_request(master, key, payload)
     try:
         for path, (content, mode) in plan.items():
-            if not path.resolve().is_relative_to(Path(config_dir).resolve()):
-                raise ValueError('Managed file escapes the selected config directory; repair its symlink explicitly')
             atomic_write(path, content, mode)
             import os
             if os.name=='posix' and os.geteuid()==0:

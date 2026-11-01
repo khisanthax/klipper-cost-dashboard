@@ -21,6 +21,8 @@ def exercise(env,base,moons,tmp,*,browser=True):
         assert env['KCD_API_KEY'] not in result.stdout+result.stderr,'Credential exposed'
         with open(artifacts/'terminal.txt','a',encoding='utf-8') as stream:stream.write(result.stdout)
         return result.stdout
+    seed="from core import db; c=db.connect_db(); db.upsert_job(c,dict(job_uid='installer-history',printer='One',filename='preserved.gcode',status='completed',duration_seconds=3600,filament_mm=1000,time_cost=40,material_cost=2,total_cost=42)); c.commit(); c.close()"
+    subprocess.run([sys.executable,'-c',seed],cwd=ROOT,env=env,check=True,capture_output=True)
     assert 'One' in terminal(['4','2','4','5'])
     assert 'Goodbye' in terminal(['bad','2','b','5'])
     # Real cancellation at the configuration selection prompt.
@@ -89,6 +91,7 @@ except RuntimeError as exc:print(str(exc))
     inactive=args.copy();inactive[inactive.index('--file')+1]='inactive.cfg';inactive[inactive.index('--macro')+1]='UNUSED_START';cli(inactive,2)
     with closing(sqlite3.connect(Path(env['KCD_DATA_DIR'])/'kcd.db')) as conn:
         assert conn.execute('SELECT COUNT(*) FROM printers').fetchone()[0]==2
+        assert conn.execute("SELECT total_cost FROM jobs WHERE job_uid='installer-history'").fetchone()[0]==42
     if not browser:
         print("Terminal installer acceptance passed (browser checks not requested in this invocation)")
         return

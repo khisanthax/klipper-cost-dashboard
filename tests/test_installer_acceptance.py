@@ -38,3 +38,14 @@ class InstallerAcceptanceTests(unittest.TestCase):
         commands=[line.split(':',1)[1].strip() for line in cfg.splitlines() if line.startswith('command:')]
         self.assertEqual(len(commands),5)
         self.assertTrue(all(shlex.split(command)[1].startswith(root+'/') for command in commands))
+
+    @unittest.skipUnless(os.name=='posix','POSIX symlink fixture')
+    def test_managed_symlink_escape_is_rejected_before_registration(self):
+        from installer.workflow import client_plan
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)/'config';root.mkdir();(root/'printer.cfg').write_text('')
+            outside=Path(tmp)/'outside';outside.write_text('preserve')
+            (root/'kcd_job_start.sh').symlink_to(outside)
+            with self.assertRaisesRegex(ValueError,'escapes'):
+                client_plan(root,'Fixture','http://master:5000','fixture-key')
+            self.assertEqual(outside.read_text(),'preserve')

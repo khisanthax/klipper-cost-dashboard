@@ -6,6 +6,8 @@ import socket
 import subprocess
 import time
 import uuid
+import sqlite3
+from contextlib import closing
 
 
 def exercise(env,base,moon,tmp):
@@ -39,6 +41,8 @@ def exercise(env,base,moon,tmp):
             path=wrappers/binary
             import shlex
             path.write_text('#!/bin/sh\nexec '+shlex.quote(actual)+' -F '+shlex.quote(str(config))+' "$@"\n');path.chmod(0o700)
+        with closing(sqlite3.connect(Path(env['KCD_DATA_DIR'])/'kcd.db')) as connection:
+            before_history=connection.execute('SELECT * FROM jobs ORDER BY job_uid').fetchall()
         from installer.remote_workflow import remote_operation
         old_path=os.environ['PATH'];os.environ['PATH']=str(wrappers)+os.pathsep+old_path
         try:
@@ -53,6 +57,9 @@ def exercise(env,base,moon,tmp):
             try:remote_operation('kcd-fixture','repair',payload);raise AssertionError('Wrong key accepted')
             except RuntimeError:pass
         finally:os.environ['PATH']=old_path
+        with closing(sqlite3.connect(Path(env['KCD_DATA_DIR'])/'kcd.db')) as connection:
+            assert connection.execute('SELECT * FROM jobs ORDER BY job_uid').fetchall()==before_history
+            assert connection.execute('SELECT COUNT(*) FROM printers').fetchone()[0]==2
         print('SSH acceptance passed: actual OpenSSH, strict host-key verification, remote preview/apply/repeat and authentication failure; no Flask required on target')
     finally:
         subprocess.run(['docker','rm','-f',name],capture_output=True)
