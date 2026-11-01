@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 import subprocess
 import sys
 import time
@@ -93,6 +94,28 @@ def rotate(args):
         for filename,text in scripts.items():
             safe_name=str(uuid.uuid5(uuid.NAMESPACE_URL,client["printer_name"]))
             atomic_write(backup/(safe_name+"-"+filename),text,backup=False)
+        # Moonraker replaces uploaded files with non-executable mode. Invoke
+        # managed scripts through bash so the fixed diagnostic can secure them.
+        config=http(base+"/server/files/config/print_cost.cfg").decode()
+        updated=re.sub(r'(?m)^(command:[ \t]*)(?!bash[ \t])(\S*/(?:kcd_job_\w+|send_print_cost)\.sh)(.*)$',r'\1bash \2\3',config)
+        if updated != config:
+            atomic_write(backup/(safe_name+"-print_cost.cfg"),config,backup=False)
+            upload(base,"print_cost.cfg",updated)
+            try:
+                http(base+"/printer/restart",b'')
+                for attempt in range(45):
+                    try:
+                        if get_json(base+"/printer/info")["result"].get("state")=="ready":
+                            break
+                    except (OSError,ValueError,KeyError):
+                        pass
+                    time.sleep(1)
+                else:
+                    raise RuntimeError("Printer did not become ready after interpreter update")
+            except Exception:
+                upload(base,"print_cost.cfg",config)
+                http(base+"/printer/restart",b'')
+                raise RuntimeError("Interpreter update failed; original config restored; check printer readiness") from None
     atomic_write(secret,json.dumps(credentials,indent=2))
     subprocess.run(["docker","restart",args.container],capture_output=True,check=True,timeout=45)
     for attempt in range(30):
