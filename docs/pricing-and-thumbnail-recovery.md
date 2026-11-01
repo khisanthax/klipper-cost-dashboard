@@ -133,3 +133,6 @@ writes are rejected; printer APIs still require the rotated API credential.
 Use an authenticated reverse proxy for access beyond that trusted network.
 Static Bootstrap assets are pinned, integrity-verified and served locally so
 LAN styling and controls do not depend on public CDN connectivity.
+
+Production outcome and exact release/backup evidence are recorded in the
+[completed audit](production-audit-2026-11.md#completed-release-and-production-verification).
