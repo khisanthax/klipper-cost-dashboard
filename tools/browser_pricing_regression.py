@@ -98,6 +98,13 @@ def main():
                 with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-preview-btn').click()
                 page.locator('[name=pricing_amount]').fill('20');page.locator('[name=pricing_amount]').blur()
                 assert page.locator('#kcd-recalc-btn').is_disabled()
+                # Fractional cents across 15 rows must reconcile in the preview.
+                page.locator('[name=pricing_amount]').fill('15.02')
+                with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-preview-btn').click()
+                from decimal import Decimal
+                displayed=page.locator('#recalc-preview-table tbody td[data-col=material_cost] strong').all_inner_texts()
+                assert sum(Decimal(value) for value in displayed)==Decimal('67.59'),displayed
+                assert query('SELECT SUM(total_cost) AS cost FROM jobs WHERE job_uid!=?','mask-15')[0]['cost']==67.5
                 # Profile creation uses spool price and density directly.
                 page.goto(base+'/settings/profiles')
                 form=page.locator('form').filter(has=page.locator('input[name="action"][value="add_filament_profile"]'))

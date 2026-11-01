@@ -297,9 +297,11 @@ def _upsert_sql_profile(profile_data: dict) -> str:
     with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
         row = conn.execute(
-            "SELECT id FROM filament_profiles WHERE profile_uid = ? OR name = ?",
-            (profile_id, name),
+            "SELECT id FROM filament_profiles WHERE profile_uid = ?",(profile_id,)
         ).fetchone()
+        collision=conn.execute("SELECT id FROM filament_profiles WHERE name=?",(name,)).fetchone()
+        if collision and (not row or collision['id']!=row['id']):
+            raise ValueError('A profile with this name already exists; edit that profile or choose a unique name')
         if row:
             conn.execute(
                 """
@@ -378,6 +380,10 @@ def _update_sql_profile(profile_id: str, updates: dict) -> bool:
         ).fetchone()
         if not row:
             return False
+
+        if values.get('name'):
+            collision=conn.execute("SELECT id FROM filament_profiles WHERE name=? AND id!=?",(values['name'],row['id'])).fetchone()
+            if collision:raise ValueError('A profile with this name already exists; choose a unique name')
 
         set_clause = ", ".join([f"{k} = ?" for k in values.keys()])
         params = list(values.values()) + [row["id"] if isinstance(row, sqlite3.Row) else row[0]]

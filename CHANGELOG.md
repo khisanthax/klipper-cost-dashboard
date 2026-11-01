@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.1 - 2026-11-01
+
+- Allocate fractional cents across Recalculate Center preview rows so displayed components and totals agree; retain full SQL calculation precision and suppress negative zero adjustments.
+- Identify selected filament profiles as the conversion source. Prevent same-name profile creation or rename from replacing another profile identity.
+
 ## v0.7.0 - 2026-11-01
 
 - Fix Recalculate Center submitting stale profile settings; require reviewed SQL previews, preserve original costs, validate actual updates and commit before/after audit evidence atomically. Preserve legitimate historical zero costs.
