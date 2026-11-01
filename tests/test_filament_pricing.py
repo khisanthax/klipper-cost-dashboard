@@ -73,8 +73,31 @@ class FilamentUnitsTests(unittest.TestCase):
         self.assertEqual(sum(r['display_total_cost'] for r in rows),totals['total_cost'])
         for r in rows:self.assertEqual(r['display_total_cost'],r['display_time_cost']+r['display_material_cost']+r['display_adjustment'])
 
+    def test_recalculate_preview_allocates_cents_and_normalizes_zero_adjustment(self):
+        from core.recalculation import reconcile_preview
+        rows=[dict(old_time_cost=1,old_material_cost=.25,old_adjustment=-1e-15,time_cost=0,material_cost=.004,adjustment=1e-15) for _ in range(15)]
+        before,after=reconcile_preview(rows)
+        self.assertEqual(after['material_cost'],Decimal('.06'))
+        self.assertEqual(sum(r['display_material_cost'] for r in rows),Decimal('.06'))
+        self.assertEqual(sum(r['display_delta'] for r in rows),after['total_cost']-before['total_cost'])
+        self.assertTrue(all(r['display_adjustment']==0 for r in rows))
+        self.assertTrue(all(r['material_cost']==.004 for r in rows),'Display allocation must not change SQL calculation precision')
+
 
 class ProjectPricingSnapshotTests(unittest.TestCase):
+    def test_profile_name_collision_cannot_replace_a_referenced_identity(self):
+        from core import db,profiles,rates
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql'}),patch.object(db,'_db_path',return_value=str(Path(tmp)/'kcd.db')):
+            original=profiles.upsert_profile(dict(id='original',name='PETG',filament_mode='per_kg',filament_rate=15,grams_per_meter=3))
+            with self.assertRaisesRegex(ValueError,'already exists'):
+                profiles.upsert_profile(dict(id='replacement',name='PETG',filament_mode='per_kg',filament_rate=99,grams_per_meter=3))
+            self.assertEqual(profiles.get_profile(original)['filament_rate'],15)
+            self.assertIsNone(profiles.get_profile('replacement'))
+            rates.upsert_rate_profile(dict(id='original-rate',name='Free',rate_per_hour=0))
+            with self.assertRaisesRegex(ValueError,'already exists'):
+                rates.upsert_rate_profile(dict(id='replacement-rate',name='Free',rate_per_hour=10))
+            self.assertEqual(rates.get_rate_profile('original-rate')['rate_per_hour'],0)
+
     def test_overlay_preview_apply_restore_and_stale_guard(self):
         from core import db,projects,project_pricing
         with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql'}),patch.object(db,'_db_path',return_value=str(Path(tmp)/'kcd.db')):

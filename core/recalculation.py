@@ -3,7 +3,7 @@ from decimal import Decimal
 import hashlib
 import json
 from core import profiles
-from core.filament import conversion,material_cost,price_spec,number
+from core.filament import conversion,material_cost,price_spec,number,reconcile_display
 
 
 def enrich_compute(base,plan,form):
@@ -34,6 +34,8 @@ def enrich_compute(base,plan,form):
         if plan.get('apply_filament_profile') and not selected_factor and row.get('filament_weight_kind')!='recorded':
             selected_factor=(profile or {}).get('grams_per_meter')
         measure=conversion(row,profile,factor_override=selected_factor,density_override=density,diameter_override=diameter)
+        if selected_factor and not factor and not density:
+            measure['conversion_source']='Selected filament profile: '+str((profile or {}).get('name') or profile_id)
         result['filament_grams']=float(measure['grams']) if measure['grams'] is not None else None
         result['filament_weight_kind']=measure['weight_kind']
         selected=spec
@@ -88,6 +90,24 @@ def enrich_compute(base,plan,form):
         return result
     compute.for_row=for_row
     return compute,plan
+
+
+def reconcile_preview(rows):
+    """Display cents consistently; retain full-precision results for SQL apply."""
+    before=[];after=[]
+    for row in rows:
+        for collection,prefix in ((before,'old_'),(after,'')):
+            values={key:row[prefix+key] for key in ('time_cost','material_cost','adjustment')}
+            if abs(number(values['adjustment'],signed=True))<Decimal('0.000000001'):
+                values['adjustment']=0
+            collection.append(values)
+    totals_before=reconcile_display(before);totals_after=reconcile_display(after)
+    for row,old,new in zip(rows,before,after):
+        for key in ('time_cost','material_cost','adjustment','total_cost'):
+            row['display_old_'+key]=old['display_'+key]
+            row['display_'+key]=new['display_'+key]
+        row['display_delta']=row['display_total_cost']-row['display_old_total_cost']
+    return totals_before,totals_after
 
 
 def preview_fingerprint(rows,compute_fn,plan):

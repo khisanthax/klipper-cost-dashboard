@@ -337,7 +337,7 @@
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div class="fw-semibold">Preview</div>
-        <div class="text-muted small">No changes were written. Use “Apply previewed prices” to save this reviewed plan.</div>
+        <div class="text-muted small">No changes were written. Displayed cents are allocated across rows to reconcile component totals; full precision is retained when applied.</div>
     </div>
     <div class="card-body">
         <div class="d-flex flex-wrap gap-3 mb-2">
@@ -374,12 +374,12 @@
                         <td class="text-truncate" style="max-width: 420px;" title="{{ p.filename }}" data-col="filename">{{ p.filename }}</td>
                         <td class="text-end" data-col="hours">{{ "%.2f"|format(p.duration_hours) }}</td>
                         <td class="text-end" data-col="filament">{{ "%.2f"|format(p.filament_meters) }} m<br>{{ "%.3f"|format(p.filament_grams) if p.filament_grams is not none else "Unknown" }} g<br><small>{{ p.grams_per_meter }} g/m · {{ p.conversion_source }}</small></td>
-                        <td class="text-end" data-col="time_cost">{{ "%.2f"|format(p.old_time_cost) }} → <strong>{{ "%.2f"|format(p.time_cost) }}</strong></td>
-                        <td class="text-end" data-col="material_cost">{{ "%.2f"|format(p.old_material_cost) }} → <strong>{{ "%.2f"|format(p.material_cost) }}</strong><br><small>{{ p.filament_rate }} {{ {"per_kg":"$/kg","per_gram":"$/g","per_meter":"$/m"}.get(p.filament_mode,p.filament_mode) }} · {{ p.pricing_source }}</small></td>
-                        <td data-col="adjustment">{{ "%.2f"|format(p.old_adjustment) }} → {{ "%.2f"|format(p.adjustment) }}</td>
-                        <td class="text-end" data-col="old">{{ "%.2f"|format(p.old_total) }}</td>
-                        <td class="text-end" data-col="new">{{ "%.2f"|format(p.new_total) }}</td>
-                        <td class="text-end {% if p.delta > 0 %}text-danger{% elif p.delta < 0 %}text-success{% endif %}" data-col="delta">{{ "%.2f"|format(p.delta) }}</td>
+                        <td class="text-end" data-col="time_cost">{{ "%.2f"|format(p.display_old_time_cost) }} → <strong>{{ "%.2f"|format(p.display_time_cost) }}</strong></td>
+                        <td class="text-end" data-col="material_cost">{{ "%.2f"|format(p.display_old_material_cost) }} → <strong>{{ "%.2f"|format(p.display_material_cost) }}</strong><br><small>{{ p.filament_rate }} {{ {"per_kg":"$/kg","per_gram":"$/g","per_meter":"$/m"}.get(p.filament_mode,p.filament_mode) }} · {{ p.pricing_source }}</small></td>
+                        <td data-col="adjustment">{{ "%.2f"|format(p.display_old_adjustment) }} → {{ "%.2f"|format(p.display_adjustment) }}</td>
+                        <td class="text-end" data-col="old">{{ "%.2f"|format(p.display_old_total_cost) }}</td>
+                        <td class="text-end" data-col="new">{{ "%.2f"|format(p.display_total_cost) }}</td>
+                        <td class="text-end {% if p.display_delta > 0 %}text-danger{% elif p.display_delta < 0 %}text-success{% endif %}" data-col="delta">{{ "%.2f"|format(p.display_delta) }}</td>
                         <td class="text-muted small text-truncate" style="max-width: 240px;" title="{{ p.job_uid }}" data-col="job_uid">{{ p.job_uid }}</td>
                     </tr>
                     {% endfor %}

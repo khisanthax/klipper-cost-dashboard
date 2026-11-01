@@ -2411,6 +2411,11 @@ def recalculate_preview():
             }
         )
 
+    from core.recalculation import reconcile_preview
+    display_before,display_after=reconcile_preview(preview_rows)
+    before_total=float(display_before['total_cost'])
+    after_total=float(display_after['total_cost'])
+
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
     rate_profiles = rates.list_rate_profiles()
@@ -3531,7 +3536,10 @@ def _settings_view(tab: str):
                     "description": description,
                 }
                 profile.update(modern)
-                profiles.add_profile(profile)
+                try:
+                    profiles.add_profile(profile)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "update_filament_profile":
@@ -3586,7 +3594,10 @@ def _settings_view(tab: str):
                 updates.update(modern)
                 if "price_input_mode" not in updates:
                     updates["price_input_mode"]=mode
-                profiles.update_profile(profile_id, updates)
+                try:
+                    profiles.update_profile(profile_id, updates)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "delete_filament_profile":
@@ -3650,7 +3661,10 @@ def _settings_view(tab: str):
                     "description": description,
                     "rate_per_hour": rate_per_hour,
                 }
-                rates.upsert_rate_profile(rate_profile)
+                try:
+                    rates.upsert_rate_profile(rate_profile)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "update_rate_profile":
@@ -3676,7 +3690,10 @@ def _settings_view(tab: str):
                         updates["rate_per_hour"] = float(request.form.get("rate_profile_rate"))
                     except (TypeError, ValueError):
                         updates["rate_per_hour"] = None
-                rates.update_rate_profile(profile_id, updates)
+                try:
+                    rates.update_rate_profile(profile_id, updates)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
         if action == "delete_rate_profile":
