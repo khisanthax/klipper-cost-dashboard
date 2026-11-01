@@ -96,4 +96,65 @@ Loaded gcode was verified after idle-only configuration reloads; all four were
 ready. Fixed CANCEL insertion to target the actual gcode body after
 `CANCEL_PRINT_BASE`, never the `rename_existing` option.
 
-Full live deployment and final counts are appended after the v0.7 rollout.
+The completed rollout is recorded below.
+
+## Completed release and production verification
+
+Published and deployed v0.7.1 on 2026-11-01. The active private Compose override
+pins the multi-architecture image to:
+
+`ghcr.io/khisanthax/klipper-cost-dashboard:v0.7.1@sha256:c0871372d0b8fb33a43d30094e566d960d4b3d64e10a5537c7d122caadf53647`
+
+The source checkout was updated through merge `66b01f1`, retaining local ignore
+rules and the pre-existing legacy recalculation log. SQL readiness passed all
+five checks with schema `0008_pricing_provenance`; integrity and foreign-key
+checks passed. Before pricing changes, a digest of every pre-existing job field
+proved the additive upgrade preserved all 1,034 records. Printer IDs, history
+membership and existing defaults were retained: Ender5P 440, SV07 240, SV08 353,
+MercuryTwo 1.
+
+The real browser then selected all 15 RaRa Masks jobs, enabled the verified
+RaRa Hours and RaRa Mats profiles, reviewed the reconciled preview and applied
+it. SQL reload verification confirmed every job stores 0/hour, per_kg at 15,
+3 g/m and the intended profile IDs. Requested/changed/validated counts were all
+15, missing count zero. The resulting 907.294 m is 2,721.882 g; material cost is
+40.82823 and time is zero. Project display is $0.00 time + $40.83 material +
+$0.00 adjustment = **$40.83**, versus the original $382.11. This is the current
+15-job case; the separate 835.02 m / $180.21 acceptance example also passes.
+
+All 1,019 unselected history rows remained byte-for-byte equivalent in their
+original fields. Reconstructing the pre-change history from the 15 retained
+original snapshots and current unselected rows reproduced the complete original
+history digest. Both original prices and the verified before/after SQL audit
+are recoverable. No global printer defaults or active-job pricing were changed.
+
+Thumbnail recovery archived 422 existing jobs as 311 unique objects: 44 proven
+cache recoveries and 378 unchanged-source captures. Remaining results were 570
+missing sources, 16 sources modified after their jobs and 26 jobs without enough
+timestamp evidence. Those were reported and not guessed. An isolated restore of
+the production backup verified all 1,034 jobs, all 422 references, every image's
+size/SHA-256 and a restored HTTP image response. Representative private backups:
+`kcd_backup_20261101_151201.tar.gz` before upgrade/pricing,
+`kcd_backup_20261101_152247.tar.gz` after archive recovery, and
+`kcd_backup_20261101_153412.tar.gz` after the verified pricing operation.
+
+SV07 began a real print during verification. Its credential matched the current
+Master and its accepted live event retained a start thumbnail. The dashboard-only
+v0.7.1 update used a graceful stop and completed in 0.62 seconds. The SQL live
+state was identical across the update and Moonraker still reported printing.
+Klipper was not restarted for this dashboard update. The other three clients'
+fixed diagnostics also verified their credentials. MercuryTwo's inactive auto
+configuration received backed-up description corrections only; its include
+selection and motion/temperature logic were unchanged.
+
+Final validation: 203 tests pass on Linux/Python 3.11; Windows has one
+platform-specific skip. All three Chromium suites and the Docker HTTP smoke
+pass in release CI. Coverage includes profile application/recovery, fractional
+cent reconciliation, safe profile identity collisions, graceful SIGTERM with a
+live SQL job, archive deletion/backup/restore, viewport/zoom/scroll selection and
+exact bulk-action targets. The live browser confirmed the 15-job SQL result and
+project components. Production History controls were also checked on desktop
+and mobile without applying other bulk mutations. All principal routes returned
+HTTP 200, and a cross-origin mutation returned 403 before processing. The
+production backup and original historical identities remain available for
+recovery.
