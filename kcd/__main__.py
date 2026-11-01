@@ -105,6 +105,37 @@ def _cmd_projects_import_json(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Klipper Cost Dashboard utilities")
     sub = parser.add_subparsers(dest="command")
+    pricing_parser=sub.add_parser('pricing',help='Recover original recorded costs after explicit recalculation')
+    pricing_sub=pricing_parser.add_subparsers(dest='pricing_command')
+    restore=pricing_sub.add_parser('restore-originals')
+    restore.add_argument('--job-uid',action='append',required=True)
+    restore.add_argument('--apply',action='store_true')
+    def restore_pricing(args):
+        from core.recalculation import restore_originals
+        import json
+        print(json.dumps(restore_originals(args.job_uid,apply=args.apply),indent=2))
+        return 0
+    restore.set_defaults(func=restore_pricing)
+    thumb_parser=sub.add_parser('thumbnails',help='Permanent thumbnail recovery and cleanup')
+    thumb_sub=thumb_parser.add_subparsers(dest='thumbnail_command')
+    thumb_backfill=thumb_sub.add_parser('backfill')
+    thumb_backfill.add_argument('--apply',action='store_true')
+    thumb_backfill.add_argument('--offline',action='store_true')
+    thumb_backfill.add_argument('--limit',type=int,default=100)
+    thumb_backfill.add_argument('--printer')
+    def thumbnail_backfill(args):
+        from core.thumbnail_archive import backfill
+        import json
+        print(json.dumps(backfill(apply=args.apply,offline=args.offline,limit=args.limit,printer=args.printer),indent=2))
+        return 0
+    thumb_backfill.set_defaults(func=thumbnail_backfill)
+    thumb_prune=thumb_sub.add_parser('prune')
+    thumb_prune.add_argument('--apply',action='store_true')
+    def thumbnail_prune(args):
+        from core.thumbnail_archive import prune_unreferenced
+        print('Unreferenced archived objects:',prune_unreferenced(apply=args.apply))
+        return 0
+    thumb_prune.set_defaults(func=thumbnail_prune)
 
     db_parser = sub.add_parser("db", help="Database utilities")
     db_sub = db_parser.add_subparsers(dest="db_command")

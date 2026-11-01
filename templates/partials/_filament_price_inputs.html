@@ -1,0 +1,41 @@
+{% set fp = price_record|default({}) %}
+{% set form_id = price_form|default('') %}
+{% set mode = fp.get('price_input_mode') or fp.get('filament_mode') or 'spool' %}
+<div class="row g-2">
+  <div class="col-md-4">
+    <label class="form-label small">Price unit
+      <select name="pricing_mode" class="form-select form-select-sm" {% if form_id %}form="{{ form_id }}"{% endif %}>
+        {% for unit,label in [('spool','Spool price ($)'),('per_kg','$/kg'),('per_gram','$/gram'),('per_meter','$/meter')] %}
+        <option value="{{ unit }}" {% if mode == unit %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="form-label small">Price / selected unit
+      <input type="number" step="any" min="0" name="pricing_amount" class="form-control form-control-sm" {% if price_required|default(true) %}required{% endif %} {% if form_id %}form="{{ form_id }}"{% endif %} value="{{ fp.get('spool_price') if mode == 'spool' and fp.get('spool_price') is not none else (fp.get('filament_rate') if fp.get('filament_rate') is not none else '') }}">
+    </label>
+  </div>
+  <div class="col-md-4">
+    <label class="form-label small">Net filament per spool (g)
+      <input type="number" step="any" min="0.01" name="net_spool_grams" class="form-control form-control-sm" {% if form_id %}form="{{ form_id }}"{% endif %} value="{{ fp.get('net_spool_grams') or 1000 }}">
+    </label>
+    <div class="small text-muted">Used only for spool pricing. Excludes the empty spool.</div>
+    <label class="form-label small">Conversion basis
+      <select name="conversion_basis" class="form-select form-select-sm" {% if form_id %}form="{{ form_id }}"{% endif %}>
+        <option value="factor" {% if fp.get('conversion_basis') == 'factor' or not fp.get('density_g_cm3') %}selected{% endif %}>Verified grams per meter</option>
+        <option value="geometry" {% if fp.get('conversion_basis') != 'factor' and fp.get('density_g_cm3') %}selected{% endif %}>Density + filament diameter</option>
+      </select>
+    </label>
+  </div>
+  <div class="col-md-4">
+    <label class="form-label small">Verified g/m (factor basis)
+      <input type="number" step="any" min="0.000001" name="grams_per_meter" class="form-control form-control-sm" {% if form_id %}form="{{ form_id }}"{% endif %} value="{{ fp.get('grams_per_meter') or '' }}">
+    </label>
+    <label class="form-label small">Density (g/cm³)
+      <input type="number" step="any" min="0.000001" name="density_g_cm3" class="form-control form-control-sm" {% if form_id %}form="{{ form_id }}"{% endif %} value="{{ fp.get('density_g_cm3') or '' }}">
+    </label>
+    <label class="form-label small">Input filament diameter (mm)
+      <input type="number" step="any" min="0.000001" name="diameter_mm" class="form-control form-control-sm" {% if form_id %}form="{{ form_id }}"{% endif %} value="{{ fp.get('diameter_mm') or 1.75 }}">
+    </label>
+    <div class="small text-muted">Use filament diameter, not nozzle diameter.</div>
+  </div>
+</div>

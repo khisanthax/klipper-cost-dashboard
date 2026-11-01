@@ -242,6 +242,14 @@ class DiscoveryTests(unittest.TestCase):
             self.assertNotIn('KCD_JOB_PAUSE',(root/'mainsail.cfg').read_text())
             self.assertIn('CUSTOM_PAUSE',(root/'macro.cfg').read_text())
 
+    def test_cancel_hook_does_not_match_rename_option(self):
+        from installer.macro_plan import macro_plan
+        from installer.discovery import effective_macro_sources
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'printer.cfg';p.write_text('[gcode_macro CANCEL_PRINT]\nrename_existing: CANCEL_PRINT_BASE\ngcode:\n    CANCEL_PRINT_BASE\n    M104 S0\n')
+            macro_plan(tmp,'printer.cfg','CANCEL_PRINT','cancel',apply=True)
+            self.assertIn('KCD_JOB_CANCEL',effective_macro_sources(tmp)[0]['CANCEL_PRINT']['body'])
+
     def test_old_managed_config_gains_only_missing_helper_definitions(self):
         from installer.workflow import client_plan
         with tempfile.TemporaryDirectory() as tmp:

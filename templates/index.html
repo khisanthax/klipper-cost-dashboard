@@ -20,12 +20,31 @@
 
 <script>
     function toggleSelectAll(source) {
-        const checkboxes = document.querySelectorAll('input[name="delete_rows"]');
+        const checkboxes = document.querySelectorAll('#historyPostForm input[name="delete_rows"]:not(:disabled)');
         checkboxes.forEach(cb => cb.checked = source.checked);
+        updateHistorySelection();
     }
 
+    function updateHistorySelection() {
+        const rows = [...document.querySelectorAll('#historyPostForm input[name="delete_rows"]:not(:disabled)')];
+        const count = rows.filter(cb => cb.checked).length;
+        const all = document.getElementById('historySelectAll');
+        if (all) {
+            all.checked = rows.length > 0 && count === rows.length;
+            all.indeterminate = count > 0 && count < rows.length;
+            all.disabled = rows.length === 0;
+        }
+        const output = document.getElementById('historySelectionCount');
+        if (output) output.textContent = `${count} selected on this page`;
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('historyPostForm')?.addEventListener('change', updateHistorySelection);
+        window.addEventListener('pageshow', updateHistorySelection);
+        updateHistorySelection();
+    });
+
     function ensureSelection() {
-        const checked = document.querySelectorAll('input[name="delete_rows"]:checked');
+        const checked = document.querySelectorAll('#historyPostForm input[name="delete_rows"]:checked:not(:disabled)');
         if (checked.length === 0) {
             alert("No rows selected.");
             return false;
@@ -425,7 +444,7 @@
 </div>
 
 <div class="meta text-muted small mb-3">
-    CSV: {{ csv_file }} | Rows (after filter): {{ rows|length }}
+    History source: {{ history_source|default("CSV") }} · Rows (after filter): {{ rows|length }}
 </div>
 
 {% if chart_cost_per_day.labels|length > 0 or chart_hours_per_printer.labels|length > 0 %}
@@ -495,6 +514,7 @@
                             onclick="return confirmDelete()">
                         Delete Selected
                     </button>
+                    <output id="historySelectionCount" class="small text-muted align-self-center" aria-live="polite">0 selected on this page</output>
                 </div>
 
                 <form method="get" class="d-flex flex-wrap gap-2 align-items-center mb-0">
@@ -544,13 +564,18 @@
         </div>
 
         <form method="post" id="historyPostForm">
+            <input type="hidden" name="selection_kind" value="job_uid">
             <div class="table-responsive">
                 <table id="history-table" class="table table-striped table-hover table-sm mb-0 kcd-table"
                        data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="history_table">
                     {% set visible = visible_cols if visible_cols and (visible_cols|length > 0) else headers %}
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 40px;" data-col="__select__"><input type="checkbox" onclick="toggleSelectAll(this)"></th>
+                            <th class="kcd-selection-cell" data-col="__select__" data-kcd-fixed-width="52" data-sortable="false" scope="col">
+                                <label class="kcd-selection-target">
+                                    <input id="historySelectAll" class="kcd-history-checkbox" type="checkbox" onclick="toggleSelectAll(this)" aria-label="Select all history rows on this page">
+                                </label>
+                            </th>
                             {% for h in headers %}
                             {% if h in visible %}
                             <th class="col-{{ h|replace(' ', '-')|lower }}"
@@ -565,7 +590,11 @@
                     <tbody>
                         {% for row in history_rows_page %}
                         <tr>
-                            <td><input type="checkbox" name="delete_rows" value="{{ row.job_uid }}"></td>
+                            <td class="kcd-selection-cell" data-col="__select__">
+                                <label class="kcd-selection-target">
+                                    <input class="kcd-history-checkbox" type="checkbox" name="delete_rows" value="{{ row.job_uid }}" aria-label="Select {{ row.get('filename', 'print') }} ({{ row.job_uid }})" {% if not row.job_uid %}disabled{% endif %}>
+                                </label>
+                            </td>
                             {% for h in headers %}
                             {% if h in visible %}
                             <td class="col-{{ h|replace(' ', '-')|lower }}">
@@ -616,6 +645,9 @@
                                  {% endif %}
                                  {% elif h == 'filament_meters' %}
                                  <span class="fw-semibold">{{ "%.2f"|format(row.get(h, 0)|float) }}</span>
+                                 <div class="small text-muted" title="{{ row.get('_weight_source','Missing conversion information') }}">{{ '%.2f'|format(row._weight_grams) if row.get('_weight_grams') is not none else 'Unknown' }} g · {{ row.get('_weight_factor','?') }} g/m</div>
+                                 {% elif h == 'filament_rate' %}
+                                 <span>{{ row.get(h, '') }} {{ row.get('_price_unit','Unknown unit') }}</span>
                                  {% elif h in ['job_uid', 'filament_profile_id', 'import_id'] %}
                                  {% set full_val = row.get(h, '') %}
                                  <span class="kcd-uuid" title="{{ full_val }}">{{ full_val }}</span>

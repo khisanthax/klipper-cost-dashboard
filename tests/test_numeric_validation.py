@@ -214,7 +214,7 @@ class RouteNumericValidationTests(unittest.TestCase):
                 data={"recompute_mode": "pricing_only", "rate_per_hour_override": "nan"},
             )
         query = parse_qs(urlparse(response.location).query)
-        self.assertIn("Invalid hourly rate override", query["msg"][0])
+        self.assertIn("Invalid hourly rate override", query["error"][0])
 
         with patch.object(self.app_module, "_is_sql_only", return_value=True), patch.object(
             self.app_module, "_sql_only_printer_exists", return_value=True

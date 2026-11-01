@@ -331,15 +331,9 @@ def compute_costs(
 
     time_cost = billable_hours * rate_per_hour
 
-    if filament_mode == "per_meter":
-        material_cost = filament_meters * filament_rate
-    elif filament_mode == "per_gram":
-        material_cost = grams * filament_rate
-    elif filament_mode == "per_kg":
-        kg = grams / 1000.0
-        material_cost = kg * filament_rate
-    else:
-        material_cost = 0.0
+    from core.filament import conversion, material_cost as filament_cost, price_spec
+    measurement=conversion({'filament_mm':filament_mm,'grams_per_meter':grams_per_meter})
+    material_cost=float(filament_cost(measurement,price_spec(filament_mode,filament_rate)))
 
     total_cost = time_cost + material_cost
 
@@ -350,6 +344,9 @@ def compute_costs(
         "filament_mode": filament_mode,
         "filament_rate": filament_rate,
         "grams_per_meter": grams_per_meter,
+        "filament_grams": grams,
+        "filament_weight_kind": "estimated",
+        "billable_hours": billable_hours,
         "time_cost": time_cost,
         "material_cost": material_cost,
         "total_cost": total_cost,
@@ -393,7 +390,7 @@ def compute_costs_with_overrides(
             label="rate_per_hour_override",
             nonnegative=True,
         )
-    if rate_profile_id:
+    if rate_profile_id and rate_per_hour is None:
         profile = rates.get_rate_profile(rate_profile_id)
         rate_per_hour = _coerce_profile_rate(printer_name, str(rate_profile_id), profile)
     if rate_per_hour is None:
@@ -444,6 +441,12 @@ def compute_costs_with_overrides(
             else:
                 profile_id = ""
 
+    if filament_rate_per_meter_override is not None:
+        filament_mode="per_meter"
+        filament_rate=filament_rate_per_meter_override
+        profile_id=""
+        profile_material=""
+
     filament_rate = finite_float(filament_rate, label="filament_rate", nonnegative=True)
     grams_per_meter = finite_float(grams_per_meter, label="grams_per_meter", nonnegative=True)
     if filament_mm > 0 and grams_per_meter == 0:
@@ -467,15 +470,9 @@ def compute_costs_with_overrides(
 
     time_cost = billable_hours * rate_per_hour
 
-    if filament_mode == "per_meter":
-        material_cost = filament_meters * filament_rate
-    elif filament_mode == "per_gram":
-        material_cost = grams * filament_rate
-    elif filament_mode == "per_kg":
-        kg = grams / 1000.0
-        material_cost = kg * filament_rate
-    else:
-        material_cost = 0.0
+    from core.filament import conversion, material_cost as filament_cost, price_spec
+    measurement=conversion({'filament_mm':filament_mm,'grams_per_meter':grams_per_meter})
+    material_cost=float(filament_cost(measurement,price_spec(filament_mode,filament_rate)))
 
     total_cost = time_cost + material_cost
 
@@ -486,6 +483,9 @@ def compute_costs_with_overrides(
         "filament_mode": filament_mode,
         "filament_rate": filament_rate,
         "grams_per_meter": grams_per_meter,
+        "filament_grams": grams,
+        "filament_weight_kind": "estimated",
+        "billable_hours": billable_hours,
         "time_cost": time_cost,
         "material_cost": material_cost,
         "total_cost": total_cost,

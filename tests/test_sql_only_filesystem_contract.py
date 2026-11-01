@@ -123,9 +123,13 @@ class SqlOnlyFilesystemContractTests(unittest.TestCase):
                     original_data_dir = app_module.DATA_DIR
                     app_module.DATA_DIR = tmpdir
                     try:
-                        response = app_module.app.test_client().post(
+                        client=app_module.app.test_client()
+                        preview=client.post('/recalculate/preview',data={"job_uids":["sql-recalc-job"],"recompute_mode":"pricing_only"})
+                        import re
+                        digest=re.search(r'name="preview_hash"[^>]*value="([a-f0-9]+)"',preview.get_data(as_text=True)).group(1)
+                        response = client.post(
                             "/recalculate/run",
-                            data={"job_uids": ["sql-recalc-job"], "recompute_mode": "pricing_only"},
+                            data={"job_uids": ["sql-recalc-job"], "recompute_mode": "pricing_only", "preview_hash":digest},
                         )
                     finally:
                         app_module.DATA_DIR = original_data_dir

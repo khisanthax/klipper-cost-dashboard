@@ -949,7 +949,7 @@ def insert_cancel_macro_call(macro_name, path, macro_to_call):
     # Determine insertion index:
     # 1) Try user hook
     insertion_index, end_index, used_hook = _apply_insert_hook_or_auto(
-        lines, start_index, end_index, patterns_for_auto=None
+        lines, start_index, end_index, patterns_for_auto=[r"\bCANCEL_PRINT_BASE\b"]
     )
 
     # Determine indentation

@@ -264,4 +264,17 @@
     </div>
 </div>
 
+<div class="card my-4">
+  <div class="card-header">Recent prints in selected range — saved historical costs</div>
+  <div class="table-responsive"><table class="table table-striped table-sm align-middle mb-0" id="report-recent-jobs">
+    <thead><tr><th>Thumbnail</th><th>Printer / file</th><th>Filament</th><th>Saved material pricing</th><th>Total ($)</th></tr></thead>
+    <tbody>{% for row in recent_jobs|default([]) %}<tr>
+      <td>{% set thumb_url=row._thumb_small %}{% set size='small' %}{% set alt=row.filename %}{% include 'partials/_thumbnail.html' %}</td>
+      <td>{{ row.printer }}<br>{{ row.filename }}</td>
+      <td>{{ '%.2f'|format(row.filament_meters or 0) }} m<br>{{ '%.2f'|format(row._weight_grams) if row._weight_grams is not none else 'Unknown' }} g<br><small>{{ row._weight_factor }} g/m · {{ row._weight_source }}</small></td>
+      <td>{{ row.filament_rate }} {{ row._price_unit }}<br><small>Saved material: ${{ '%.2f'|format(row.material_cost or 0) }}</small></td>
+      <td>{{ '%.2f'|format(row.total_cost or 0) }}</td>
+    </tr>{% else %}<tr><td colspan="5" class="text-muted">No prints in this range.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
 {% endblock %}

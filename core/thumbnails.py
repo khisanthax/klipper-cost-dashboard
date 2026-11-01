@@ -22,6 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 
 from core.config import DATA_DIR, SETTINGS_FILE
 from core.storage import load_settings
@@ -49,6 +50,9 @@ def _safe_dir(name: str) -> str:
 
 
 def _evict_cache(printer_dir: str) -> None:
+    from core.thumbnail_archive import ARCHIVE_ROOT
+    if Path(printer_dir).resolve().is_relative_to(ARCHIVE_ROOT.resolve()):
+        return
     if _MAX_FILES <= 0:
         return
     try:

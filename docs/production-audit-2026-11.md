@@ -13,7 +13,7 @@ Observed production on 2026-11-01: vaultwarden, Docker
 `/home/khisanthax/klipper-cost-dashboard/data` → `/app/data`, SQL storage.
 SQLite integrity and all five readiness checks passed. Initial counts: Ender5P
 440, SV07 240, SV08 353, MercuryTwo 1 (1,034 total). A consistent private backup
-was created before changes. No historical jobs were reassigned or recalculated.
+was created before changes. At that baseline, no historical jobs were reassigned or recalculated.
 
 ## Findings and repairs
 
@@ -25,7 +25,7 @@ was created before changes. No historical jobs were reassigned or recalculated.
 | High | API credential was tracked in `data/secret.json`, exposed by prompts/settings, and stored in scripts with world-readable permissions. | Remove tracked credential; generate private credentials on first setup; hidden prompts, no secret defaults/diffs, atomic private writes/backups, bounded overlap rotation and fixed printer-side self-check. Never reproduce the prior value. Historical Git objects still contain the revoked credential; rotation is essential. |
 | High | SQL live state vanished on process restart. Cancellation removed state before writing history; duplicate cancellation attempted a forbidden CSV read. | Persist SQL live jobs in `user_settings`, serialize state transitions, preserve state on failed finalization, use SQL for duplicate cancellation lookup. Use a single process with threads. |
 | Medium | Remote update referenced undefined `moonraker_url` and `auto_mode` after writing files; remote macro code unpacked a list incorrectly. | Replace divergent install/update paths with one previewable repair workflow, including SSH staging, credential-on-stdin transfer, atomic files and explicit incomplete-install diagnostics. |
-| Medium | Installer scanned unused `.cfg` alternatives and could patch both manual and automatic starts. Existing unmarked completion hooks were not recognized. | Traverse `printer.cfg` include graph, support nested/wildcard includes, report cycles/missing includes, reject duplicate definitions and inactive targets, detect existing/delegated hooks, generate a diff and require explicit apply. |
+| Medium | Installer scanned unused `.cfg` alternatives and could patch both manual and automatic starts. Existing unmarked completion hooks were not recognized. | Traverse `printer.cfg` include graph, support nested/wildcard includes, report cycles/missing includes, resolve effective definitions in Klipper override order and reject inactive targets, detect existing/delegated hooks, generate a diff and require explicit apply. |
 | Medium | Discovery reused only saved paths; hard-coded three Moonraker ports and treated localhost/bridge/LAN aliases as separate printers. | Bounded directory candidates plus running Klipper/Moonraker process arguments; associate sockets/config roots and configured ports; prefer LAN endpoints; deduplicate only with machine MACs, instance ID and config root. Unknown ports remain unknown. |
 | Medium | Completion retries could produce multiple SQL rows. HTTP errors were treated as successful shell execution. | Stable printer-scoped job UID from Moonraker history ID or optional event UUID, duplicate guard, bounded completion retries and curl failure handling. Secrets are passed via header input rather than process arguments. |
 | Medium | Docker/source services used Flask's development server. Image publication could finish despite failed validation and only published the host architecture. | Waitress, one process/four threads; pristine SQL initialization at first server start; validation gates publication; amd64, arm64 and arm/v7 image builds. |
@@ -66,3 +66,34 @@ Existing custom include or wrapper ambiguities require an explicit target.
 
 Deployment verification, image identifiers and final live counts are recorded
 in the release/deployment section after completing the rollout.
+
+## Expanded financial, selection and thumbnail findings
+
+| Severity | Reproduction / root cause | Repair and evidence |
+| --- | --- | --- |
+| Critical | Select 15 jobs and new profiles without submitting GET filters. The POST action form carried stale hidden plan copies, while success counted matched updates. Production profile IDs were valid, but jobs retained 1/hour and .25/m. | Actual controls now belong to POST; reviewed hashes bind jobs/plan/profile prices; SQL reload validation and atomic before/after audit; changed vs unchanged counts; first original costs retained. Chromium verifies all 15 fields/costs, one untouched job, project totals, repeated apply and recovery. |
+| High | SQL history reads treated zero as missing, allowing current defaults to replace legitimate free costs in display. | Only missing values may be filled. Complete saved cost components bypass current profile computation; explicit zero/signed values survive reads and writes. |
+| High | Project kg overrides affected manual/planned work but not tracked costs; no explicit tracked overlay existed. | Project-only preview/apply snapshots preserve original jobs, show length/mass/factor/source and signed components, reconcile cents, and distinguish historical, adjusted and hypothetical prices. Acceptance example yields 2.50506 kg, $37.5759 material, $180.21 total. |
+| High | Pricing inputs used incompatible units; operators manually converted spool prices to per-meter rates. | Shared explicit-unit normalization, spool/net-weight input, material density/input-diameter conversion or verified g/m, per-job precedence and missing-conversion errors. Existing numeric prices keep their units. |
+| High | Tiny native History controls lacked names/counts; generic persisted column resizing could collapse the control column. | Explicit high-contrast 20px controls, 44px labels, fixed sticky selection width, partial/select-all counts, stable UID-only operations. Chromium covers desktop, narrow/mobile, 200% zoom, scrolling and exact Complete/Recalculate/Delete targets. |
+| High | Temporary filename/URL-dependent images disappeared after expiry, source deletion or relocation. | Content-addressed persistent objects, stable SQL job references, atomic start-asset attachment on completion/cancel, conservative recovery/backfill, coordinated backup/restore and explicit unreferenced pruning. Browser test deletes source before completion, relocates URL, restarts and displays all four views. |
+| Medium | Each historical thumbnail could perform remote requests during project HTML rendering, multiplying offline-printer delay by job count. | Lazy job-scoped retrieval and short negative caching keep network work outside page rendering. |
+| Medium | Dashboard mutation forms accepted cross-origin browser submissions; CDN failure could remove expected styling. | Same-origin checks before mutations; integrity-verified Bootstrap 5.3.8 served locally. The dashboard remains within its documented trusted-LAN administrative boundary. |
+
+## Live configuration and credential repairs completed
+
+Verified all four printers from their own Moonraker context. MercuryTwo uses
+`:7129`; Ender5P retains its dedicated Pi address and historical identity. SQL
+operational metadata was recovered for all four clients. The exposed key was
+rotated with bounded overlap, all four self-checks passed, and the previous key
+was revoked. No key values appear in this report.
+
+Backed up and patched only active custom pause/resume/cancel definitions and
+missing managed helpers. Preserved start/end hooks and all motion/temperature
+logic. Both Mercuries use `print_start_manual.cfg`; the alternate automatic
+configuration remains inactive. Sovols use their effective custom macros.
+Loaded gcode was verified after idle-only configuration reloads; all four were
+ready. Fixed CANCEL insertion to target the actual gcode body after
+`CANCEL_PRINT_BASE`, never the `rename_existing` option.
+
+Full live deployment and final counts are appended after the v0.7 rollout.

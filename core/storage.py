@@ -963,6 +963,7 @@ def _backup_file(csv_file: str) -> Optional[str]:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = f"{csv_file}.bak.{ts}"
     shutil.copy2(csv_file, backup_path)
+    os.chmod(backup_path,0o600)
     return backup_path
 
 
@@ -1005,16 +1006,12 @@ def rewrite_csv_recalculate_costs_job_uids(csv_file, headers, job_uids, compute_
         try:
             # Normalize persisted pause column shape during recalc.
             row["paused_seconds_total"] = str(paused_seconds_total)
-            row.update(compute_costs_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total))
+            row.update(compute_costs_fn.for_row(row) if hasattr(compute_costs_fn,'for_row') else compute_costs_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total))
             updated += 1
-        except Exception:
-            continue
+        except Exception as exc:
+            raise ValueError('Could not calculate selected job '+str(row.get('job_uid'))+': '+str(exc)) from exc
 
-    with open(csv_file, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(_row_to_csv_dict(row, headers))
+    rewrite_csv_all_rows(csv_file,headers,rows)
 
     return updated
 

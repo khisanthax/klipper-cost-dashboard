@@ -210,16 +210,31 @@
     const cols = ensureColgroup(table, ths.length);
     const skey = storageKeyForWidths(table);
     const widths = loadJson(skey, {});
+    const history = table.id === "history-table";
+    const initialWidths = ths.map(th => th.getBoundingClientRect().width);
+    function fitHistoryWidth() {
+      if (!history) return;
+      const total = Array.from(cols).reduce((sum, col) => sum + (parseFloat(col.style.width) || MIN_WIDTH_PX), 0);
+      table.style.width = `max(100%, ${Math.max(1280, Math.ceil(total))}px)`;
+    }
 
     ths.forEach((th, i) => {
       const colKey = getColKey(th, i);
+      if (colKey === "__select__") {
+        cols[i].style.width = `${Number(th.dataset.kcdFixedWidth) || 52}px`;
+        return;
+      }
       const w = widths[colKey];
       if (typeof w === "number" && w >= MIN_WIDTH_PX) {
         cols[i].style.width = `${w}px`;
+      } else if (history) {
+          cols[i].style.width = `${Math.max(120, Math.round(initialWidths[i]))}px`;
       }
     });
+    fitHistoryWidth();
 
     ths.forEach((th, i) => {
+      if (getColKey(th, i) === "__select__") return;
       if (th.querySelector(".kcd-col-resizer")) return;
       const resizer = document.createElement("div");
       resizer.className = "kcd-col-resizer";
@@ -231,7 +246,8 @@
         const current = loadJson(skey, {});
         delete current[colKey];
         saveJson(skey, current);
-        cols[i].style.width = "";
+        cols[i].style.width = history ? `${Math.max(120, Math.round(initialWidths[i]))}px` : "";
+        fitHistoryWidth();
       }
 
       resizer.addEventListener("dblclick", (e) => {
@@ -253,6 +269,7 @@
           const dx = ev.clientX - startX;
           const next = Math.max(MIN_WIDTH_PX, Math.round(startWidth + dx));
           cols[i].style.width = `${next}px`;
+          fitHistoryWidth();
         }
 
         function onUp() {

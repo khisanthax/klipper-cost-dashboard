@@ -33,6 +33,25 @@ jobs:
       - name: Validate SQL-only filesystem isolation
         run: python tools/validate_sql_only.py
 
+      - name: Install browser regression dependencies
+        run: |
+          python -m pip install -r requirements-browser.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Verify browser selection, pricing and permanent thumbnails
+        run: |
+          python tools/browser_history_regression.py
+          python tools/browser_pricing_regression.py
+          python tools/browser_thumbnail_regression.py
+
+      - name: Preserve browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression-${{ github.run_id }}
+          path: browser-artifacts/
+          if-no-files-found: ignore
+
       - name: Build release image
         run: docker build --tag kcd-release-ci .
 

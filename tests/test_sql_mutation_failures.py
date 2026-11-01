@@ -59,6 +59,19 @@ class SqlMutationFailureTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "database unavailable"):
                 self.app_module._sql_only_printer_exists("SV08")
 
+    def test_browser_cross_origin_delete_is_rejected_before_mutation(self):
+        with patch.object(self.app_module,'_delete_jobs_sql') as delete:
+            response=self.client.post('/',data={'action':'delete_rows','delete_rows':['job-1']},headers={'Origin':'https://unrelated.example'})
+            self.assertEqual(response.status_code,403)
+            delete.assert_not_called()
+            response=self.client.post('/',data={'action':'delete_rows','delete_rows':['job-1']},headers={'Sec-Fetch-Site':'cross-site'})
+            self.assertEqual(response.status_code,403)
+            delete.assert_not_called()
+        with patch.object(self.app_module,'_delete_jobs_sql',return_value=0) as delete,patch.object(self.app_module.system_events,'emit_event'):
+            response=self.client.post('/',data={'action':'delete_rows','delete_rows':['job-1']},headers={'Origin':'http://localhost'})
+            self.assertEqual(response.status_code,302)
+            delete.assert_called_once_with(['job-1'])
+
     def test_delete_route_reports_failure_without_audit_event(self):
         with patch.object(
             self.app_module,
@@ -91,12 +104,12 @@ class SqlMutationFailureTests(unittest.TestCase):
         ), patch.object(self.app_module.system_events, "emit_event") as emit_event:
             response = self.client.post(
                 "/recalculate/run",
-                data={"recompute_mode": "pricing_only", "job_uids": ["job-1"]},
+                data={"recompute_mode": "pricing_only", "job_uids": ["job-1"], "preview_hash":"reviewed-test-plan"},
             )
 
         self.assertEqual(response.status_code, 302)
         query = parse_qs(urlparse(response.location).query)
-        self.assertIn("recalc transaction failed", query["msg"][0])
+        self.assertIn("recalc transaction failed", query["error"][0])
         emit_event.assert_not_called()
 
     def test_delete_transaction_rolls_back_assignment_when_job_delete_fails(self):
@@ -137,6 +150,49 @@ class SqlMutationFailureTests(unittest.TestCase):
             ).fetchone()["c"]
         self.assertEqual(job_count, 1)
         self.assertEqual(assignment_count, 1)
+
+    def _pricing_fixture(self):
+        with self.db_module.connect_db() as conn:
+            self.db_module.apply_migrations(conn)
+            self.db_module.upsert_job(conn,dict(job_uid='priced',printer='Fixture',filename='fixture.gcode',status='completed',duration_seconds=3600,filament_mm=100000,rate_per_hour=1,filament_mode='per_meter',filament_rate=.25,grams_per_meter=3,time_cost=1,material_cost=25,total_cost=26))
+        def compute(*_args):
+            return dict(rate_per_hour=0,filament_mode='per_kg',filament_rate=15,grams_per_meter=3,time_cost=0,material_cost=4.5,total_cost=4.5)
+        return compute
+
+    def test_post_update_verification_rolls_back_ignored_sql_update(self):
+        compute=self._pricing_fixture()
+        with self.db_module.connect_db() as conn:
+            conn.execute("CREATE TRIGGER ignore_pricing BEFORE UPDATE ON jobs BEGIN SELECT RAISE(IGNORE); END")
+        with self.assertRaisesRegex(ValueError,'post-update verification'):
+            self.app_module._recalc_jobs_sql(['priced'],compute)
+        with self.db_module.connect_db() as conn:
+            self.assertEqual(conn.execute('SELECT total_cost FROM jobs').fetchone()[0],26)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM job_cost_originals').fetchone()[0],0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM system_events').fetchone()[0],0)
+
+    def test_audit_write_failure_rolls_back_prices_and_original_snapshot(self):
+        compute=self._pricing_fixture()
+        with self.db_module.connect_db() as conn:
+            conn.execute("CREATE TRIGGER fail_audit BEFORE INSERT ON system_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END")
+        with self.assertRaisesRegex(Exception,'audit unavailable'):
+            self.app_module._recalc_jobs_sql(['priced'],compute)
+        with self.db_module.connect_db() as conn:
+            self.assertEqual(conn.execute('SELECT total_cost FROM jobs').fetchone()[0],26)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM job_cost_originals').fetchone()[0],0)
+
+    def test_preview_hash_binds_selected_jobs_and_computed_profile_prices(self):
+        from core.recalculation import preview_fingerprint
+        compute=self._pricing_fixture()
+        with self.db_module.connect_db() as conn:
+            rows=[dict(r) for r in conn.execute('SELECT j.*,p.name AS printer FROM jobs j JOIN printers p ON p.id=j.printer_id')]
+        compute.kcd_plan={'rate_profile_id':'zero','filament_profile_id':'15-kg'}
+        compute.expected_preview_hash=preview_fingerprint(rows,compute,compute.kcd_plan)
+        # A changed profile result invalidates a previously reviewed preview.
+        compute.for_row=lambda _row:dict(rate_per_hour=0,filament_mode='per_kg',filament_rate=20,grams_per_meter=3,time_cost=0,material_cost=6,total_cost=6)
+        with self.assertRaisesRegex(ValueError,'fresh preview'):
+            self.app_module._recalc_jobs_sql(['priced'],compute)
+        with self.db_module.connect_db() as conn:
+            self.assertEqual(conn.execute('SELECT total_cost FROM jobs').fetchone()[0],26)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ from typing import Any, Optional, Tuple
 
 from core.config import DATA_DIR, CSV_FILE
 from core.sql_only import require_file_reads_allowed, require_file_writes_allowed, is_sql_only
+from core.thumbnail_archive import archive_consistent
 
 
 APP_SETTINGS_FILE = os.path.join(DATA_DIR, "app_settings.json")
@@ -218,6 +219,7 @@ def _enforce_retention(keep: int) -> None:
             pass
 
 
+@archive_consistent
 def create_backup_archive(*, keep: Optional[int] = None) -> str:
     """
     Create a single tar.gz archive containing:
@@ -249,6 +251,8 @@ def create_backup_archive(*, keep: Optional[int] = None) -> str:
     def _filter(ti: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
         # `ti.name` is based on arcname ("data/...")
         if ti.name == "data/backups" or ti.name.startswith("data/backups/"):
+            return None
+        if ti.name.endswith('/.archive.lock'):
             return None
         if ti.name in ("data/kcd.db", "data/kcd.db-wal", "data/kcd.db-shm"):
             return None

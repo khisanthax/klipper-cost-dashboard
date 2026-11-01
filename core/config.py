@@ -62,6 +62,12 @@ HEADERS = [
     "filament_mm_raw",
     "filament_mm_est",
     "filament_mm_effective",
+    "filament_grams",
+    "filament_weight_kind",
+    "filament_density",
+    "filament_diameter",
+    "billable_hours",
+    "hourly_rate_profile_id",
 ]
 
 # User-friendly column names
@@ -98,6 +104,12 @@ FRIENDLY_HEADERS = {
     "filament_mm_raw": "Filament Raw (mm)",
     "filament_mm_est": "Filament Est (mm)",
     "filament_mm_effective": "Filament Effective (mm)",
+    "filament_grams": "Filament weight (g)",
+    "filament_weight_kind": "Weight source",
+    "filament_density": "Filament density (g/cm³)",
+    "filament_diameter": "Filament diameter (mm)",
+    "billable_hours": "Billable hours",
+    "hourly_rate_profile_id": "Hourly rate profile",
 }
 
 # Colors per printer for tags

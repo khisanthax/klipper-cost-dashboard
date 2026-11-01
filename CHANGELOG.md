@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.0 - 2026-11-01
+
+- Fix Recalculate Center submitting stale profile settings; require reviewed SQL previews, preserve original costs, validate actual updates and commit before/after audit evidence atomically. Preserve legitimate historical zero costs.
+- Unify explicit filament units, spool price/net weight and density/diameter or verified g/m conversion across settings, profiles, projects and recalculation. Add project-only pricing snapshots and reconciled signed cost components.
+- Archive print thumbnails outside SQLite with stable job references, start/completion/cancel capture, conservative cache recovery, bounded backfill, explicit pruning and coordinated backup coverage.
+- Make History selection visible, accessible and sticky while scrolling; protect numeric job UIDs and verify exact bulk-action scope. Keep remote thumbnail retrieval out of HTML rendering.
+- Vendor integrity-checked Bootstrap 5.3.8 for offline deployments and reject browser cross-origin mutations.
+- Add Chromium regression suites for responsive/zoom selection, 15-job $0/hour/$15/kg recalculation, profile spool inputs and thumbnail survival after source deletion, printer relocation and restart. Gate releases on these checks.
+
 ## v0.6.2 - 2026-11-01
 
 - Prepare and verify bash interpreter commands before Moonraker credential propagation, because uploads replace executable permissions. Add a regression smoke test for that behavior.

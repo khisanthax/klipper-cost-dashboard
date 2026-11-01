@@ -33,17 +33,18 @@ def _now_iso() -> str:
 def _safe_meta(meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not isinstance(meta, dict):
         return {}
+    def value(v,depth=0):
+        if depth>8:return '[nesting limit]'
+        if v is None or isinstance(v,(str,int,float,bool)):return v
+        if isinstance(v,dict):return {str(k):value(item,depth+1) for k,item in v.items()}
+        if isinstance(v,(list,tuple)):return [value(item,depth+1) for item in v]
+        return str(v)
     out: Dict[str, Any] = {}
     for k, v in meta.items():
         key = str(k).strip()
         if not key:
             continue
-        if v is None:
-            out[key] = None
-        elif isinstance(v, (str, int, float, bool)):
-            out[key] = v
-        else:
-            out[key] = str(v)
+        out[key] = value(v)
     return out
 
 
@@ -83,9 +84,8 @@ def _enforce_retention_sql(max_events: int = MAX_EVENTS) -> None:
         return
 
 
-def _emit_event_sql(event: Dict[str, Any]) -> None:
-    with closing(db_module.connect_db()) as conn:
-        db_module.apply_migrations(conn)
+def _emit_event_sql(event: Dict[str, Any], connection=None) -> None:
+    def insert(conn):
         conn.execute(
             """
             INSERT INTO system_events (ts, category, title, message, severity, meta_json)
@@ -100,6 +100,13 @@ def _emit_event_sql(event: Dict[str, Any]) -> None:
                 json.dumps(event.get("meta") or {}, ensure_ascii=False),
             ),
         )
+    if connection is not None:
+        insert(connection)
+        connection.execute('DELETE FROM system_events WHERE id NOT IN (SELECT id FROM system_events ORDER BY ts DESC,id DESC LIMIT ?)',(MAX_EVENTS,))
+        return
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        insert(conn)
         conn.commit()
     try:
         _enforce_retention_sql()
@@ -107,7 +114,7 @@ def _emit_event_sql(event: Dict[str, Any]) -> None:
         return
 
 
-def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str, Any]] = None) -> None:
+def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str, Any]] = None, *, connection=None) -> None:
     """
     Append a single curated event to the event store.
 
@@ -126,7 +133,7 @@ def emit_event(category: str, title: str, message: str, meta: Optional[Dict[str,
     }
 
     if is_sql_only():
-        _emit_event_sql(event)
+        _emit_event_sql(event,connection)
         return
 
     require_file_writes_allowed("system_events.jsonl", caller_hint="core.system_events.emit_event")
