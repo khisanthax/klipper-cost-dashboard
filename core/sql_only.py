@@ -46,6 +46,8 @@ def classify_sql_only_filesystem_path(path: object) -> str:
         return "forbidden_runtime_state"
     if basename == "secret.json":
         return "allowed_credential"
+    if "thumbnails" in parts:
+        return "allowed_archive"
     if "thumb_cache" in parts or "thumbnail_cache" in parts:
         return "allowed_cache"
     if "backups" in parts:

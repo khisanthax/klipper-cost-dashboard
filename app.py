@@ -48,6 +48,7 @@ from core import pricing
 from core import live
 from core import projects
 from core import thumbnails as thumbs
+from core import thumbnail_archive as archived_thumbs
 from core import system_events
 from core import storage_backend
 from core import history_repo
@@ -140,7 +141,13 @@ def _safe_thumb_dir(name: str) -> str:
     return s or "unknown"
 
 
-def build_thumb_url_from_token(printer_name: str, token: str, size_hint: str) -> str | None:
+def build_thumb_url_from_token(printer_name: str, token: str, size_hint: str, job_uid=None) -> str | None:
+    if job_uid:
+        asset = archived_thumbs.get_job_asset(job_uid)
+        if asset:
+            return url_for('archived_thumbnail', digest=asset)
+        if _is_sql_only():
+            return url_for('job_thumbnail',job_uid=job_uid)
     token = str(token or "").strip()
     if not token:
         return None
@@ -159,6 +166,12 @@ def get_job_thumbnail_url(
     *,
     job_uid: str | None = None,
 ) -> str | None:
+    if job_uid:
+        asset = archived_thumbs.get_job_asset(job_uid)
+        if asset:
+            return url_for('archived_thumbnail', digest=asset)
+        if _is_sql_only():
+            return url_for('job_thumbnail',job_uid=job_uid)
     cache_path = thumbs.get_cached_thumbnail_path(printer_name, filename, size_hint=size_hint)
     if not cache_path:
         return None
@@ -180,6 +193,45 @@ def get_job_thumbnail_url(
             pass
 
     return url
+
+
+@app.get('/jobs/<job_uid>/thumbnail')
+def job_thumbnail(job_uid):
+    """Lazy retrieval keeps remote printer failures out of HTML rendering."""
+    asset=archived_thumbs.get_job_asset(job_uid)
+    if asset:return archived_thumbnail(asset)
+    status=archived_thumbs.get_job_status(job_uid)
+    checked=status.get('checked_at')
+    if checked:
+        try:
+            if time.time()-datetime.fromisoformat(checked.replace('Z','+00:00')).timestamp()<120:
+                return ('',404,{'X-KCD-Thumbnail-Status':status['status'],'Cache-Control':'no-store'})
+        except ValueError:pass
+    with db_module.connect_db() as conn:
+        row=conn.execute('SELECT j.*,p.name AS printer FROM jobs j JOIN printers p ON p.id=j.printer_id WHERE j.job_uid=?',(job_uid,)).fetchone()
+    if not row:return ('',404)
+    ended=None
+    try:ended=datetime.fromisoformat(row['ended_at'].replace('Z','+00:00')).timestamp()
+    except (AttributeError,ValueError):pass
+    asset=archived_thumbs.recover_cached_job(job_uid,row['printer'],row['filename'],row['thumbnail'],ended)
+    if not asset:
+        result=archived_thumbs.capture_job(job_uid,row['printer'],row['filename'],ended_at=ended,historical=True)
+        asset=result['asset'];status=result
+    if asset:return archived_thumbnail(asset)
+    return ('',404,{'X-KCD-Thumbnail-Status':status['status'],'Cache-Control':'no-store'})
+
+
+@app.get('/thumbnails/<digest>')
+def archived_thumbnail(digest):
+    result=archived_thumbs.asset_path(digest)
+    if not result:
+        return ('',404)
+    path,mime=result
+    response=send_file(path,mimetype=mime,conditional=True)
+    response.headers['Cache-Control']='public, max-age=31536000, immutable'
+    response.headers['X-Content-Type-Options']='nosniff'
+    response.headers['X-KCD-Thumbnail-Status']='archived'
+    return response
 
 
 @app.route("/thumb/<printer_name>/<cache_file>", methods=["GET"], endpoint="thumb_cache")
@@ -343,6 +395,22 @@ def _history_sort_key(row: dict) -> float:
 
 def _sort_history_rows(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=_history_sort_key, reverse=True)
+
+
+@app.before_request
+def _reject_cross_origin_mutations():
+    """Reject browser cross-site writes to the trusted-LAN dashboard."""
+    if request.method in {'GET','HEAD','OPTIONS'}:
+        return
+    from urllib.parse import urlsplit
+    origin=request.headers.get('Origin')
+    if origin:
+        try:parsed=urlsplit(origin)
+        except ValueError:return jsonify(error='Invalid request origin'),403
+        if parsed.scheme not in {'http','https'} or parsed.netloc.lower()!=request.host.lower():
+            return jsonify(error='Cross-origin changes are not allowed'),403
+    elif request.headers.get('Sec-Fetch-Site')=='cross-site':
+        return jsonify(error='Cross-site changes are not allowed'),403
 
 
 @app.before_request
@@ -696,7 +764,9 @@ def log_print():
         "filament_mm": filament_mm,
     }
     row.update(cost_data)
-    
+    if live_metadata and live_metadata.get('filename')==filename:
+        row['thumbnail_asset']=live_metadata.get('thumbnail_asset')
+
     # Add status and failure_reason
     row["status"] = status
     row["failure_reason"] = failure_reason
@@ -706,6 +776,13 @@ def log_print():
         row["ended_at"] = row_ended_at
 
     storage_backend.write_job(row)
+
+    try:
+        archived_thumbs.capture_job(row['job_uid'],printer_name,filename,
+            live_asset=(live_metadata or {}).get('thumbnail_asset') if (live_metadata or {}).get('filename')==filename else None,
+            ended_at=ts)
+    except Exception:
+        app.logger.warning('Thumbnail retention deferred for job %s',row['job_uid'])
 
     if status == "completed":
         app.logger.info(
@@ -839,6 +916,12 @@ def job_start():
     profile_id = data.get("profile_id")
     
     live.start_job(printer_name, filename, start_time, estimated_duration, estimated_filament, profile_id)
+    try:
+        asset,_status,_modified=archived_thumbs.fetch_image(printer_name,filename)
+        if asset:
+            live.update_job(printer_name,thumbnail_asset=asset)
+    except Exception:
+        app.logger.warning('Thumbnail unavailable at job start for %s',printer_name)
     job = live.get_job(printer_name)
     
     return jsonify({"success": True, "job": job})
@@ -1134,7 +1217,13 @@ def job_cancel():
     row.update(cost_data)
     row["status"] = "canceled"
     row["failure_reason"] = str(reason or "").strip()
+    row["thumbnail_asset"]=live_result.get("thumbnail_asset")
     storage_backend.write_job(row)
+    try:
+        archived_thumbs.capture_job(row['job_uid'],printer_name,filename,
+            live_asset=live_result.get('thumbnail_asset'),ended_at=ts)
+    except Exception:
+        app.logger.warning('Canceled job saved; thumbnail archival deferred for %s',row['job_uid'])
 
     app.logger.info(
         "job-cancel logged: printer=%s filename=%s elapsed_seconds=%s",
@@ -1202,7 +1291,7 @@ def index():
             selected = request.form.getlist("delete_rows")
             if selected:
                 if _is_sql_only():
-                    if all(str(v).strip().isdigit() for v in selected):
+                    if not _is_sql_only() and request.form.get("selection_kind") != "job_uid" and all(str(v).strip().isdigit() for v in selected):
                         indices = [int(i) for i in selected if str(i).strip().isdigit()]
                         rows_for_map, _ = _load_history_rows_for_recalc()
                         job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
@@ -1213,7 +1302,7 @@ def index():
                     except Exception as exc:
                         return redirect(url_for("index", error=f"Failed to mark jobs completed: {exc}"))
                 else:
-                    if all(str(v).strip().isdigit() for v in selected):
+                    if not _is_sql_only() and request.form.get("selection_kind") != "job_uid" and all(str(v).strip().isdigit() for v in selected):
                         indices = [int(i) for i in selected if str(i).strip().isdigit()]
                         rewrite_csv_mark_completed(CSV_FILE, HEADERS, indices)
                     else:
@@ -1225,25 +1314,23 @@ def index():
             selected = request.form.getlist("delete_rows")
             job_uids = []
             if selected:
-                if all(str(v).strip().isdigit() for v in selected):
+                if not _is_sql_only() and request.form.get("selection_kind") != "job_uid" and all(str(v).strip().isdigit() for v in selected):
                     indices = {int(i) for i in selected if str(i).strip().isdigit()}
                     rows_for_map, _ = load_rows_raw(CSV_FILE)
                     job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
                 else:
                     job_uids = [str(v).strip() for v in selected if str(v).strip()]
 
-            try:
-                updated = storage_backend.recalc_jobs(job_uids, compute_costs)
-            except Exception as exc:
-                return redirect(url_for("index", error=f"Failed to recalculate jobs: {exc}"))
-            return redirect(url_for("index", msg=f"Recalculated costs for {updated} job(s)."))
+            if not _is_sql_only() and request.form.get('selection_kind')!='job_uid':
+                return redirect(url_for('recalculate_page',job_uids=job_uids))
+            return redirect(url_for('recalculate_preview'),code=307)
 
         # Handle row deletion
         if action in ("delete_rows", "delete"):
             selected = request.form.getlist("delete_rows")
             if selected:
                 if _is_sql_only():
-                    if all(str(v).strip().isdigit() for v in selected):
+                    if not _is_sql_only() and request.form.get("selection_kind") != "job_uid" and all(str(v).strip().isdigit() for v in selected):
                         indices = [int(i) for i in selected if str(i).strip().isdigit()]
                         rows_for_map, _ = _load_history_rows_for_recalc()
                         job_uids = [r.get("job_uid") for r in rows_for_map if r.get("row_index") in indices and r.get("job_uid")]
@@ -1260,7 +1347,7 @@ def index():
                         meta={"action": "delete_history_rows", "count": deleted},
                     )
                 else:
-                    if all(str(v).strip().isdigit() for v in selected):
+                    if not _is_sql_only() and request.form.get("selection_kind") != "job_uid" and all(str(v).strip().isdigit() for v in selected):
                         indices = [int(i) for i in selected if str(i).strip().isdigit()]
                         rewrite_csv_without_indices(CSV_FILE, HEADERS, indices)
                         system_events.emit_event(
@@ -1407,7 +1494,16 @@ def index():
         if thumbs_enabled and thumbs_on_cards:
             job_for_card = active_by_printer.get(pname, {})
             card_filename = str(job_for_card.get("filename") or ps.get("last_job_name") or "").strip()
-            ps["_thumb_card"] = get_job_thumbnail_url(pname, card_filename, size_hint="card") if card_filename else None
+            ps["_thumb_card"] = None
+            if job_for_card.get("thumbnail_asset"):
+                ps["_thumb_card"] = url_for('archived_thumbnail',digest=job_for_card['thumbnail_asset'])
+            if not ps["_thumb_card"]:
+                try:
+                    with db_module.connect_db() as conn:
+                        latest=conn.execute("SELECT job_uid FROM jobs j JOIN printers p ON p.id=j.printer_id WHERE p.name=? AND j.filename=? ORDER BY j.ended_at DESC LIMIT 1",(pname,card_filename)).fetchone()
+                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card",job_uid=latest[0] if latest else None) if card_filename else None
+                except Exception:
+                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card") if card_filename else None
         else:
             ps["_thumb_card"] = None
 
@@ -1422,9 +1518,14 @@ def index():
         job["_thumb_cards_enabled"] = bool(thumbs_enabled and thumbs_on_cards)
         if thumbs_enabled and thumbs_on_cards:
             fname = str(job.get("filename") or "").strip()
-            job["_thumb_small"] = get_job_thumbnail_url(pname, fname, size_hint="small") if fname else None
+            job["_thumb_small"] = url_for("archived_thumbnail",digest=job["thumbnail_asset"]) if job.get("thumbnail_asset") else (get_job_thumbnail_url(pname, fname, size_hint="small") if fname else None)
         else:
             job["_thumb_small"] = None
+
+    from core.filament import describe_job
+    all_filament_profiles=profiles.get_all_profiles()
+    for row in history_rows_page:
+        describe_job(row,all_filament_profiles.get(row.get('filament_profile_id')))
 
     # Print History thumbnails (independent toggle: visible column; respects thumbnails_enabled only).
     if "thumbnail" in (visible_cols or []):
@@ -1441,7 +1542,7 @@ def index():
             row["_thumbs_enabled"] = bool(thumbs_enabled)
             token = str(row.get("thumbnail") or "").strip()
             if thumbs_enabled and token:
-                row["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+                row["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small", job_uid=row.get("job_uid"))
                 row["_thumb_unavailable"] = False
             elif thumbs_enabled and fname:
                 thumb_url = get_job_thumbnail_url(
@@ -1480,6 +1581,7 @@ def index():
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
         csv_file=CSV_FILE,
+      history_source="SQL" if _is_sql_only() else "CSV",
         active_jobs=active_jobs,
         printer_summaries=printer_summaries,
     )
@@ -1489,9 +1591,19 @@ def index():
 def reports_page():
     """Reports page with monthly breakdown and top printers."""
     data = reports_repo.get_reports_data(request.args)
+    start,end,_label,_quick=get_date_range_from_params(request.args)
+    recent=history_repo.list_history_rows(history_repo.HistoryQuery(start_dt=start,end_dt=end),page=1,per_page=10).rows_page
+    from core.filament import describe_job
+    all_profiles=profiles.get_all_profiles()
+    printer_settings=load_settings(SETTINGS_FILE)
+    for row in recent:
+        describe_job(row,all_profiles.get(row.get('filament_profile_id')))
+        enabled=printer_settings.get(row['printer'],{}).get('thumbnails_enabled',True)
+        row['_thumb_small']=get_job_thumbnail_url(row['printer'],row['filename'],'small',job_uid=row.get('job_uid')) if enabled else None
 
     return render_template(
         "reports.html",
+        recent_jobs=recent,
         monthly_breakdown=data.get("monthly_breakdown", []),
         top_printers=data.get("top_printers", []),
         summary=data.get("summary", {}),
@@ -1573,7 +1685,7 @@ def _parse_int(value, default):
 
 
 def _parse_required_nonneg_float(raw, field_label):
-    raw = (raw or "").strip()
+    raw = "" if raw is None else str(raw).strip()
     if not raw:
         return None, f"Missing {field_label}."
     try:
@@ -1584,7 +1696,7 @@ def _parse_required_nonneg_float(raw, field_label):
 
 
 def _parse_required_positive_float(raw, field_label):
-    raw = (raw or "").strip()
+    raw = "" if raw is None else str(raw).strip()
     if not raw:
         return None, f"Missing {field_label}."
     try:
@@ -1609,10 +1721,11 @@ def _load_history_rows_for_recalc() -> tuple[list, str | None]:
         try:
             history_query = history_repo.HistoryQuery()
             history_result = history_repo.list_history_rows_sql(history_query, page=1, per_page=25, error=None)
-            return history_result.rows_all, history_result.error
+            return [r for r in history_result.rows_all if str(r.get("status") or "").lower() not in {"printing","paused"}], history_result.error
         except Exception as exc:
             return [], f"Error loading history from SQL: {exc}"
-    return load_rows_raw(CSV_FILE)
+    rows,error=load_rows_raw(CSV_FILE)
+    return [r for r in rows if str(r.get("status") or "").lower() not in {"printing","paused"}],error
 
 
 def _sum_total_cost_sql(job_uids: list[str]) -> float:
@@ -1627,96 +1740,62 @@ def _sum_total_cost_sql(job_uids: list[str]) -> float:
         ).fetchone()
         if not row:
             return 0.0
-        return finite_float(row["total"] or 0.0, label="total_cost", nonnegative=True)
+        return finite_float(row["total"] or 0.0, label="total_cost")
 
 
 def _recalc_jobs_sql(job_uids: list[str], compute_fn) -> int:
     if not job_uids:
         return 0
-    placeholders = ",".join(["?"] * len(job_uids))
-    updated = 0
-    with closing(db_module.connect_db()) as conn:
+    fields=("duration_hours","filament_meters","rate_per_hour","filament_mode","filament_rate","grams_per_meter","time_cost","material_cost","total_cost","filament_profile_id","filament_material","hourly_rate_profile_id","filament_grams","billable_hours","filament_weight_kind","override_rate_per_hour","override_material_cost","override_total_cost")
+    mandatory={"rate_per_hour","filament_mode","filament_rate","grams_per_meter","time_cost","material_cost","total_cost"}
+    outcomes=[]
+    with db_module.connect_db() as conn:
         db_module.apply_migrations(conn)
-        rows = conn.execute(
-            f"""
-            SELECT
-                j.job_uid,
-                p.name AS printer,
-                j.duration_seconds,
-                j.filament_mm,
-                j.paused_seconds_total
-            FROM jobs j
-            JOIN printers p ON j.printer_id = p.id
-            WHERE j.job_uid IN ({placeholders})
-            """,
-            job_uids,
-        ).fetchall()
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        for row in rows:
-            job_uid = str(row["job_uid"] or "").strip()
-            if not job_uid:
-                continue
-            printer = str(row["printer"] or "").strip()
-            duration_seconds = finite_float(
-                row["duration_seconds"] or 0.0,
-                label="duration_seconds",
-                nonnegative=True,
-            )
-            filament_mm = finite_float(
-                row["filament_mm"] or 0.0,
-                label="filament_mm",
-                nonnegative=True,
-            )
-            paused_seconds_total = finite_float(
-                row["paused_seconds_total"] or 0.0,
-                label="paused_seconds_total",
-                nonnegative=True,
-            )
-
-            computed = compute_fn(printer, duration_seconds, filament_mm, paused_seconds_total) or {}
-            if not computed:
-                continue
-
-            conn.execute(
-                """
-                UPDATE jobs
-                   SET duration_hours = ?,
-                       filament_meters = ?,
-                       rate_per_hour = ?,
-                       filament_mode = ?,
-                       filament_rate = ?,
-                       grams_per_meter = ?,
-                       time_cost = ?,
-                       material_cost = ?,
-                       total_cost = ?,
-                       filament_profile_id = ?,
-                       filament_material = ?,
-                       updated_at = ?
-                 WHERE job_uid = ?
-                """,
-                (
-                    computed.get("duration_hours"),
-                    computed.get("filament_meters"),
-                    computed.get("rate_per_hour"),
-                    computed.get("filament_mode"),
-                    computed.get("filament_rate"),
-                    computed.get("grams_per_meter"),
-                    computed.get("time_cost"),
-                    computed.get("material_cost"),
-                    computed.get("total_cost"),
-                    computed.get("filament_profile_id"),
-                    computed.get("filament_material"),
-                    now_iso,
-                    job_uid,
-                ),
-            )
-            updated += 1
-
-        conn.commit()
-    if updated:
-        app.logger.info("SQL recalc updated %s job(s).", updated)
-    return updated
+        conn.execute("BEGIN IMMEDIATE")
+        rows=conn.execute("SELECT j.*,p.name AS printer FROM jobs j JOIN printers p ON p.id=j.printer_id WHERE j.job_uid IN ("+",".join("?" for _ in job_uids)+")",job_uids).fetchall()
+        if getattr(compute_fn,'expected_preview_hash',None):
+            from core.recalculation import preview_fingerprint
+            actual_hash=preview_fingerprint([dict(r) for r in rows],compute_fn,compute_fn.kcd_plan)
+            if actual_hash!=compute_fn.expected_preview_hash:
+                raise ValueError('Jobs or requested profile prices changed; review a fresh preview')
+        for source in rows:
+            row=dict(source)
+            computed=(compute_fn.for_row(row) if hasattr(compute_fn,'for_row') else compute_fn(row['printer'],row.get('duration_seconds') or 0,row.get('filament_mm') or 0,row.get('paused_seconds_total') or 0)) or {}
+            if not mandatory.issubset(computed):
+                raise ValueError("Recalculation did not produce complete pricing; no success was recorded")
+            expected={k:computed[k] for k in fields if k in computed}
+            for key in mandatory-{'filament_mode'}:
+                if key=='grams_per_meter' and expected[key] is None:
+                    continue
+                expected[key]=finite_float(expected[key],label=key,nonnegative=key!='total_cost')
+            if expected['filament_mode'] not in {'per_meter','per_gram','per_kg'}:
+                raise ValueError('Recalculation produced an invalid filament unit')
+            before={k:row.get(k) for k in expected}
+            def equivalent(a,b):
+                if a in (None,'') and b in (None,''):return True
+                if isinstance(a,(int,float)) and isinstance(b,(int,float)):
+                    return math.isclose(a,b,rel_tol=1e-10,abs_tol=1e-10)
+                return a==b
+            changed=any(not equivalent(before[k],v) for k,v in expected.items())
+            if changed:
+                conn.execute("INSERT OR IGNORE INTO job_cost_originals VALUES (?,?,?)",(row['job_uid'],json.dumps(row),db_module._utc_now_iso()))
+                conn.execute("UPDATE jobs SET "+",".join(k+"=?" for k in expected)+",updated_at=? WHERE job_uid=?",[*expected.values(),db_module._utc_now_iso(),row['job_uid']])
+            actual=dict(conn.execute("SELECT * FROM jobs WHERE job_uid=?",(row['job_uid'],)).fetchone())
+            if any(not equivalent(actual[k],value) for k,value in expected.items()):
+                raise ValueError("Stored pricing failed post-update verification; transaction rolled back")
+            outcomes.append({'job_uid':row['job_uid'],'changed':changed,'validated':True,'before':before,'after':{k:actual[k] for k in expected},'conversion_source':computed.get('conversion_source'),'pricing_source':computed.get('pricing_source')})
+        changed_count=sum(item['changed'] for item in outcomes)
+        audit_meta={'count_requested':len(job_uids),'count_skipped_missing':0,**getattr(compute_fn,'kcd_request_meta',{}),'action':'recalculate',
+            'count_updated':changed_count,
+            'count_validated':len(outcomes),'count_unchanged':len(outcomes)-changed_count,
+            'plan':getattr(compute_fn,'kcd_plan',{}),'comparisons':outcomes,
+            'totals':{side:sum(item[side]['total_cost'] or 0 for item in outcomes) for side in ('before','after')}}
+        system_events.emit_event('activity','Pricing recalculation completed',
+            f'Verified {len(outcomes)} job(s): {changed_count} changed, {len(outcomes)-changed_count} already matched.',
+            meta=audit_meta,connection=conn)
+    compute_fn.kcd_audit_recorded=True
+    compute_fn.kcd_outcomes=outcomes
+    return sum(1 for r in outcomes if r['changed'])
 
 
 def _mark_completed_jobs_sql(job_uids: list[str]) -> int:
@@ -1764,6 +1843,7 @@ def recalculate_page():
       - Only rewrites computed pricing fields (same behavior as existing bulk recalc)
     """
     rows, error = _load_history_rows_for_recalc()
+    error=request.args.get("error") or error
     message = request.args.get("msg", "").strip()
 
     filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.args)
@@ -1828,7 +1908,7 @@ def recalculate_page():
         start_date=start_dt.strftime("%Y-%m-%d") if start_dt else "",
         end_date=end_dt.strftime("%Y-%m-%d") if end_dt else "",
         rows_page=rows_page,
-        selected_job_uids=set(),
+        selected_job_uids=set(request.args.getlist("job_uids")),
         select_filtered=False,
         preview=None,
         recalc_visible_cols=recalc_visible_cols,
@@ -1922,6 +2002,11 @@ def recalculate_run():
                     "action": "recalculate",
                     "count_requested": int(record.get("count_requested") or 0),
                     "count_updated": int(record.get("count_updated") or 0),
+                    "count_validated": int(record.get("count_validated") or 0),
+                    "count_unchanged": int(record.get("count_unchanged") or 0),
+                    "plan": record.get("plan"),
+                    "comparisons": record.get("comparisons", []),
+                    "totals": record.get("totals"),
                     "count_skipped_missing": int(record.get("count_skipped_missing") or 0),
                     "job_uids_hash": str(record.get("job_uids_hash") or ""),
                 },
@@ -1946,7 +2031,7 @@ def recalculate_run():
 
     rows, error = _load_history_rows_for_recalc()
     if error:
-        return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
+        return redirect(url_for("recalculate_page", error=f"Error loading history: {error}"))
 
     if recompute_mode not in ("pricing_only", "full"):
         recompute_mode = "pricing_only"
@@ -1963,7 +2048,14 @@ def recalculate_run():
         filament_rate_per_meter_override_raw,
     )
     if plan_err:
-        return redirect(url_for("recalculate_page", msg=plan_err))
+        return redirect(url_for("recalculate_page", error=plan_err))
+    from core.recalculation import enrich_compute,preview_fingerprint
+    try:
+        compute_fn,plan=enrich_compute(compute_fn,plan,request.form)
+    except ValueError as exc:
+        return redirect(url_for('recalculate_page',error=str(exc)))
+    compute_fn.kcd_outcomes=[]
+
 
     existing_uids = {str(r.get("job_uid") or "").strip() for r in (rows or []) if str(r.get("job_uid") or "").strip()}
 
@@ -1971,10 +2063,13 @@ def recalculate_run():
         filtered, _start_dt, _end_dt = _filter_history_rows_for_recalc(rows, request.form)
         requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
     else:
-        requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
+        requested_uids = {str(u or "").strip() for u in (request.form.getlist("job_uids") or request.form.getlist("delete_rows") or request.form.getlist("job_uid")) if str(u or "").strip()}
 
     missing = {u for u in requested_uids if u not in existing_uids}
     to_update = [u for u in requested_uids if u in existing_uids]
+
+    if not to_update:
+        return redirect(url_for('recalculate_page',error='No selected historical jobs were found; no changes were written.'))
 
     confirm = (request.form.get("confirm") or "").strip().upper()
     if len(to_update) > RECALC_CONFIRM_THRESHOLD and confirm != "RECALC":
@@ -1996,6 +2091,7 @@ def recalculate_run():
             "rate_profile_id",
             "rate_per_hour_override",
             "filament_rate_per_meter_override",
+        "pricing_mode", "pricing_amount", "net_spool_grams", "conversion_factor_override",
         ):
             v = (request.form.get(key) or "").strip()
             if v:
@@ -2003,6 +2099,12 @@ def recalculate_run():
         redirect_params["msg"] = f"Confirm large run: type RECALC to recalculate {len(to_update)} jobs."
         return redirect(url_for("recalculate_page", **redirect_params))
 
+    if _is_sql_only():
+        if not request.form.get('preview_hash'):
+            return recalculate_preview()
+        compute_fn.expected_preview_hash=request.form.get('preview_hash')
+        compute_fn.kcd_plan=plan
+        compute_fn.kcd_request_meta={"count_skipped_missing":len(missing),"count_requested":len(requested_uids)}
     updated = 0
     if to_update:
         before_total = 0.0
@@ -2019,7 +2121,7 @@ def recalculate_run():
                 updated = _recalc_jobs_sql(to_update, compute_fn)
                 after_total = _sum_total_cost_sql(to_update)
             except Exception as exc:
-                return redirect(url_for("recalculate_page", msg=f"Pricing recalculation failed: {exc}"))
+                return redirect(url_for("recalculate_page", error=f"Pricing recalculation failed: {exc}"))
         else:
             updated = storage_backend.recalc_jobs(to_update, compute_fn)
 
@@ -2040,6 +2142,9 @@ def recalculate_run():
             "timestamp": datetime.now(TIMEZONE_OBJ).isoformat(),
             "count_requested": len(requested_uids),
             "count_updated": int(updated),
+            "count_validated": len(getattr(compute_fn,"kcd_outcomes",[])),
+            "count_unchanged": sum(1 for r in getattr(compute_fn,"kcd_outcomes",[]) if not r["changed"]),
+            "comparisons": getattr(compute_fn,"kcd_outcomes",[]),
             "count_skipped_missing": int(len(missing)),
             "select_filtered": bool(select_filtered),
             "recompute_mode": "pricing_only",
@@ -2053,7 +2158,8 @@ def recalculate_run():
                 "delta": after_total - before_total,
             },
         }
-        _append_recalc_audit_log(record)
+        if not getattr(compute_fn,"kcd_audit_recorded",False):
+            _append_recalc_audit_log(record)
 
     skipped = len(missing)
 
@@ -2076,12 +2182,14 @@ def recalculate_run():
         "rate_profile_id",
         "rate_per_hour_override",
         "filament_rate_per_meter_override",
+        "pricing_mode", "pricing_amount", "net_spool_grams", "conversion_factor_override",
     ):
         v = (request.form.get(key) or "").strip()
         if v:
             redirect_params[key] = v
 
-    msg = f"Recalculated costs for {updated} job(s)."
+    unchanged_count=sum(1 for outcome in getattr(compute_fn,"kcd_outcomes",[]) if not outcome["changed"])
+    msg = f"Verified pricing; changed {updated} job(s). {unchanged_count} already matched."
     if skipped:
         msg += f" Skipped {skipped} missing job(s)."
     redirect_params["msg"] = msg
@@ -2170,7 +2278,7 @@ def recalculate_preview():
 
     rows, error = _load_history_rows_for_recalc()
     if error:
-        return redirect(url_for("recalculate_page", msg=f"Error loading history: {error}"))
+        return redirect(url_for("recalculate_page", error=f"Error loading history: {error}"))
 
     if recompute_mode not in ("pricing_only", "full"):
         recompute_mode = "pricing_only"
@@ -2186,8 +2294,13 @@ def recalculate_preview():
         filament_rate_per_meter_override_raw,
     )
     if compute_fn is None:
-        return redirect(url_for("recalculate_page", msg=plan_or_err))
+        return redirect(url_for("recalculate_page", error=plan_or_err))
     plan = plan_or_err
+    from core.recalculation import enrich_compute,preview_fingerprint
+    try:
+        compute_fn,plan=enrich_compute(compute_fn,plan,request.form)
+    except ValueError as exc:
+        return redirect(url_for('recalculate_page',error=str(exc)))
 
     filtered, start_dt, end_dt = _filter_history_rows_for_recalc(rows, request.form)
     filtered_total = len(filtered)
@@ -2208,19 +2321,25 @@ def recalculate_preview():
     if select_filtered:
         requested_uids = {str(r.get("job_uid") or "").strip() for r in filtered if str(r.get("job_uid") or "").strip()}
     else:
-        requested_uids = {str(u or "").strip() for u in request.form.getlist("job_uids") if str(u or "").strip()}
+        requested_uids = {str(u or "").strip() for u in (request.form.getlist("job_uids") or request.form.getlist("delete_rows") or request.form.getlist("job_uid")) if str(u or "").strip()}
 
     missing = {u for u in requested_uids if u not in existing_uids}
     to_preview = {u for u in requested_uids if u in existing_uids}
 
+    raw_preview={}
+    if _is_sql_only() and to_preview:
+        with db_module.connect_db() as conn:
+            raw_preview={r['job_uid']:dict(r) for r in conn.execute('SELECT j.*,p.name AS printer FROM jobs j JOIN printers p ON p.id=j.printer_id WHERE j.job_uid IN ('+','.join('?' for _ in to_preview)+')',list(to_preview))}
     preview_rows = []
+    preview_errors=[]
     before_total = 0.0
     after_total = 0.0
-    for r in filtered:
+    for r in rows:
         uid = str(r.get("job_uid") or "").strip()
         if not uid or uid not in to_preview:
             continue
 
+        if uid in raw_preview:r={**r,**raw_preview[uid]}
         printer_name = str(r.get("printer") or "")
         try:
             duration_seconds = float(r.get("duration_seconds") or 0.0)
@@ -2239,7 +2358,11 @@ def recalculate_preview():
         except Exception:
             old_total = 0.0
 
-        computed = compute_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total) or {}
+        try:
+            computed = (compute_fn.for_row(r) if hasattr(compute_fn,"for_row") else compute_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total)) or {}
+        except ValueError as exc:
+            preview_errors.append(str(r.get('filename') or uid)+': '+str(exc))
+            continue
         try:
             new_total = float(computed.get("total_cost") or 0.0)
         except Exception:
@@ -2272,6 +2395,16 @@ def recalculate_preview():
                 "filament_meters": filament_meters,
                 "time_cost": time_cost,
                 "material_cost": material_cost,
+                "old_time_cost": r.get("time_cost") or 0,
+                "old_material_cost": r.get("material_cost") or 0,
+                "old_adjustment": float(r.get("total_cost") or 0)-float(r.get("time_cost") or 0)-float(r.get("material_cost") or 0),
+                "adjustment": computed.get("adjustment",0),
+                "filament_grams": computed.get("filament_grams"),
+                "grams_per_meter": computed.get("grams_per_meter"),
+                "conversion_source": computed.get("conversion_source"),
+                "pricing_source": computed.get("pricing_source"),
+                "filament_mode": computed.get("filament_mode"),
+                "filament_rate": computed.get("filament_rate"),
                 "old_total": old_total,
                 "new_total": new_total,
                 "delta": new_total - old_total,
@@ -2308,7 +2441,7 @@ def recalculate_preview():
 
     return render_template(
         "recalculate.html",
-        error=error,
+        error="; ".join(preview_errors) or error,
         message=msg,
         project_id=project_id,
         project_name=project_name,
@@ -2333,6 +2466,7 @@ def recalculate_preview():
         selected_job_uids=to_preview,
         select_filtered=select_filtered,
         recalc_visible_cols=recalc_visible_cols,
+        preview_hash=preview_fingerprint(list(raw_preview.values()),compute_fn,plan) if _is_sql_only() and not preview_errors else '',
         preview={
             "rows": preview_rows,
             "totals": {"before": before_total, "after": after_total, "delta": after_total - before_total},
@@ -2347,6 +2481,28 @@ def recalculate_preview():
             "has_next": page < pages,
         },
     )
+
+
+@app.route('/projects/<project_uid>/pricing',methods=['GET','POST'])
+def project_pricing_page(project_uid):
+    from core import project_pricing
+    if not _is_sql_only():
+        return redirect(url_for('projects_page',error='Project-only pricing snapshots require SQL storage; compatibility history is unchanged'))
+    error=None
+    try:
+        if request.method=='POST':
+            if request.form.get('action')=='clear':
+                project_pricing.clear(project_uid)
+            elif request.form.get('action')=='apply':
+                project_pricing.apply(project_uid,request.form.get('fingerprint',''))
+            return redirect(url_for('projects_page',msg='Project price view updated. Historical job prices were retained.'))
+        plan=project_pricing.preview(project_uid)
+    except ValueError as exc:
+        error=str(exc)
+        if error=='Project not found':
+            return ('Project not found',404)
+        plan=project_pricing.preview(project_uid)
+    return render_template('project_pricing.html',plan=plan,error=error),409 if error else 200
 
 
 @app.route("/projects", methods=["GET", "POST"])
@@ -2377,11 +2533,15 @@ def projects_page():
                 hourly_rate_override = request.form.get("hourly_rate_override", "").strip()
                 filament_cost_per_kg_override = request.form.get("filament_cost_per_kg_override", "").strip()
                 labor_only = bool(request.form.get("labor_only"))
+                from core.filament import project_price_from_form
+                modern_kg,modern_spec=project_price_from_form(request.form)
+                if modern_kg is not None:filament_cost_per_kg_override=modern_kg
                 projects.create_project(
                     name=name,
                     notes=notes,
                     hourly_rate_override=hourly_rate_override,
                     filament_cost_per_kg_override=filament_cost_per_kg_override,
+                    filament_price=modern_spec,
                     labor_only=labor_only,
                 )
 
@@ -2392,12 +2552,16 @@ def projects_page():
                 hourly_rate_override = request.form.get("hourly_rate_override", "").strip()
                 filament_cost_per_kg_override = request.form.get("filament_cost_per_kg_override", "").strip()
                 labor_only = bool(request.form.get("labor_only"))
+                from core.filament import project_price_from_form
+                modern_kg,modern_spec=project_price_from_form(request.form)
+                if modern_kg is not None:filament_cost_per_kg_override=modern_kg
                 projects.update_project(
                     project_id=project_id,
                     name=name,
                     notes=notes,
                     hourly_rate_override=hourly_rate_override,
                     filament_cost_per_kg_override=filament_cost_per_kg_override,
+                    filament_price=modern_spec,
                     labor_only=labor_only,
                 )
 
@@ -2435,11 +2599,7 @@ def projects_page():
 
             elif action == "recalc_costs":
                 job_ids = request.form.getlist("job_uid") or request.form.getlist("job_key")
-                if _is_sql_only():
-                    updated = _recalc_jobs_sql(job_ids, compute_costs)
-                else:
-                    updated = storage_backend.recalc_jobs(job_ids, compute_costs)
-                redirect_args = {"msg": f"Recalculated costs for {updated} job(s)."}
+                return redirect(url_for('recalculate_preview'),code=307)
 
             elif action == "create_manual_job":
                 project_id = request.form.get("project_id", "").strip()
@@ -2685,10 +2845,27 @@ def projects_page():
     for pid, p in projects_map.items():
         jobs = project_jobs.get(pid, [])
         manual_jobs = manual_jobs_by_project.get(pid, [])
+        from core import project_pricing
+        from core.filament import conversion,reconcile_display
+        overlays=project_pricing.saved_overlays(pid) if _is_sql_only() else {}
         for job in jobs:
-            components = projects.compute_tracked_job_cost_components(job)
+            components=projects.compute_tracked_job_cost_components(job)
+            job['historical_costs']=dict(components)
+            overlay=overlays.get(job['job_uid'])
+            if overlay:
+                components={key:float(overlay['after'][key]) for key in ('time_cost','material_cost','adjustment','total_cost')}
             job.update(components)
+            measurement=conversion(job,profiles.get_profile(job.get('filament_profile_id')) if job.get('filament_profile_id') else {})
+            if overlay:
+                measurement={**measurement,**{k:overlay[k] for k in ('grams','grams_per_meter','conversion_source')}}
+            job['_weight_grams']=float(measurement['grams']) if measurement['grams'] is not None else None
+            job['_weight_factor']=measurement['grams_per_meter']
+            job['_weight_source']=measurement['conversion_source']
+            job['pricing_view']='Project-adjusted snapshot' if overlay else 'Saved historical'
+
         totals = projects.compute_project_totals(jobs, manual_jobs=manual_jobs, project=p)
+        totals["tracked_filament_g"]=sum(job.get("_weight_grams") or 0 for job in jobs)
+        totals["unknown_weights"]=sum(job.get("_weight_grams") is None for job in jobs)
         plans = plans_by_project.get(pid, [])
         projection = projects.compute_project_projection(plans, project=p)
 
@@ -2743,12 +2920,35 @@ def projects_page():
                 }
             )
 
+        # Reconcile the actual view at cent precision across tracked and manual
+        # components, keeping stored history and overlay full precision intact.
+        actual_views=jobs+manual_jobs_view
+        displayed=reconcile_display(actual_views)
+        for item in actual_views:
+            for key in ('time_cost','material_cost','adjustment','total_cost'):
+                item[key]=float(item['display_'+key])
+        for key,value in displayed.items():totals[key]=float(value)
+        totals['cost']=totals['total_cost']
+        tracked_cost=sum(item['total_cost'] for item in jobs)
+        manual_cost=sum(item['total_cost'] for item in manual_jobs_view)
+        for item in manual_jobs_view:item['computed_cost']=item['total_cost']
+        active_plans=[item for item in plans_view if item['status']=='active' and not item['converted_to_manual_job_id']]
+        plan_components=[{key:item['estimated_'+key] for key in ('time_cost','material_cost','adjustment','total_cost')} for item in active_plans]
+        plan_display=reconcile_display(plan_components)
+        for item,component in zip(active_plans,plan_components):
+            for key in ('time_cost','material_cost','adjustment','total_cost'):item['estimated_'+key]=float(component['display_'+key])
+            item['est_cost']=item['estimated_total_cost']
+        for key,value in plan_display.items():projection[key]=float(value)
+        projection['cost']=projection['total_cost']
+
         project_rows.append(
             {
                 "id": pid,
                 "name": p.name,
                 "notes": p.notes,
                 "hourly_rate_override": p.hourly_rate_override,
+                "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
+                "adjusted_jobs": len(overlays),
                 "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
                 "labor_only": bool(p.labor_only),
                 "created_at": p.created_at,
@@ -2797,7 +2997,7 @@ def projects_page():
         j["_thumbs_enabled"] = bool(thumbs_enabled)
         token = str(j.get("thumbnail") or "").strip()
         if thumbs_enabled and token:
-            j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+            j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small", job_uid=j.get("job_uid"))
             j["_thumb_unavailable"] = False
         elif thumbs_enabled and fname:
             thumb_url = get_job_thumbnail_url(
@@ -2826,7 +3026,7 @@ def projects_page():
             j["_thumbs_enabled"] = bool(thumbs_enabled)
             token = str(j.get("thumbnail") or "").strip()
             if thumbs_enabled and token:
-                j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small")
+                j["_thumb_small"] = build_thumb_url_from_token(pname, token, size_hint="small", job_uid=j.get("job_uid"))
                 j["_thumb_unavailable"] = False
             elif thumbs_enabled and fname:
                 thumb_url = get_job_thumbnail_url(
@@ -3018,6 +3218,14 @@ def _settings_view(tab: str):
                 mode = (request.form.get("filament_mode") or "").strip()
                 filament_rate_raw = request.form.get("filament_rate")
                 grams_raw = request.form.get("grams_per_meter")
+                from core.filament import configuration_from_form
+                try:
+                    modern=configuration_from_form(request.form)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+                mode=modern.get('filament_mode',mode)
+                filament_rate_raw=modern.get('filament_rate',filament_rate_raw)
+                grams_raw=modern.get('grams_per_meter',grams_raw)
 
                 if _is_sql_only():
                     rate_per_hour, err = _parse_required_nonneg_float(rate_raw, "hourly rate")
@@ -3038,11 +3246,14 @@ def _settings_view(tab: str):
                     filament_rate = float(request.form.get("filament_rate", 0.25))
                     grams_per_meter = float(request.form.get("grams_per_meter", 3.0))
 
+                filament_rate=modern.get("filament_rate",filament_rate)
+                grams_per_meter=modern.get("grams_per_meter",grams_per_meter)
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
 
                 try:
+                    settings[printer].update(modern)
                     settings[printer]["rate_per_hour"] = rate_per_hour
                     settings[printer]["filament_mode"] = mode
                     settings[printer]["filament_rate"] = filament_rate
@@ -3187,6 +3398,7 @@ def _settings_view(tab: str):
             else:
                 summary = import_moonraker_history_to_csv(
                     csv_file=CSV_FILE,
+      history_source="SQL" if _is_sql_only() else "CSV",
                     headers=HEADERS,
                     printer_name=printer,
                     base_url=base_url,
@@ -3279,13 +3491,19 @@ def _settings_view(tab: str):
             color = request.form.get("color", "").strip()
             mode = request.form.get("filament_mode", "").strip()
             description = request.form.get("description", "").strip()
+            from core.filament import configuration_from_form
+            try:
+                modern=configuration_from_form(request.form)
+            except ValueError as exc:
+                return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+            mode=modern.get('filament_mode',mode)
             if _is_sql_only():
                 if mode not in {"per_meter", "per_gram", "per_kg"}:
                     return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
-                rate, err = _parse_required_nonneg_float(request.form.get("filament_rate"), "filament rate")
+                rate, err = _parse_required_nonneg_float(modern.get("filament_rate",request.form.get("filament_rate")), "filament rate")
                 if err:
                     return redirect(url_for(_settings_endpoint_for_action(action), error=err))
-                gpm, err = _parse_required_positive_float(request.form.get("grams_per_meter"), "grams per meter")
+                gpm, err = _parse_required_positive_float(modern.get("grams_per_meter",request.form.get("grams_per_meter")), "grams per meter")
                 if err:
                     return redirect(url_for(_settings_endpoint_for_action(action), error=err))
             else:
@@ -3299,6 +3517,8 @@ def _settings_view(tab: str):
                     gpm = float(request.form.get("grams_per_meter", 3.0))
                 except (TypeError, ValueError):
                     gpm = None
+            rate=modern.get("filament_rate",rate)
+            gpm=modern.get("grams_per_meter",gpm)
             if name and rate is not None:
                 profile = {
                     "name": name,
@@ -3310,6 +3530,7 @@ def _settings_view(tab: str):
                     "grams_per_meter": gpm,
                     "description": description,
                 }
+                profile.update(modern)
                 profiles.add_profile(profile)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 
@@ -3322,17 +3543,23 @@ def _settings_view(tab: str):
                 brand = request.form.get("brand", "").strip()
                 color = request.form.get("color", "").strip()
                 mode = request.form.get("filament_mode", "").strip()
+                from core.filament import configuration_from_form
+                try:
+                    modern=configuration_from_form(request.form)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+                mode=modern.get('filament_mode',mode)
                 if _is_sql_only():
                     if mode not in {"per_meter", "per_gram", "per_kg"}:
                         return redirect(url_for(_settings_endpoint_for_action(action), error="Missing filament mode."))
                     filament_rate, err = _parse_required_nonneg_float(
-                        request.form.get("filament_rate"),
+                        modern.get("filament_rate",request.form.get("filament_rate")),
                         "filament rate",
                     )
                     if err:
                         return redirect(url_for(_settings_endpoint_for_action(action), error=err))
                     grams_per_meter, err = _parse_required_positive_float(
-                        request.form.get("grams_per_meter"),
+                        modern.get("grams_per_meter",request.form.get("grams_per_meter")),
                         "grams per meter",
                     )
                     if err:
@@ -3356,6 +3583,9 @@ def _settings_view(tab: str):
                         updates["grams_per_meter"] = float(request.form.get("grams_per_meter"))
                     except (TypeError, ValueError):
                         updates["grams_per_meter"] = None
+                updates.update(modern)
+                if "price_input_mode" not in updates:
+                    updates["price_input_mode"]=mode
                 profiles.update_profile(profile_id, updates)
             return redirect(url_for(_settings_endpoint_for_action(action)))
 

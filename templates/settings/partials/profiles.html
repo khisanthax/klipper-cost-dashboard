@@ -30,15 +30,10 @@
                         <td><input form="profile-update-{{ pid }}" type="text" class="form-control form-control-sm" name="material" value="{{ profile.material }}"></td>
                         <td><input form="profile-update-{{ pid }}" type="text" class="form-control form-control-sm" name="brand" value="{{ profile.brand }}"></td>
                         <td><input form="profile-update-{{ pid }}" type="text" class="form-control form-control-sm" name="color" value="{{ profile.color }}"></td>
-                        <td>
-                            <select form="profile-update-{{ pid }}" name="filament_mode" class="form-select form-select-sm">
-                                <option value="per_meter" {% if profile.filament_mode=='per_meter' %}selected{% endif %}>per meter</option>
-                                <option value="per_gram" {% if profile.filament_mode=='per_gram' %}selected{% endif %}>per gram</option>
-                                <option value="per_kg" {% if profile.filament_mode=='per_kg' %}selected{% endif %}>per kg</option>
-                            </select>
+                        <td colspan="3">
+                          {% set price_record=profile %}{% set price_form='profile-update-' ~ pid %}
+                          {% include 'partials/_filament_price_inputs.html' %}
                         </td>
-                        <td><input form="profile-update-{{ pid }}" type="text" class="form-control form-control-sm" name="filament_rate" value="{{ profile.filament_rate }}"></td>
-                        <td><input form="profile-update-{{ pid }}" type="text" class="form-control form-control-sm" name="grams_per_meter" value="{{ profile.grams_per_meter }}"></td>
                         <td class="text-nowrap">
                             <div class="d-flex gap-2">
                                 <button form="profile-update-{{ pid }}" type="submit" class="btn btn-sm btn-primary">Save</button>
@@ -81,21 +76,9 @@
                         <label class="form-label">Color</label>
                         <input type="text" name="color" placeholder="e.g. Black" class="form-control">
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Mode</label>
-                        <select name="filament_mode" class="form-select">
-                            <option value="per_meter">per meter</option>
-                            <option value="per_gram">per gram</option>
-                            <option value="per_kg">per kg</option>
-                        </select>
-                    </div>
-                    <div class="col-md-1">
-                        <label class="form-label">Rate</label>
-                        <input type="text" name="filament_rate" value="0.25" class="form-control">
-                    </div>
-                    <div class="col-md-1">
-                        <label class="form-label">g/m</label>
-                        <input type="text" name="grams_per_meter" value="3.0" class="form-control">
+                    <div class="col-12">
+                      {% set price_record={} %}{% set price_form='' %}
+                      {% include 'partials/_filament_price_inputs.html' %}
                     </div>
                     <div class="col-md-1 d-grid">
                         <button type="submit" class="btn btn-success">Add</button>

@@ -1,5 +1,5 @@
 <div class="alert alert-light border mb-4">
-    Edit pricing for each printer below. New printers will appear here after they send their first job.
+    Edit pricing for each printer below. Registered printers appear here with initialized pricing. Saving defaults affects future jobs; historical prices require an explicit recalculation preview.
 </div>
 
 {% if not printers %}
@@ -57,25 +57,9 @@
                     <label class="form-label">Rate per hour ($/hr)</label>
                     <input type="text" name="rate_per_hour" value="{{ configs[p].rate_per_hour }}" class="form-control">
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label">Filament mode</label>
-                    <select name="filament_mode" class="form-select">
-                        <option value="per_meter" {% if configs[p].filament_mode=='per_meter' %}selected{% endif %}>per
-                            meter</option>
-                        <option value="per_gram" {% if configs[p].filament_mode=='per_gram' %}selected{% endif %}>per
-                            gram</option>
-                        <option value="per_kg" {% if configs[p].filament_mode=='per_kg' %}selected{% endif %}>per kg
-                        </option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Filament rate</label>
-                    <input type="text" name="filament_rate" value="{{ configs[p].filament_rate }}" class="form-control">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Grams per meter</label>
-                    <input type="text" name="grams_per_meter" value="{{ configs[p].grams_per_meter }}"
-                        class="form-control">
+                <div class="col-md-9">
+                    {% set price_record = configs[p] %}{% set price_form = '' %}
+                    {% include 'partials/_filament_price_inputs.html' %}
                 </div>
             </div>
             <div class="d-flex justify-content-between align-items-center mt-3">

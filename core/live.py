@@ -120,7 +120,7 @@ def update_job(printer_name, **kwargs):
     
     # Update allowed fields
     allowed_fields = {
-        "filename", "estimated_duration", "estimated_filament_mm", "profile_id"
+        "filename", "estimated_duration", "estimated_filament_mm", "profile_id", "thumbnail_asset"
     }
     for key, value in kwargs.items():
         if key in allowed_fields:
@@ -385,6 +385,7 @@ def get_job_metadata_for_logging(printer_name):
 
     return {
         "actual_start_time": job.get("start_time"),
+        "thumbnail_asset": job.get("thumbnail_asset"),
         "elapsed_seconds": max(0.0, time.time()-float(job.get("start_time") or time.time())-total_paused),
         "total_paused_duration": total_paused,
         "profile_id": job.get("profile_id"),

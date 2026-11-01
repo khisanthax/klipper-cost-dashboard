@@ -83,7 +83,7 @@ class BackupConsistencyTests(unittest.TestCase):
         with closing(sqlite3.connect(restored_db)) as conn:
             schema = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
             job = conn.execute("SELECT job_uid, total_cost FROM jobs WHERE job_uid = ?", ("backup-job",)).fetchone()
-        self.assertEqual(schema, "0006_system_events")
+        self.assertEqual(schema, "0008_pricing_provenance")
         self.assertEqual(job, ("backup-job", 4.25))
 
     def test_archive_permission_hardening_is_applied(self):

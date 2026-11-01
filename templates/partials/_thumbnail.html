@@ -18,7 +18,7 @@
   <span class="kcd-thumb-wrap kcd-thumb-{{ _size }}">
     <span
       class="kcd-thumb-placeholder kcd-thumb-{{ _size }}{% if _unavail %} kcd-thumb-unavailable{% endif %}"
-      {% if _unavail %}title="Thumbnail unavailable (file not found on printer)"{% endif %}
+      {% if _unavail %}title="Thumbnail unavailable; review thumbnail recovery diagnostics"{% endif %}
       aria-hidden="true"
     ></span>
     {% if _unavail %}

@@ -55,7 +55,7 @@ def _ensure_cost_fields(row: dict) -> dict:
     time_cost = _as_float(row.get("time_cost"))
     total_cost = _as_float(row.get("total_cost"))
 
-    needs_calc = duration_seconds > 0 and (rate_per_hour <= 0 or time_cost <= 0 or total_cost <= 0)
+    needs_calc = duration_seconds > 0 and any(row.get(k) in (None,'') for k in ('rate_per_hour','time_cost','material_cost','total_cost'))
     if not needs_calc:
         return row
 
@@ -64,14 +64,14 @@ def _ensure_cost_fields(row: dict) -> dict:
     # Respect explicit overrides if present.
     override_material = _as_float(row.get("override_material_cost"))
     override_total = _as_float(row.get("override_total_cost"))
-    if override_material > 0:
+    if row.get('override_material_cost') not in (None,''):
         cost_data["material_cost"] = override_material
         cost_data["total_cost"] = cost_data.get("time_cost", 0.0) + override_material
-    if override_total > 0:
+    if row.get('override_total_cost') not in (None,''):
         cost_data["total_cost"] = override_total
 
     for key, value in cost_data.items():
-        if row.get(key) in (None, "", 0) and value not in (None, ""):
+        if row.get(key) in (None, "") and value not in (None, ""):
             row[key] = value
 
     return row

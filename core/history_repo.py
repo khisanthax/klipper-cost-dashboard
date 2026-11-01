@@ -276,6 +276,11 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
             j.filament_mode,
             j.filament_rate,
             j.grams_per_meter,
+            j.filament_grams,
+            j.filament_weight_kind,
+            j.filament_density,
+            j.filament_diameter,
+            j.billable_hours,
             j.time_cost,
             j.material_cost,
             j.total_cost,
@@ -434,7 +439,7 @@ def _parse_iso_to_epoch(value: object) -> Optional[float]:
 
 def compute_job_cost_fields(row: dict) -> dict:
     """
-    Compute missing/zero cost fields for a job row using the same pricing rules
+    Compute missing cost fields for a job row using the same pricing rules
     as CSV reads. This is used to fill gaps in SQL rows that lack derived fields.
     """
     printer_name = str(row.get("printer") or "").strip()
@@ -453,6 +458,13 @@ def compute_job_cost_fields(row: dict) -> dict:
 
     # If there's still no signal, don't overwrite existing zeros.
     if duration_seconds <= 0 and filament_mm <= 0:
+        return row
+
+    # Stored zero and signed values are complete historical evidence. Reading a
+    # record must not depend on today's profiles or silently reprice that job.
+    if all(_as_float(row.get(k)) is not None for k in ('time_cost','material_cost','total_cost')):
+        if row.get('duration_hours') in (None,''):row['duration_hours']=duration_seconds/3600
+        if row.get('filament_meters') in (None,''):row['filament_meters']=filament_mm/1000
         return row
 
     filament_profile_id = str(row.get("filament_profile_id") or "").strip() or None
@@ -481,8 +493,6 @@ def compute_job_cost_fields(row: dict) -> dict:
     def _should_set(key: str, value: float) -> bool:
         existing = _as_float(row.get(key))
         if existing is None:
-            return True
-        if existing <= 0 and value > 0:
             return True
         return False
 

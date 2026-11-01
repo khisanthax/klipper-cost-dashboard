@@ -4,7 +4,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h1 class="h3 mb-0">Recalculate Center</h1>
-        <div class="text-muted small">Bulk re-run pricing for selected historical jobs (history only; no live jobs).</div>
+        <div class="text-muted small">Preview adjusted pricing for historical jobs. Applying a run changes current saved prices; the first recorded pricing snapshot is retained for recovery. Live jobs are excluded.</div>
     </div>
 </div>
 
@@ -116,12 +116,34 @@
                             <div class="fw-semibold">Recalculation Plan</div>
                             <div class="text-muted small">Applies only to this run; does not change printer defaults.</div>
                         </div>
-                        <input type="hidden" name="recompute_mode" value="pricing_only">
+                        <input type="hidden" name="recompute_mode" form="kcd-recalc-form" value="pricing_only">
                         <div class="row g-2 mt-1 align-items-end">
+                            <div class="col-12 border rounded p-2">
+                                <div class="fw-semibold small">Optional filament price override</div>
+                                <div class="row g-2">
+                                    <label class="col-md-3 small">Price unit
+                                        <select form="kcd-recalc-form" name="pricing_mode" class="form-select form-select-sm">
+                                            {% for mode,label in [('spool','Spool price ($)'),('per_kg','$/kg'),('per_gram','$/gram'),('per_meter','$/meter')] %}
+                                            <option value="{{ mode }}" {% if request.values.get('pricing_mode','spool') == mode %}selected{% endif %}>{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </label>
+                                    <label class="col-md-3 small">Price (blank keeps selected profile / saved material)
+                                        <input form="kcd-recalc-form" class="form-control form-control-sm" type="number" step="any" min="0" name="pricing_amount" value="{{ request.values.get('pricing_amount','') }}">
+                                    </label>
+                                    <label class="col-md-3 small">Net spool filament (g)
+                                        <input form="kcd-recalc-form" class="form-control form-control-sm" type="number" step="any" min="0.01" name="net_spool_grams" value="{{ request.values.get('net_spool_grams',1000) }}">
+                                    </label>
+                                    <label class="col-md-3 small">Explicit conversion override (g/m, optional)
+                                        <input form="kcd-recalc-form" class="form-control form-control-sm" type="number" step="any" min="0.000001" name="conversion_factor_override" value="{{ request.values.get('conversion_factor_override','') }}">
+                                    </label>
+                                </div>
+                                <div class="small text-muted">Otherwise uses each job's recorded weight/factor, or its filament profile. Spool price is divided by net filament weight. Explicit price overrides the selected filament profile's rate.</div>
+                            </div>
                             <div class="col-md-4">
                                 <label class="form-label mb-1">Hourly rate override</label>
                                 <input type="text"
-                                       name="rate_per_hour_override"
+                                       name="rate_per_hour_override" form="kcd-recalc-form"
                                        value="{{ rate_per_hour_override or '' }}"
                                        class="form-control form-control-sm"
                                        placeholder="$/hr (optional)">
@@ -129,9 +151,9 @@
                             </div>
 
                             <div class="col-md-4">
-                                <label class="form-label mb-1">Filament override</label>
+                                <label class="form-label mb-1">Legacy explicit $/meter override</label>
                                 <input type="text"
-                                       name="filament_rate_per_meter_override"
+                                       name="filament_rate_per_meter_override" form="kcd-recalc-form"
                                        value="{{ filament_rate_per_meter_override or '' }}"
                                        class="form-control form-control-sm"
                                        placeholder="$/meter (optional)">
@@ -140,11 +162,11 @@
 
                             <div class="col-md-6">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="apply_rate_profile" value="1"
+                                    <input class="form-check-input" type="checkbox" name="apply_rate_profile" form="kcd-recalc-form" value="1"
                                            id="apply_rate_profile" {% if apply_rate_profile %}checked{% endif %}>
                                     <label class="form-check-label" for="apply_rate_profile">Apply hourly rate profile</label>
                                 </div>
-                                <select name="rate_profile_id" class="form-select form-select-sm mt-1">
+                                <select name="rate_profile_id" form="kcd-recalc-form" class="form-select form-select-sm mt-1">
                                     <option value="">Select rate profile…</option>
                                     {% for rid, rp in rate_profiles.items() %}
                                     <option value="{{ rid }}" {% if rate_profile_id == rid %}selected{% endif %}>
@@ -156,11 +178,11 @@
 
                             <div class="col-md-6">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" name="apply_filament_profile" value="1"
+                                    <input class="form-check-input" type="checkbox" name="apply_filament_profile" form="kcd-recalc-form" value="1"
                                            id="apply_filament_profile" {% if apply_filament_profile %}checked{% endif %}>
                                     <label class="form-check-label" for="apply_filament_profile">Apply filament profile</label>
                                 </div>
-                                <select name="filament_profile_id" class="form-select form-select-sm mt-1">
+                                <select name="filament_profile_id" form="kcd-recalc-form" class="form-select form-select-sm mt-1">
                                     <option value="">Select filament profile…</option>
                                     {% for fid, fp in filament_profiles.items() %}
                                     <option value="{{ fid }}" {% if filament_profile_id == fid %}selected{% endif %}>
@@ -189,6 +211,7 @@
     </div>
     <div class="card-body">
         <form method="post" action="{{ url_for('recalculate_run') }}" id="kcd-recalc-form">
+            <input type="hidden" name="preview_hash" id="kcd-preview-hash" value="{{ preview_hash|default('') }}">
             <input type="hidden" name="select_filtered" id="kcd-select-filtered" value="{% if select_filtered %}1{% else %}0{% endif %}">
 
             {# Preserve filter params for run + redirect #}
@@ -204,12 +227,7 @@
             <input type="hidden" name="per_page" value="{{ pager.per_page }}">
             <input type="hidden" name="page" value="{{ pager.page }}">
             <input type="hidden" name="recompute_mode" value="{{ recompute_mode or 'pricing_only' }}">
-            <input type="hidden" name="apply_rate_profile" value="{% if apply_rate_profile %}1{% else %}0{% endif %}">
-            <input type="hidden" name="apply_filament_profile" value="{% if apply_filament_profile %}1{% else %}0{% endif %}">
-            <input type="hidden" name="rate_profile_id" value="{{ rate_profile_id or '' }}">
-            <input type="hidden" name="filament_profile_id" value="{{ filament_profile_id or '' }}">
-            <input type="hidden" name="rate_per_hour_override" value="{{ rate_per_hour_override or '' }}">
-            <input type="hidden" name="filament_rate_per_meter_override" value="{{ filament_rate_per_meter_override or '' }}">
+
 
             <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -230,7 +248,7 @@
                             formaction="{{ url_for('recalculate_preview') }}">
                         Preview changes
                     </button>
-                    <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn">Recalculate selected</button>
+                    <button type="submit" class="btn btn-sm btn-primary" id="kcd-recalc-btn" data-preview-ready="{{ 1 if preview and not error else 0 }}" {% if not preview or error %}disabled{% endif %}>Apply previewed prices</button>
                 </div>
             </div>
 
@@ -241,7 +259,7 @@
                     <thead>
                         <tr>
                             <th style="width: 36px;" data-col="__select__" data-sortable="false">
-                                <input type="checkbox" class="form-check-input" id="kcd-toggle-all">
+                                <input type="checkbox" class="form-check-input" id="kcd-toggle-all" aria-label="Select all recalculation rows on this page">
                             </th>
                             <th data-col="printer" data-sort-type="text" class="{% if 'printer' not in _recalc_cols %}kcd-col-hidden{% endif %}">Printer</th>
                             <th data-col="filename" data-sort-type="text" class="{% if 'filename' not in _recalc_cols %}kcd-col-hidden{% endif %}">Filename</th>
@@ -261,6 +279,7 @@
                                 <input type="checkbox"
                                        class="form-check-input kcd-job-cb"
                                        name="job_uids"
+                                       aria-label="Select {{ r.filename }} ({{ r.job_uid }})"
                                        value="{{ r.job_uid }}"
                                        {% if selected_job_uids and (r.job_uid in selected_job_uids) %}checked{% endif %}>
                             </td>
@@ -318,7 +337,7 @@
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div class="fw-semibold">Preview</div>
-        <div class="text-muted small">No changes were written. Use “Recalculate selected” to apply.</div>
+        <div class="text-muted small">No changes were written. Use “Apply previewed prices” to save this reviewed plan.</div>
     </div>
     <div class="card-body">
         <div class="d-flex flex-wrap gap-3 mb-2">
@@ -338,9 +357,10 @@
                         <th data-col="printer" data-sort-type="text">Printer</th>
                         <th data-col="filename" data-sort-type="text">Filename</th>
                         <th class="text-end" data-col="hours" data-sort-type="number">Hours</th>
-                        <th class="text-end" data-col="filament" data-sort-type="number">Filament (m)</th>
-                        <th class="text-end" data-col="time_cost" data-sort-type="number">Time Cost ($)</th>
-                        <th class="text-end" data-col="material_cost" data-sort-type="number">Material Cost ($)</th>
+                        <th class="text-end" data-col="filament" data-sort-type="number">Length / weight / conversion</th>
+                        <th class="text-end" data-col="time_cost" data-sort-type="number">Time: saved → preview ($)</th>
+                        <th class="text-end" data-col="material_cost" data-sort-type="number">Material: saved → preview ($)</th>
+                        <th data-col="adjustment">Adjustment: saved → preview ($)</th>
                         <th class="text-end" data-col="old" data-sort-type="number">Old Total ($)</th>
                         <th class="text-end" data-col="new" data-sort-type="number">New Total ($)</th>
                         <th class="text-end" data-col="delta" data-sort-type="number">Delta ($)</th>
@@ -353,9 +373,10 @@
                         <td class="text-nowrap" data-col="printer">{{ p.printer }}</td>
                         <td class="text-truncate" style="max-width: 420px;" title="{{ p.filename }}" data-col="filename">{{ p.filename }}</td>
                         <td class="text-end" data-col="hours">{{ "%.2f"|format(p.duration_hours) }}</td>
-                        <td class="text-end" data-col="filament">{{ "%.2f"|format(p.filament_meters) }}</td>
-                        <td class="text-end" data-col="time_cost">{{ "%.2f"|format(p.time_cost) }}</td>
-                        <td class="text-end" data-col="material_cost">{{ "%.2f"|format(p.material_cost) }}</td>
+                        <td class="text-end" data-col="filament">{{ "%.2f"|format(p.filament_meters) }} m<br>{{ "%.3f"|format(p.filament_grams) if p.filament_grams is not none else "Unknown" }} g<br><small>{{ p.grams_per_meter }} g/m · {{ p.conversion_source }}</small></td>
+                        <td class="text-end" data-col="time_cost">{{ "%.2f"|format(p.old_time_cost) }} → <strong>{{ "%.2f"|format(p.time_cost) }}</strong></td>
+                        <td class="text-end" data-col="material_cost">{{ "%.2f"|format(p.old_material_cost) }} → <strong>{{ "%.2f"|format(p.material_cost) }}</strong><br><small>{{ p.filament_rate }} {{ {"per_kg":"$/kg","per_gram":"$/g","per_meter":"$/m"}.get(p.filament_mode,p.filament_mode) }} · {{ p.pricing_source }}</small></td>
+                        <td data-col="adjustment">{{ "%.2f"|format(p.old_adjustment) }} → {{ "%.2f"|format(p.adjustment) }}</td>
                         <td class="text-end" data-col="old">{{ "%.2f"|format(p.old_total) }}</td>
                         <td class="text-end" data-col="new">{{ "%.2f"|format(p.new_total) }}</td>
                         <td class="text-end {% if p.delta > 0 %}text-danger{% elif p.delta < 0 %}text-success{% endif %}" data-col="delta">{{ "%.2f"|format(p.delta) }}</td>
@@ -396,7 +417,7 @@
     } else {
       selectedSummary.textContent = checked ? `Selected: ${checked}` : '';
     }
-    recalcBtn.disabled = (!selectFiltered && checked === 0);
+    recalcBtn.disabled = (!selectFiltered && checked === 0) || recalcBtn.dataset.previewReady !== '1';
     previewBtn.disabled = (!selectFiltered && checked === 0);
 
     const needsConfirm = (selectFiltered && totalFiltered > confirmThreshold) || (!selectFiltered && checked > confirmThreshold);
@@ -436,6 +457,14 @@
   }));
 
   updateSummary();
+  function invalidatePreview() {
+    recalcBtn.dataset.previewReady = '0';
+    document.getElementById('kcd-preview-hash').value = '';
+    updateSummary();
+  }
+  document.querySelectorAll('[form="kcd-recalc-form"]').forEach(el => el.addEventListener('change', invalidatePreview));
+  getCheckboxes().forEach(el => el.addEventListener('change', invalidatePreview));
+  ['kcd-toggle-all','kcd-select-page','kcd-select-filtered-btn','kcd-clear'].forEach(id => document.getElementById(id).addEventListener('click', invalidatePreview));
 })();
 </script>
 {% endblock %}

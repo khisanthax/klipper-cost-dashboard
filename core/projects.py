@@ -58,6 +58,7 @@ class Project:
     labor_only: bool = False
     created_at: float = 0.0
     updated_at: float = 0.0
+    filament_price: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +205,7 @@ def _load_projects_sql() -> Dict[str, Project]:
                 status,
                 hourly_rate_override,
                 filament_cost_per_kg_override,
+                filament_price_json,
                 labor_only,
                 created_at,
                 updated_at
@@ -223,6 +225,7 @@ def _load_projects_sql() -> Dict[str, Project]:
             notes=str(row["notes"] or ""),
             hourly_rate_override=_opt_nonneg_float(row["hourly_rate_override"]),
             filament_cost_per_kg_override=_opt_nonneg_float(row["filament_cost_per_kg_override"]),
+            filament_price=json.loads(row["filament_price_json"]) if row["filament_price_json"] else None,
             labor_only=bool(row["labor_only"] or False),
             created_at=_parse_iso_to_epoch(row["created_at"]),
             updated_at=_parse_iso_to_epoch(row["updated_at"]),
@@ -269,6 +272,7 @@ def _save_projects_sql(projects: Iterable[Project]) -> None:
                     now,
                 ),
             )
+            conn.execute("UPDATE projects SET filament_price_json=? WHERE project_uid=?",(json.dumps(p.filament_price) if p.filament_price else None,p.id))
         conn.commit()
 
 
@@ -575,6 +579,7 @@ def _upsert_project_sql(project: Project) -> None:
                 now,
             ),
         )
+        conn.execute("UPDATE projects SET filament_price_json=? WHERE project_uid=?",(json.dumps(project.filament_price) if project.filament_price else None,project.id))
         conn.commit()
 
 
@@ -678,6 +683,7 @@ def load_projects() -> Dict[str, Project]:
             notes=notes,
             hourly_rate_override=hourly_rate_override,
             filament_cost_per_kg_override=filament_cost_per_kg_override,
+            filament_price=item.get("filament_price"),
             labor_only=labor_only,
             created_at=created_at,
             updated_at=updated_at,
@@ -698,6 +704,7 @@ def save_projects(projects: Iterable[Project]) -> None:
                 "notes": p.notes,
                 "hourly_rate_override": p.hourly_rate_override,
                 "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
+                "filament_price": p.filament_price,
                 "labor_only": bool(p.labor_only),
                 "created_at": float(p.created_at or 0.0),
                 "updated_at": float(p.updated_at or 0.0),
@@ -1588,6 +1595,7 @@ def create_project(
     *,
     hourly_rate_override: Optional[float] = None,
     filament_cost_per_kg_override: Optional[float] = None,
+    filament_price: Optional[dict] = None,
     labor_only: bool = False,
 ) -> Project:
     name = str(name or "").strip()
@@ -1611,6 +1619,7 @@ def create_project(
         notes=str(notes or ""),
         hourly_rate_override=hourly_override,
         filament_cost_per_kg_override=filament_override,
+        filament_price=filament_price,
         labor_only=bool(labor_only),
         created_at=now,
         updated_at=now,
@@ -1631,6 +1640,7 @@ def update_project(
     *,
     hourly_rate_override: Optional[float] = None,
     filament_cost_per_kg_override: Optional[float] = None,
+    filament_price: Optional[dict] = None,
     labor_only: Optional[bool] = None,
 ) -> Project:
     pid = str(project_id or "").strip()
@@ -1669,6 +1679,7 @@ def update_project(
             notes=str(notes or ""),
             hourly_rate_override=hourly_override if hourly_rate_override is not None else existing.hourly_rate_override,
             filament_cost_per_kg_override=filament_override if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+            filament_price=filament_price if filament_price is not None else (existing.filament_price if filament_cost_per_kg_override is None else None),
             labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
             created_at=existing.created_at,
             updated_at=time.time(),
@@ -1688,6 +1699,7 @@ def update_project(
         notes=str(notes or ""),
         hourly_rate_override=hourly_override if hourly_rate_override is not None else existing.hourly_rate_override,
         filament_cost_per_kg_override=filament_override if filament_cost_per_kg_override is not None else existing.filament_cost_per_kg_override,
+        filament_price=filament_price if filament_price is not None else (existing.filament_price if filament_cost_per_kg_override is None else None),
         labor_only=bool(labor_only) if labor_only is not None else bool(existing.labor_only),
         created_at=existing.created_at,
         updated_at=now,

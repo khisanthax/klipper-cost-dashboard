@@ -12,7 +12,9 @@ pricing recalculation, and CSV export.
 - Per-printer pricing plus hourly-rate and filament profiles
 - Pause-aware hourly billing
 - Projects, manual jobs, and planned items
-- Previewable pricing recalculation for historical jobs
+- Previewable, recoverable pricing recalculation and project-only adjusted snapshots
+- Spool price/net weight inputs with explicit units and per-job filament conversion
+- Permanent job thumbnails retained independently of printer files and addresses
 - SQL-backed system events and runtime health checks
 - Explicit CSV export, parity, import, and migration tooling
 
@@ -117,7 +119,7 @@ SQL-only does not mean that the process performs literally zero filesystem I/O.
 The following are deliberate exceptions to the SQL business-state contract:
 
 - `data/secret.json` as the API-key credential fallback
-- thumbnail cache files
+- permanent thumbnail objects and temporary thumbnail cache files
 - explicit CSV exports
 - backup archives
 - temporary files created for explicit operations
@@ -317,3 +319,5 @@ and focused feature proposals.
 Pull requests intended for release must pass the unfiltered **Release Validation**
 workflow, including the full unit suite, compile checks, SQL-only isolation,
 production Docker build, and in-container CLI/tool smoke tests, before merge.
+
+Pricing units, original-price recovery and permanent thumbnail administration: [operator guide](docs/pricing-and-thumbnail-recovery.md).

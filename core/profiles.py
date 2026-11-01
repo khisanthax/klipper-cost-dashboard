@@ -62,6 +62,8 @@ def upsert_profile(profile_data):
     If 'id' is missing, a new one is generated.
     Returns the profile_id.
     """
+    from core.filament import normalize_profile
+    profile_data.update(normalize_profile(profile_data))
     if _is_sql_only():
         return _upsert_sql_profile(profile_data)
 
@@ -94,6 +96,12 @@ def update_profile(profile_id, updates):
     Update an existing profile with provided fields.
     Returns True if updated, False if profile not found.
     """
+    from core.filament import normalize_profile
+    if any(k in updates for k in ('filament_mode','filament_rate')) and not any(k in updates for k in ('pricing_amount','price_input_mode','spool_price')):
+        updates={**updates,'price_input_mode':updates.get('filament_mode') or (get_profile(profile_id) or {}).get('filament_mode')}
+    if any(k in updates for k in ('pricing_amount','price_input_mode','density_g_cm3','diameter_mm','conversion_basis')):
+        original=get_profile(profile_id) or {}
+        updates=normalize_profile({**original,**updates})
     if _is_sql_only():
         return _update_sql_profile(profile_id, updates)
 
@@ -114,6 +122,7 @@ def update_profile(profile_id, updates):
         "filament_rate",
         "cost_per_kg",
         "grams_per_meter",
+        "price_input_mode", "conversion_basis", "spool_price", "net_spool_grams", "density_g_cm3", "diameter_mm",
     }
 
     for key, value in updates.items():
@@ -229,7 +238,7 @@ def _load_sql_profiles():
         db_module.apply_migrations(conn)
         rows = conn.execute(
             """
-            SELECT id, profile_uid, name, material, brand, color, filament_mode, filament_rate, cost_per_kg, grams_per_meter
+            SELECT *
               FROM filament_profiles
             """
         ).fetchall()
@@ -248,6 +257,7 @@ def _load_sql_profiles():
                 "filament_rate": r["filament_rate"],
                 "cost_per_kg": r["cost_per_kg"],
                 "grams_per_meter": r["grams_per_meter"],
+                **{k:r[k] for k in ("price_input_mode","conversion_basis","spool_price","net_spool_grams","density_g_cm3","diameter_mm")},
             }
         elif isinstance(r, (tuple, list)):
             pid = r[1] or str(r[0])
@@ -334,6 +344,9 @@ def _upsert_sql_profile(profile_data: dict) -> str:
                     now,
                 ),
             )
+        metadata={k:profile_data[k] for k in ("price_input_mode","conversion_basis","spool_price","net_spool_grams","density_g_cm3","diameter_mm") if k in profile_data}
+        if metadata:
+            conn.execute("UPDATE filament_profiles SET "+", ".join(k+"=?" for k in metadata)+" WHERE profile_uid=?",[*metadata.values(),profile_id])
         conn.commit()
     return profile_id
 
@@ -350,6 +363,7 @@ def _update_sql_profile(profile_id: str, updates: dict) -> bool:
         "filament_rate",
         "cost_per_kg",
         "grams_per_meter",
+        "price_input_mode", "conversion_basis", "spool_price", "net_spool_grams", "density_g_cm3", "diameter_mm",
     }
     values = {k: v for k, v in (updates or {}).items() if k in allowed and v is not None}
     if not values:

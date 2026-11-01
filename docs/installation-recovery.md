@@ -62,10 +62,13 @@ python3 install.py macro-plan --config-dir /home/pi/printer_data/config \
 ```
 
 Events: start, end, cancel, pause, resume. Select existing active user macros.
-Inactive alternatives, missing includes, cycles and duplicate macro definitions
-block patching. Existing hooks are retained. Motion and thermal commands are
+Inactive alternatives, missing includes and cycles block patching. Effective
+definitions follow Klipper include/override order, including shared symlinked files;
+shadowed alternatives are reported. Existing hooks are retained. Motion and thermal commands are
 preserved. Reload Klipper configuration only while idle if a config changed.
-Updating shell scripts alone needs no Klipper restart. Older custom
+Updating shell scripts alone needs no Klipper restart. Managed shell commands
+use an explicit bash interpreter because Moonraker uploads reset executable bits;
+the fixed diagnostic restores owner-only executable permissions. Older custom
 `print_cost.cfg` files without a baked `_KCD_VARS` identity require explicit
 migration; the repair command refuses to replace them wholesale.
 
@@ -82,8 +85,10 @@ initializes it before reporting success.
 Before deployment, create `python tools/kcd_backup.py`, retain the previous
 image ID and back up the private Compose configuration. Test a restored copy in
 an isolated data directory and port. Recreate only the KCD service. On failure,
-recreate with the previous image and current data (this release adds no schema
-migration); restore the consistent backup only if data verification requires it.
+recreate with the previous image and current data after testing that combination
+in isolation. v0.7 adds additive thumbnail/pricing tables and nullable columns;
+retain them and their image objects during rollback. Restore a consistent backup
+only if data verification requires it.
 Do not overwrite unrelated services or discard new jobs during rollback.
 
 ## Credential rotation
@@ -111,3 +116,6 @@ with network/access controls. File permissions do not prevent the owning
 Moonraker service from reading client scripts. Archived old keys must remain
 private even after revocation. Retired/offline clients need explicit repair with
 the current key before reactivation.
+
+See [pricing and thumbnail recovery](pricing-and-thumbnail-recovery.md) for the
+new previews, original-price recovery, thumbnail backfill and object backups.

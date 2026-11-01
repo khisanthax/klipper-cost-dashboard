@@ -329,6 +329,11 @@ def upsert_job(conn: sqlite3.Connection, row: dict) -> None:
         "updated_at": now,
     }
 
+    for key in ('filament_grams','filament_density','filament_diameter','billable_hours'):
+        if key in row:
+            payload[key]=_to_float(row[key])
+    if 'filament_weight_kind' in row:
+        payload['filament_weight_kind']=row['filament_weight_kind']
     cols = ", ".join(payload.keys())
     placeholders = ", ".join(["?"] * len(payload))
     updates = ", ".join([f"{k}=excluded.{k}" for k in payload.keys() if k not in ("job_uid", "created_at")])
@@ -341,6 +346,16 @@ def upsert_job(conn: sqlite3.Connection, row: dict) -> None:
         """,
         list(payload.values()),
     )
+
+    # Attach a start-captured asset in the same transaction as history. A
+    # failure after job persistence cannot orphan the only surviving image.
+    asset=row.get('thumbnail_asset')
+    if asset and conn.execute('SELECT 1 FROM thumbnail_assets WHERE sha256=?',(asset,)).fetchone():
+        conn.execute('''INSERT INTO job_thumbnails
+            (job_uid,asset_sha256,status,source_url,source_filename,source_modified,provenance,checked_at)
+            VALUES (?,?,'archived','',?,NULL,'captured_at_start',?)
+            ON CONFLICT(job_uid) DO UPDATE SET asset_sha256=excluded.asset_sha256,status='archived',checked_at=excluded.checked_at''',
+            (payload['job_uid'],asset,payload['filename'],now))
 
     logger.debug(
         "SQL upsert job_uid=%s status=%s duration_seconds=%s rate_per_hour=%s time_cost=%s",

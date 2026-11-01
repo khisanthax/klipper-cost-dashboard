@@ -88,10 +88,11 @@
                 <input type="text" class="form-control" name="hourly_rate_override" placeholder="optional">
                 <div class="text-muted small">$/hr</div>
             </div>
-            <div class="col-md-2">
-                <label class="form-label">Filament (override)</label>
-                <input type="text" class="form-control" name="filament_cost_per_kg_override" placeholder="optional">
-                <div class="text-muted small">$/kg</div>
+            <div class="col-12 border rounded p-2">
+              <div class="small fw-semibold">Optional filament override</div>
+              {% set price_record={} %}{% set price_form='' %}{% set price_required=false %}
+              {% include 'partials/_filament_price_inputs.html' %}
+              <div class="small text-muted">Leave price blank for defaults. Tracked history changes only after a project pricing preview and explicit apply.</div>
             </div>
             <div class="col-md-2 d-flex align-items-end">
                 <div class="form-check mb-2">
@@ -160,6 +161,8 @@
                         <td class="text-end">{{ "%.2f"|format(p.totals.hours) }}</td>
                         <td class="text-end">
                             <div>{{ "%.2f"|format(p.totals.meters) }} m</div>
+                            <div class="small">Tracked: {{ '%.2f'|format(p.totals.get("tracked_filament_g",0)) }} g ({{ '%.5f'|format(p.totals.get("tracked_filament_g",0) / 1000) }} kg)</div>
+                            {% if p.totals.get("unknown_weights",0) %}<div class="text-warning small">{{ p.totals.get("unknown_weights",0) }} job(s) need weight conversion</div>{% endif %}
                             {% if p.totals.filament_g and p.totals.filament_g > 0 %}
                             <div class="text-muted small">{{ "%.1f"|format(p.totals.filament_g) }} g</div>
                             {% endif %}
@@ -195,12 +198,9 @@
                                                        placeholder="optional">
                                                 <div class="text-muted small">$/hr</div>
                                             </div>
-                                            <div class="col-md-2">
-                                                <label class="form-label">Filament (override)</label>
-                                                <input type="text" class="form-control" name="filament_cost_per_kg_override"
-                                                       value="{{ p.filament_cost_per_kg_override if p.filament_cost_per_kg_override is not none else '' }}"
-                                                       placeholder="optional">
-                                                <div class="text-muted small">$/kg</div>
+                                            <div class="col-12 border rounded p-2">
+                                              {% set price_record=p.price_record %}{% set price_form='' %}{% set price_required=false %}
+                                              {% include 'partials/_filament_price_inputs.html' %}
                                             </div>
                                             <div class="col-md-2 d-flex align-items-end">
                                                 <div class="form-check mb-2">
@@ -215,10 +215,12 @@
                                         </form>
 
                                         <a class="btn btn-outline-secondary"
-                                           href="{{ url_for('recalculate_page', project=p.id) }}">
-                                            Advanced Recalculate…
+                                           href="{{ url_for('project_pricing_page', project_uid=p.id) }}">
+                                            Preview project-adjusted costs…
                                         </a>
 
+                                        <a class="btn btn-outline-secondary" href="{{ url_for('recalculate_page',project=p.id) }}">Advanced Recalculate saved history…</a>
+                                        <div class="small text-muted w-100">{{ p.adjusted_jobs }} tracked job(s) use an explicitly applied project snapshot. Other tracked jobs use saved historical costs. Manual jobs use project defaults; planned items remain hypothetical.</div>
                                         <form method="post" class="m-0">
                                             <input type="hidden" name="action" value="delete_project">
                                             <input type="hidden" name="project_id" value="{{ p.id }}">
@@ -281,10 +283,11 @@
                                   {% endif %}
                               </td>
                               <td class="text-nowrap{% if 'printer' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.printer|lower }}" data-sort-key="printer" data-col="printer">{{ j.printer }}</td>
-                              <td class="text-break{% if 'filename' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename">{{ j.filename }}</td>
+                              <td class="text-break{% if 'filename' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename"><div>{{ j.filename }}</div><small>{{ j.pricing_view }}</small>{% if j.pricing_view == 'Project-adjusted snapshot' %}<div class="small text-muted">Saved historical: ${{ '%.2f'|format(j.historical_costs.total_cost) }}</div>{% endif %}</td>
                              <td class="text-nowrap{% if 'status' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.status|lower }}" data-sort-key="status" data-col="status">{{ j.status }}</td>
                              <td class="text-end{% if 'hours' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.duration_hours or 0 }}" data-sort-key="hours" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
                              <td class="text-end text-nowrap{% if 'filament' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filament_meters or 0 }}" data-sort-key="filament" data-col="filament">
+                                                        {% if j.get('_weight_grams') is not none %}<div class="small" title="{{ j._weight_source }}">{{ '%.2f'|format(j._weight_grams) }} g · {{ j._weight_factor }} g/m</div>{% else %}<div class="small text-warning">Weight unknown</div>{% endif %}
                                                         {% if j.filament_meters %}
                                                         {{ "%.2f"|format(j.filament_meters|float) }} m
                                                         {% else %}
