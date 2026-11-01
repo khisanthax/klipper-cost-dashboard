@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.2 - 2026-11-01
+
+- Prepare and verify bash interpreter commands before Moonraker credential propagation, because uploads replace executable permissions. Add a regression smoke test for that behavior.
+
 ## v0.6.1 - 2026-11-01
 
 - Resolve effective macro definitions in Klipper's linear include/override order, retaining shadowed definitions and shared symlink semantics.

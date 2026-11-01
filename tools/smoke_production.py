@@ -72,6 +72,16 @@ def main():
                     subprocess.run(command+['--apply'],cwd=ROOT,env=env,capture_output=True,text=True,check=True)
                 assert (Path(server.config_root)/'kcd_job_start.sh').exists()
             assert len(request('/api/installer/registration')['clients'])==2
+            # Model Moonraker replacing a script with mode 0644. Its bash
+            # interpreter still executes the diagnostic and restores 0700.
+            executable=Path(mock[0].config_root)/'kcd_job_start.sh'
+            executable.chmod(0o644)
+            bin_dir=Path(tmp)/'bin';bin_dir.mkdir()
+            curl=bin_dir/'curl'
+            curl.write_text('#!'+sys.executable+'\nimport sys,urllib.request\nargs=sys.argv[1:]\nheader=next(a[1:] for a in args if a.startswith("@"))\nkey=open(header).read().split(":",1)[1].strip()\nurl=args[-1]\nrequest=urllib.request.Request(url,headers={"X-API-Key":key})\nurllib.request.urlopen(request,timeout=5).read()\n')
+            curl.chmod(0o700)
+            subprocess.run(['bash',str(executable),'--kcd-self-check'],env={**env,'PATH':str(bin_dir)+os.pathsep+os.environ['PATH']},check=True,capture_output=True)
+            assert executable.stat().st_mode & 0o777==0o700
             request('/job-start',{'printer_name':'One','filename':'test.gcode','start_time':time.time()-3600})
             request('/job-pause',{'printer_name':'One'})
             request('/job-resume',{'printer_name':'One'})
