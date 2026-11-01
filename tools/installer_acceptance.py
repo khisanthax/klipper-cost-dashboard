@@ -107,6 +107,17 @@ except RuntimeError as exc:print(str(exc))
                 assert defaults.locator('[name=rate_per_hour]').input_value()=='1.0'
                 assert defaults.locator('[name=grams_per_meter]').input_value()=='3.0'
                 page.screenshot(path=str(artifacts/(label+'.png')),full_page=True)
+            page.evaluate("document.body.style.zoom=1")
+            page.goto(base+'/settings/printers')
+            form=page.locator('form').filter(has=page.locator('input[name=printer][value=One]')).filter(has=page.locator('[name=rate_per_hour]'))
+            form.locator('[name=moonraker_url]').fill('http://127.0.0.1:1')
+            with page.expect_navigation(wait_until='domcontentloaded'):form.get_by_role('button',name='Test Moonraker',exact=True).click()
+            assert 'Moonraker test failed for One' in page.get_by_role('alert').inner_text()
+            page.screenshot(path=str(artifacts/'diagnostic-failure.png'),full_page=True)
+            form=page.locator('form').filter(has=page.locator('input[name=printer][value=One]')).filter(has=page.locator('[name=rate_per_hour]'))
+            form.locator('[name=moonraker_url]').fill(common[common.index('--moonraker')+1])
+            with page.expect_navigation(wait_until='domcontentloaded'):form.get_by_role('button',name='Test Moonraker',exact=True).click()
+            assert 'Moonraker OK for One' in page.get_by_role('alert').inner_text()
             page.goto(base+'/printer-diagnostics');assert page.locator('body').inner_text().count('One')>=1
             assert not errors,errors
         finally:

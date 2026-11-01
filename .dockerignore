@@ -8,3 +8,5 @@ tests/.tmp
 *.log
 *.backup
 **/*.kcd-backup-*
+
+browser-artifacts
