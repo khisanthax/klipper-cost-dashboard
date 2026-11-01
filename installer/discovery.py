@@ -18,7 +18,9 @@ def active_config_files(config_dir, max_files=256):
     root = Path(config_dir).resolve()
     files, errors, visiting = [], [], set()
     def visit(path, depth=0):
-        path = path.resolve()
+        # Klipper resolves includes relative to the include path, including
+        # symlink names, rather than the symlink target's parent directory.
+        path = Path(os.path.abspath(path))
         if depth > 24 or len(files) >= max_files:
             raise ValueError("Klipper include graph exceeds safe discovery limits")
         if path in visiting:
@@ -43,6 +45,37 @@ def active_config_files(config_dir, max_files=256):
         visiting.remove(path)
     visit(root / "printer.cfg")
     return files, errors
+
+
+def effective_macro_sources(config_dir):
+    """Follow Klipper's linear include/override order for each macro's gcode."""
+    active, definitions, stack = {}, [], set()
+    def visit(path, depth=0):
+        path = Path(os.path.abspath(path))
+        if path in stack or depth > 24 or len(definitions) > 2048:
+            raise ValueError("Recursive or excessive macro include graph")
+        stack.add(path)
+        buffer = []
+        def flush():
+            if not any(line.strip() for line in buffer):
+                buffer.clear(); return
+            parser = configparser.RawConfigParser(strict=False, interpolation=None, inline_comment_prefixes=(';', '#'))
+            parser.read_string('\n'.join(buffer))
+            for section in parser.sections():
+                if section.lower().startswith('gcode_macro ') and parser.has_option(section,'gcode'):
+                    name=section[len('gcode_macro '):]
+                    item={'file':str(path),'name':name,'body':parser.get(section,'gcode')}
+                    definitions.append(item);active[name.upper()]=item
+            buffer.clear()
+        for line in path.read_text(errors='replace').splitlines():
+            match=re.match(r'^\s*\[include\s+(.+?)\]\s*(?:[#;].*)?$',line,re.I)
+            if match:
+                flush()
+                for child in sorted(glob.glob(str(path.parent/match[1]))):visit(child,depth+1)
+            else:buffer.append(line)
+        flush();stack.remove(path)
+    visit(Path(config_dir)/'printer.cfg')
+    return active, definitions
 
 
 def process_instances(proc_root="/proc"):

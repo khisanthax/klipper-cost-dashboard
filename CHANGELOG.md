@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.1 - 2026-11-01
+
+- Resolve effective macro definitions in Klipper's linear include/override order, retaining shadowed definitions and shared symlink semantics.
+
 ## v0.6.0 - 2026-11-01
 
 - Unified client installation/repair around authenticated Master registration, transactional SQL identity/pricing initialization and recovered installation metadata.

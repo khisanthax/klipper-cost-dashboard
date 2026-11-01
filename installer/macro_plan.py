@@ -1,10 +1,11 @@
 """Inspect active macro hooks; preview targeted changes before explicit apply."""
 import difflib
+import configparser
 from pathlib import Path
 import re
 import tempfile
 
-from .discovery import active_config_files
+from .discovery import active_config_files, effective_macro_sources
 from core.file_io import atomic_write
 
 
@@ -12,21 +13,22 @@ def macro_plan(config_dir, filename=None, macro=None, event=None, *, apply=False
     import installer_macro as im
     root = Path(config_dir).resolve()
     files, errors = active_config_files(root)
+    if errors:
+        if filename:
+            raise ValueError("Resolve missing includes/cycles before patching")
+        return {"active_files":[str(p) for p in files],"errors":errors}
+    effective, all_definitions = effective_macro_sources(root)
     definitions = {}
-    for path in files:
-        text = path.read_text()
-        for match in re.finditer(r'^\[gcode_macro\s+([^\]]+)\]\s*\n(.*?)(?=^\[|\Z)', text, re.M | re.S):
-            definitions.setdefault(match[1].upper(), []).append({"file": str(path), "name": match[1], "body": match[2]})
+    for definition in all_definitions:
+        definitions.setdefault(definition['name'].upper(),[]).append(definition)
     duplicates = [name for name, defs in definitions.items() if len(defs) > 1]
-    summary = [{"macro": name, "file": d["file"], "hooks": sorted(set(re.findall(r'\bKCD_JOB_(?:START|CANCEL|PAUSE|RESUME)\b|CMD=send_print_cost', d["body"])))} for name, defs in definitions.items() for d in defs]
+    summary = [{"macro": name, "file": d["file"], "active":effective[name] is d, "hooks": sorted(set(re.findall(r'\bKCD_JOB_(?:START|CANCEL|PAUSE|RESUME)\b|CMD=send_print_cost', d["body"])))} for name, defs in definitions.items() for d in defs]
     if not filename:
         return {"active_files": [str(p) for p in files], "errors": errors, "duplicate_macros": duplicates, "macros": summary}
-    path = (root / filename).resolve()
-    if errors or duplicates:
-        raise ValueError("Fix missing includes or duplicate active macro definitions before patching")
+    path = Path(__import__('os').path.abspath(root / filename))
     if path not in files or path.name == "print_cost.cfg":
         raise ValueError("Choose an active user macro file; inactive alternatives are never patched")
-    defs = definitions.get(str(macro).upper(), [])
+    defs = [effective[str(macro).upper()]] if str(macro).upper() in effective else []
     if len(defs) != 1 or defs[0]["file"] != str(path) or not event:
         raise ValueError("Select one existing active macro and event; custom routines are never created automatically")
     body = defs[0]["body"]
@@ -34,8 +36,8 @@ def macro_plan(config_dir, filename=None, macro=None, event=None, *, apply=False
     if hook in body:
         return {"applied": False, "diff": "", "status": "Hook already present; no duplicate inserted"}
     # A wrapper that delegates to another hooked macro must not emit the same event.
-    for name, values in definitions.items():
-        if re.search(r'^\s*'+re.escape(name)+r'(?:\s|$)', body, re.M | re.I) and hook in values[0]["body"]:
+    for name, definition in effective.items():
+        if re.search(r'^\s*'+re.escape(name)+r'(?:\s|$)', body, re.M | re.I) and hook in definition["body"]:
             raise ValueError("Delegated macro already emits this event; refusing a duplicate hook")
     before = path.read_text()
     with tempfile.TemporaryDirectory() as tmp:
@@ -56,6 +58,7 @@ def macro_plan(config_dir, filename=None, macro=None, event=None, *, apply=False
             after = re.sub(r'^([ \t]*)'+re.escape(hook)+r'[ \t]*$',
                 lambda m: m[1]+"{% if 'gcode_macro "+hook+"' in printer %}\n"+m[1]+"    "+hook+"\n"+m[1]+"{% endif %}",after,flags=re.M)
     diff = "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True), fromfile=str(path), tofile=str(path)))
+    configparser.RawConfigParser(strict=False, interpolation=None).read_string(after)
     if apply and diff:
         atomic_write(path, after, path.stat().st_mode & 0o777)
     return {"applied": bool(apply and diff), "diff": diff, "status": message}

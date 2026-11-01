@@ -218,13 +218,29 @@ class DiscoveryTests(unittest.TestCase):
     def test_shared_pause_macro_gets_guarded_hook(self):
         from installer.macro_plan import macro_plan
         with tempfile.TemporaryDirectory() as tmp:
-            p=Path(tmp)/'printer.cfg';p.write_text('[gcode_macro PAUSE]\ngcode:\n    PAUSE_BASE\n')
+            p=Path(tmp)/'printer.cfg';p.write_text('[gcode_macro PAUSE]\nrename_existing: PAUSE_BASE\ngcode:\n    PAUSE_BASE\n')
             result=macro_plan(tmp,'printer.cfg','PAUSE','pause',apply=True)
             text=p.read_text()
             self.assertIn("{% if 'gcode_macro KCD_JOB_PAUSE' in printer %}",text)
             self.assertIn('    PAUSE_BASE',text)
             self.assertIn('{% endif %}\n',text)
+            self.assertLess(text.index('gcode:'),text.index("{% if 'gcode_macro KCD_JOB_PAUSE'"))
             self.assertFalse(macro_plan(tmp,'printer.cfg','PAUSE','pause',apply=True)['applied'])
+
+    def test_include_overrides_select_effective_definition_in_linear_order(self):
+        from installer.discovery import effective_macro_sources
+        from installer.macro_plan import macro_plan
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            (root/'printer.cfg').write_text('[include mainsail.cfg]\n[include macro.cfg]\n')
+            (root/'mainsail.cfg').write_text('[gcode_macro PAUSE]\ngcode:\n    PAUSE_BASE\n')
+            (root/'macro.cfg').write_text('[gcode_macro PAUSE]\ngcode:\n    CUSTOM_PAUSE\n')
+            active,defs=effective_macro_sources(tmp)
+            self.assertEqual(active['PAUSE']['file'],str(root/'macro.cfg'))
+            with self.assertRaises(ValueError):macro_plan(tmp,'mainsail.cfg','PAUSE','pause',apply=True)
+            macro_plan(tmp,'macro.cfg','PAUSE','pause',apply=True)
+            self.assertNotIn('KCD_JOB_PAUSE',(root/'mainsail.cfg').read_text())
+            self.assertIn('CUSTOM_PAUSE',(root/'macro.cfg').read_text())
 
     def test_old_managed_config_gains_only_missing_helper_definitions(self):
         from installer.workflow import client_plan
