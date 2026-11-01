@@ -109,7 +109,13 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
     registration = master_request(master, key, payload)
     try:
         for path, (content, mode) in plan.items():
+            if not path.resolve().is_relative_to(Path(config_dir).resolve()):
+                raise ValueError('Managed file escapes the selected config directory; repair its symlink explicitly')
             atomic_write(path, content, mode)
+            import os
+            if os.name=='posix' and os.geteuid()==0:
+                owner=Path(config_dir).stat()
+                os.chown(path,owner.st_uid,owner.st_gid)
     except OSError:
         raise RuntimeError("Master registered; client files incomplete. Private per-file backups exist. Rerun the same repair; no history was moved") from None
     if not registration.get("readiness", {}).get("ready"):
