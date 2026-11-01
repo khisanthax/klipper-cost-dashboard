@@ -261,6 +261,8 @@ class SqlOnlyPrinterLifecycleTests(unittest.TestCase):
                 "Reactivate Me",
                 "http://reactivated.local",
                 external_id="new-client",
+                relocate=True,
+                reactivate=True,
             )
         )
         self.assertIn("Reactivate Me", get_canonical_printer_names())
@@ -276,7 +278,7 @@ class SqlOnlyPrinterLifecycleTests(unittest.TestCase):
         self.assertEqual(history["printer_id"], original_id)
         self.assertEqual(printer["moonraker_url"], "http://reactivated.local")
         self.assertEqual(printer["external_id"], "new-client")
-        self.assertFalse(check_sql_only_readiness()["ready"])
+        self.assertTrue(check_sql_only_readiness()["ready"])
 
         with self.db_module.connect_db() as conn:
             self._save_setting(

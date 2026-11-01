@@ -446,17 +446,19 @@ def ensure_api_key(secret_file=None, data_dir=None):
                 existing_key = data.get("api_key")
                 if existing_key:
                     # Key exists - use it (don't regenerate)
+                    os.chmod(secret_file, 0o600)
                     return existing_key
         except Exception:
             # File exists but is corrupted - don't overwrite, let installer fix it
-            pass
+            return None
+        return None
     
     # File doesn't exist - only generate on first-time setup
     # This should normally be done by the installer, but we provide a fallback
     key = secrets.token_hex(16)
     try:
-        with open(secret_file, "w") as f:
-            json.dump({"api_key": key}, f, indent=2)
+        from core.file_io import atomic_write
+        atomic_write(secret_file, json.dumps({"api_key": key}, indent=2), backup=False)
         return key
     except Exception:
         return None

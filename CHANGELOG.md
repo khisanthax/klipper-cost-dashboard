@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.6.0 - 2026-11-01
+
+- Unified client installation/repair around authenticated Master registration, transactional SQL identity/pricing initialization and recovered installation metadata.
+- Added bounded Klipper instance discovery, Moonraker identity deduplication and config-root validation from the Master network.
+- Added active-include macro inspection, dry-run diffs and targeted, idempotent integration.
+- Preserved live SQL jobs across restarts; retained live state on failed cancellation; fixed SQL duplicate cancellation and completion retries.
+- Removed the tracked API credential, masked prompts, secured generated scripts/backups and added recoverable coordinated key rotation.
+- Replaced Flask's development server with Waitress; pinned/audited dependencies and gated multi-architecture image publication on release validation.
+- Added production audit, recovery/rollback instructions and regression coverage.
+
 ## v0.5.1 - 2026-08-23
 
 ### Fixed

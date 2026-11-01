@@ -10,7 +10,7 @@ except ImportError:  # pragma: no cover
 from core.storage import ensure_api_key
 
 # Directories and files
-DATA_DIR = "data"
+DATA_DIR = os.environ.get("KCD_DATA_DIR", "data")
 CSV_FILE = os.path.join(DATA_DIR, "print_costs.csv")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 CSV_EXAMPLE_FILE = os.path.join(DATA_DIR, "print_costs.example.csv")

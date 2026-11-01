@@ -60,3 +60,9 @@ tests/.tmp/
 
 
 /data/settings.local.json.CONFLICT_*
+
+data/secret.json
+audit-*.log
+audit-dependencies.json
+*.kcd-backup-*
+.worktrees/

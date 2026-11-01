@@ -11,6 +11,8 @@ import os
 import json
 import re
 import secrets
+import getpass
+import shlex
 import tempfile
 import shutil
 import sys
@@ -22,9 +24,11 @@ import urllib.error
 from contextlib import closing
 from typing import Any, Dict, List, Optional, Tuple
 from . import remote as r
+from core.file_io import atomic_write
+from core.sql_only import is_sql_only
 import installer_macro
 
-from core.config import DATA_DIR, SETTINGS_FILE, CSV_FILE
+from core.config import DATA_DIR, SETTINGS_FILE, CSV_FILE, DEFAULT_PRICING
 from core.storage import (
     load_state as _load_state_key,
     save_state as _save_state_key,
@@ -101,24 +105,11 @@ def _ensure_sql_capable(import_from_csv: bool = False) -> bool:
         return False
 
 
-def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Optional[str] = None) -> bool:
+def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Optional[str] = None, *, relocate=False, reactivate=False) -> bool:
     try:
         from core import db as db_module
-        from core import printer_lifecycle
-        with closing(db_module.connect_db()) as conn:
-            db_module.apply_migrations(conn)
-            existing = conn.execute("SELECT id FROM printers WHERE name = ?", (printer_name,)).fetchone()
-        if existing:
-            printer_lifecycle.reactivate_printer(
-                printer_name,
-                moonraker_url=moonraker_url,
-                external_id=external_id,
-            )
-        else:
-            with closing(db_module.connect_db()) as conn:
-                db_module.apply_migrations(conn)
-                db_module.upsert_printer(conn, printer_name, moonraker_url, external_id=external_id)
-                conn.commit()
+        from core.registration import register_printer
+        register_printer(printer_name, moonraker_url, external_id=external_id, relocate=relocate, reactivate=reactivate)
         return True
     except Exception as e:
         println(f"WARNING: failed to sync printer to SQL: {e}")
@@ -130,12 +121,11 @@ def _sync_printer_to_sql(printer_name: str, moonraker_url: str, external_id: Opt
 # ----------------------------------------------------------------------
 
 def _mask_secret(value: str) -> str:
-    raw = str(value or "")
-    if not raw:
-        return ""
-    if len(raw) <= 8:
-        return raw[0:1] + "***"
-    return raw[:4] + "..." + raw[-4:]
+    return "[configured]" if value else "[not set]"
+
+
+def prompt_secret(label, default=""):
+    return getpass.getpass(f"{label} ({'Enter keeps configured key' if default else 'required'}): ").strip() or default
 
 
 def println(msg: str = "") -> None:
@@ -259,7 +249,7 @@ def _venv_paths(root_dir: str) -> Tuple[str, str, str]:
 
 def _installer_runtime_backends(sql_enabled: bool) -> Tuple[str, str]:
     """Return the supported installer write/read backend pair."""
-    return ("dual", "auto") if sql_enabled else ("csv", "csv")
+    return ("sql", "sql") if is_sql_only() else (("dual", "auto") if sql_enabled else ("csv", "csv"))
 
 
 def _render_systemd_service(
@@ -273,7 +263,9 @@ def _render_systemd_service(
 ) -> str:
     storage_backend = str(storage_backend or "").strip().lower()
     reports_backend = str(reports_backend or "").strip().lower()
-    if (storage_backend, reports_backend) not in {("csv", "csv"), ("dual", "auto")}:
+    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", service_name) or not 0 < int(port) < 65536:
+        raise ValueError("Invalid service name or port")
+    if (storage_backend, reports_backend) not in {("csv", "csv"), ("dual", "auto"), ("sql", "sql")}:
         raise ValueError(
             "installer service requires storage/reports backends csv/csv or dual/auto"
         )
@@ -284,6 +276,7 @@ def _render_systemd_service(
         "Environment=FLASK_APP=app.py",
         f"Environment=KCD_STORAGE_BACKEND={storage_backend}",
         f"Environment=KCD_REPORTS_BACKEND={reports_backend}",
+        'Environment="KCD_DATA_DIR=' + str(DATA_DIR).replace('%','%%').replace('"','\\"') + '"',
     ]
     unit = [
         "[Unit]",
@@ -299,7 +292,7 @@ def _render_systemd_service(
     unit.extend(env_lines)
     unit.extend(
         [
-            f"ExecStart={venv_python} -m flask run --host 0.0.0.0 --port {port}",
+            f"ExecStart={venv_python} -m kcd.server --port {port}",
             "Restart=always",
             "RestartSec=3",
             "",
@@ -568,29 +561,10 @@ def _autodetect_moonraker_local() -> List[str]:
     Auto-detect Moonraker on the local machine / docker-host only.
     No LAN scan.
     """
-    hosts = [
-        "127.0.0.1",
-        "localhost",
-        "host.docker.internal",
-        "172.17.0.1",
-    ]
-    ports = [7125, 7126, 7127]
-    found: List[str] = []
-    for h in hosts:
-        for p in ports:
-            url = f"http://{h}:{p}"
-            ok, _ = test_moonraker_url(url, timeout_s=4.0)
-            if ok:
-                found.append(url)
-    # De-dupe while preserving order
-    seen = set()
-    unique = []
-    for u in found:
-        if u in seen:
-            continue
-        seen.add(u)
-        unique.append(u)
-    return unique
+    from .discovery import discover_local, discover_endpoints
+    candidates = discover_local()
+    ports = [c["moonraker_port"] for c in candidates if c["moonraker_port"]]
+    return [p["url"] for p in discover_endpoints(ports)]
 
 
 def _configure_moonraker_url_local(printer_name: str) -> Optional[str]:
@@ -722,10 +696,28 @@ def prompt_choice(prompt: str, valid, allow_empty: bool = False, cancel_inputs: 
 
 
 def load_state(key: str, default: Any = "") -> Any:
+    if key == "api_key":
+        return _load_secret_api_key() or default
+    if is_sql_only():
+        from core.storage import _load_user_settings_sql
+        return (_load_user_settings_sql("installer_metadata") or {}).get(key, default)
     return _load_state_key(STATE_FILE, key, default)
 
 
 def save_state(key: str, value: Any) -> None:
+    if key == "api_key":
+        # Installer metadata is never a second authority for credentials.
+        return
+    if is_sql_only():
+        from core.printer_lifecycle import _load_setting, _save_setting
+        from core import db
+        with db.connect_db() as conn:
+            db.apply_migrations(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            state = _load_setting(conn, "installer_metadata")
+            state[key] = value
+            _save_setting(conn, "installer_metadata", state)
+        return
     _save_state_key(STATE_FILE, DATA_DIR, key, value)
 
 
@@ -734,14 +726,19 @@ def save_state(key: str, value: Any) -> None:
 # ----------------------------------------------------------------------
 
 def get_client_registry() -> List[Dict[str, Any]]:
-    registry = _load_state_key(STATE_FILE, "clients", [])
+    if is_sql_only():
+        from core.registration import registered_clients
+        registry = load_state("clients", [])
+        by_name = {c["printer_name"]: c for c in registry if isinstance(c, dict) and c.get("printer_name")}
+        return [{**by_name.get(c["printer_name"], {}), **c} for c in registered_clients()]
+    registry = load_state("clients", [])
     if not isinstance(registry, list):
         return []
     return [c for c in registry if isinstance(c, dict)]
 
 
 def _set_client_registry(clients: List[Dict[str, Any]]) -> None:
-    _save_state_key(STATE_FILE, DATA_DIR, "clients", clients)
+    save_state("clients", clients)
 
 
 def register_client(entry: Dict[str, Any]) -> None:
@@ -1016,8 +1013,18 @@ def generate_job_start_script(master_url: str, api_key: str) -> str:
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
-MASTER_URL="{master_url}"
-API_KEY="{api_key}"
+MASTER_URL={shlex.quote(master_url)}
+API_KEY={shlex.quote(api_key)}
+
+if [ "${{1:-}}" = "--kcd-self-check" ]; then
+  for script in "$(dirname "${{BASH_SOURCE[0]}}")"/kcd_job_*.sh "$(dirname "${{BASH_SOURCE[0]}}")"/send_print_cost.sh; do
+    [ ! -f "$script" ] || chmod 700 "$script"
+  done
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+    -H @<(printf 'X-API-Key: %s\n' "$API_KEY") "$MASTER_URL/api/installer/registration" >/dev/null
+  echo "KCD credential verification passed"
+  exit 0
+fi
 
 PARAMS="${{*:-}}"
 IFS='|' read -r PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT <<< "$PARAMS"
@@ -1026,7 +1033,6 @@ FILENAME="${{FILENAME:-}}"
 EST_DURATION="${{EST_DURATION:-0}}"
 EST_FILAMENT="${{EST_FILAMENT:-0}}"
 
-echo "KCD_JOB_START DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' EST_DURATION='$EST_DURATION' EST_FILAMENT='$EST_FILAMENT'"
 
 export PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT
 
@@ -1051,9 +1057,9 @@ print(json.dumps(data))
 PY
 )
 
-curl -s -X POST "$MASTER_URL/job-start" \\
+curl --fail --silent --show-error --connect-timeout 3 --max-time 10 -X POST "$MASTER_URL/job-start" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: $API_KEY" \\
+  -H @<(printf 'X-API-Key: %s\n' "$API_KEY") \\
   -d "$JSON"
 """
 
@@ -1062,8 +1068,18 @@ def generate_job_cancel_script(master_url: str, api_key: str) -> str:
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
-MASTER_URL="{master_url}"
-API_KEY="{api_key}"
+MASTER_URL={shlex.quote(master_url)}
+API_KEY={shlex.quote(api_key)}
+
+if [ "${{1:-}}" = "--kcd-self-check" ]; then
+  for script in "$(dirname "${{BASH_SOURCE[0]}}")"/kcd_job_*.sh "$(dirname "${{BASH_SOURCE[0]}}")"/send_print_cost.sh; do
+    [ ! -f "$script" ] || chmod 700 "$script"
+  done
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+    -H @<(printf 'X-API-Key: %s\n' "$API_KEY") "$MASTER_URL/api/installer/registration" >/dev/null
+  echo "KCD credential verification passed"
+  exit 0
+fi
 
 PARAMS="${{*:-}}"
 IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS <<< "$PARAMS"
@@ -1071,7 +1087,6 @@ PRINTER_NAME="${{PRINTER_NAME:-}}"
 FILENAME="${{FILENAME:-}}"
 ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
 
-echo "KCD_JOB_CANCEL DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS'"
 
 export PRINTER_NAME FILENAME ELAPSED_SECONDS
 
@@ -1095,9 +1110,9 @@ print(json.dumps(data))
 PY
 )
 
-curl -s -X POST "$MASTER_URL/job-cancel" \\
+curl --fail --silent --show-error --connect-timeout 3 --max-time 10 -X POST "$MASTER_URL/job-cancel" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: $API_KEY" \\
+  -H @<(printf 'X-API-Key: %s\n' "$API_KEY") \\
   -d "$JSON"
 """
 
@@ -1106,8 +1121,18 @@ def generate_job_pause_script(master_url: str, api_key: str) -> str:
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
-MASTER_URL="{master_url}"
-API_KEY="{api_key}"
+MASTER_URL={shlex.quote(master_url)}
+API_KEY={shlex.quote(api_key)}
+
+if [ "${{1:-}}" = "--kcd-self-check" ]; then
+  for script in "$(dirname "${{BASH_SOURCE[0]}}")"/kcd_job_*.sh "$(dirname "${{BASH_SOURCE[0]}}")"/send_print_cost.sh; do
+    [ ! -f "$script" ] || chmod 700 "$script"
+  done
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+    -H @<(printf 'X-API-Key: %s\n' "$API_KEY") "$MASTER_URL/api/installer/registration" >/dev/null
+  echo "KCD credential verification passed"
+  exit 0
+fi
 
 PARAMS="${{*:-}}"
 IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS REASON <<< "$PARAMS"
@@ -1116,7 +1141,6 @@ FILENAME="${{FILENAME:-}}"
 ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
 REASON="${{REASON:-}}"
 
-echo "KCD_JOB_PAUSE DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS' REASON='$REASON'"
 
 export PRINTER_NAME FILENAME ELAPSED_SECONDS REASON
 
@@ -1141,9 +1165,9 @@ print(json.dumps(data))
 PY
 )
 
-curl -s -X POST "$MASTER_URL/job-pause" \\
+curl --fail --silent --show-error --connect-timeout 3 --max-time 10 -X POST "$MASTER_URL/job-pause" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: $API_KEY" \\
+  -H @<(printf 'X-API-Key: %s\n' "$API_KEY") \\
   -d "$JSON"
 """
 
@@ -1152,8 +1176,18 @@ def generate_job_resume_script(master_url: str, api_key: str) -> str:
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
-MASTER_URL="{master_url}"
-API_KEY="{api_key}"
+MASTER_URL={shlex.quote(master_url)}
+API_KEY={shlex.quote(api_key)}
+
+if [ "${{1:-}}" = "--kcd-self-check" ]; then
+  for script in "$(dirname "${{BASH_SOURCE[0]}}")"/kcd_job_*.sh "$(dirname "${{BASH_SOURCE[0]}}")"/send_print_cost.sh; do
+    [ ! -f "$script" ] || chmod 700 "$script"
+  done
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+    -H @<(printf 'X-API-Key: %s\n' "$API_KEY") "$MASTER_URL/api/installer/registration" >/dev/null
+  echo "KCD credential verification passed"
+  exit 0
+fi
 
 PARAMS="${{*:-}}"
 IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS <<< "$PARAMS"
@@ -1161,7 +1195,6 @@ PRINTER_NAME="${{PRINTER_NAME:-}}"
 FILENAME="${{FILENAME:-}}"
 ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
 
-echo "KCD_JOB_RESUME DEBUG: PARAMS='$PARAMS' PRINTER_NAME='$PRINTER_NAME' FILENAME='$FILENAME' ELAPSED_SECONDS='$ELAPSED_SECONDS'"
 
 export PRINTER_NAME FILENAME ELAPSED_SECONDS
 
@@ -1185,9 +1218,9 @@ print(json.dumps(data))
 PY
 )
 
-curl -s -X POST "$MASTER_URL/job-resume" \\
+curl --fail --silent --show-error --connect-timeout 3 --max-time 10 -X POST "$MASTER_URL/job-resume" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: $API_KEY" \\
+  -H @<(printf 'X-API-Key: %s\n' "$API_KEY") \\
   -d "$JSON"
 """
 
@@ -1196,8 +1229,18 @@ def generate_job_end_script(master_url: str, api_key: str) -> str:
     return f"""#!/usr/bin/env bash
 set -euo pipefail
 
-MASTER_URL="{master_url}"
-API_KEY="{api_key}"
+MASTER_URL={shlex.quote(master_url)}
+API_KEY={shlex.quote(api_key)}
+
+if [ "${{1:-}}" = "--kcd-self-check" ]; then
+  for script in "$(dirname "${{BASH_SOURCE[0]}}")"/kcd_job_*.sh "$(dirname "${{BASH_SOURCE[0]}}")"/send_print_cost.sh; do
+    [ ! -f "$script" ] || chmod 700 "$script"
+  done
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
+    -H @<(printf 'X-API-Key: %s\n' "$API_KEY") "$MASTER_URL/api/installer/registration" >/dev/null
+  echo "KCD credential verification passed"
+  exit 0
+fi
 
 TS=$(date +%s)
 PARAMS="${{*:-}}"
@@ -1216,7 +1259,7 @@ if [ -z "$PYBIN" ]; then
 fi
 
 JSON=$("$PYBIN" - <<'PY'
-import json, os, time
+import json, os, time, uuid
 def to_float(v):
     try: return float(v)
     except: return 0.0
@@ -1224,6 +1267,8 @@ def to_ts(v):
     try: return float(v)
     except: return time.time()
 data = {{
+    "event_id": str(uuid.uuid4()),
+    "duration_basis": "active",
     "timestamp": to_ts(os.environ.get("TS", "")),
     "printer": os.environ.get("PRINTER", ""),
     "filename": os.environ.get("FILENAME", ""),
@@ -1234,18 +1279,16 @@ print(json.dumps(data))
 PY
 )
 
-curl -s -X POST "$MASTER_URL/log-print" \\
+curl --fail --silent --show-error --retry 2 --retry-delay 1 --connect-timeout 2 --max-time 4 -X POST "$MASTER_URL/log-print" \\
   -H "Content-Type: application/json" \\
-  -H "X-API-Key: $API_KEY" \\
+  -H @<(printf 'X-API-Key: %s\n' "$API_KEY") \\
   -d "$JSON"
 """
 
 
 def write_script(path: str, content: str) -> bool:
     try:
-        with open(path, "w") as f:
-            f.write(content)
-        os.chmod(path, 0o755)
+        atomic_write(path, content, 0o700)
         return True
     except Exception as e:
         println(f"Failed to write script {path}: {e}")
@@ -1333,6 +1376,9 @@ def _load_secret_api_key() -> str:
 
 def master_setup(master_and_client: bool = False) -> None:
     println("\n=== Master Setup ===")
+    if os.environ.get("KCD_MASTER_CONTAINER"):
+        println("Docker Master already owns this data directory. Upgrade its image with Docker; source-service installation is blocked to prevent two Masters.")
+        return
 
     auto_mode = prompt_yes_no("Use auto mode (reuse saved master settings)?", default=True)
 
@@ -1343,7 +1389,7 @@ def master_setup(master_and_client: bool = False) -> None:
 
     state_api = load_state("api_key", "")
     secret_api = _load_secret_api_key()
-    default_api = state_api or secret_api or secrets.token_hex(16)
+    default_api = secret_api or state_api or secrets.token_hex(16)
 
     host = current_host
     port_str = current_port
@@ -1363,7 +1409,7 @@ def master_setup(master_and_client: bool = False) -> None:
         url_default = current_url or f"http://{host}:{port_str}"
         url = _safe_input(f"Master URL [{url_default}]: ").strip() or url_default
         service_name = _safe_input(f"Service name [{current_service}]: ").strip() or current_service
-        api_key = _safe_input(f"API key for printers [{default_api}]: ").strip() or default_api
+        println("Using the configured Master credential. Use tools/rotate_api_key.py for synchronized rotation.")
 
     try:
         port = int(port_str)
@@ -1443,376 +1489,70 @@ def master_setup(master_and_client: bool = False) -> None:
 
 
 def install_client_local() -> None:
-    println("\n=== Local Client Installation ===")
-
-    auto_mode = prompt_yes_no("Use auto mode (reuse saved settings and printer dir)?", default=True)
-
-    master_url = load_state("master_url", "http://localhost:5000")
-    state_api = load_state("api_key", "")
-    secret_api = _load_secret_api_key()
-    default_api = state_api or secret_api or secrets.token_hex(16)
-
-    saved_printer = load_state("printer_name", "")
-    last_dir = load_state("printer_dir", "")
-    default_dir = last_dir or "/home/pi/printer_data/config"
-
-    printer_name = saved_printer
-    printer_dir = default_dir
-    api_key = default_api
-
-    if auto_mode:
-        if not (master_url and api_key and printer_name and printer_dir and os.path.isdir(printer_dir)):
-            println("[auto] Saved settings incomplete; switching to manual input.")
-            auto_mode = False
-    if not auto_mode:
-        master_url = _safe_input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
-        api_key = _safe_input(f"API key for this printer [{default_api}]: ").strip() or default_api
-
-        printer_name = _safe_input("Printer name for dashboard (e.g., SV08): ").strip()
-        if not printer_name:
-            println("Printer name is required; aborting.")
+    from .discovery import discover_local
+    from .workflow import repair_client
+    candidates = discover_local()
+    println("\n=== Local client installation / repair ===")
+    for index, candidate in enumerate(candidates, 1):
+        println(f"  {index}) {candidate['config_dir']} [{candidate['classification']}] identity={candidate['printer_name'] or 'unset'} port={candidate['moonraker_port'] or 'unknown'}")
+    println("  0) Enter a custom directory")
+    selected = prompt_choice("Select configuration: ", range(len(candidates)+1))
+    candidate = candidates[selected-1] if selected else {}
+    directory = candidate.get("config_dir") or _safe_input("Config directory containing printer.cfg: ").strip()
+    existing_name = candidate.get("printer_name", "")
+    name = _safe_input(f"Printer identity [{existing_name}]: ").strip() or existing_name
+    if not name:
+        println("Identity is required. A clone must use its own identity; relocation keeps the existing identity.")
+        return
+    master_default = load_state("master_url", os.environ.get("KCD_MASTER_URL", "http://localhost:5000"))
+    master = _safe_input(f"Master URL reachable by printer [{master_default}]: ").strip() or master_default
+    key = prompt_secret("Master API key", _load_secret_api_key())
+    moonraker = _configure_moonraker_url_local(name)
+    if not moonraker:
+        return
+    relocate = prompt_yes_no("Relocating the SAME printer / correcting its endpoint while preserving history?", default=False)
+    reactivate = prompt_yes_no("Explicitly reactivate a retired printer?", default=False)
+    try:
+        preview = repair_client(directory, name, moonraker, master, key, relocate=relocate, reactivate=reactivate)
+        println(json.dumps(preview, indent=2))
+        if not prompt_yes_no("Apply this client repair?", default=False):
             return
-
-        printer_dir = _safe_input(
-            f"Printer config directory (folder with printer.cfg) [{default_dir}]: "
-        ).strip() or default_dir
-        if not os.path.isdir(printer_dir):
-            println(f"Directory does not exist: {printer_dir}")
-            return
-    else:
-        println(f"[auto] Using saved master URL: {master_url}")
-        println(f"[auto] Using printer: {printer_name}")
-        println(f"[auto] Using config dir: {printer_dir}")
-
-    moonraker_url = _configure_moonraker_url_local(printer_name)
-    if not moonraker_url:
-        println("Moonraker URL setup cancelled; aborting local client install.")
-        return
-
-    ok, cfg_path = make_print_cost_cfg(printer_dir, printer_name)
-    if not ok:
-        println("Failed to create print_cost.cfg; aborting.")
-        return
-    if auto_mode:
-        println(f"[auto] Wrote print_cost.cfg to {cfg_path}")
-
-    job_start_script = generate_job_start_script(master_url, api_key)
-    job_cancel_script = generate_job_cancel_script(master_url, api_key)
-    job_pause_script = generate_job_pause_script(master_url, api_key)
-    job_resume_script = generate_job_resume_script(master_url, api_key)
-    end_script = generate_job_end_script(master_url, api_key)
-
-    job_start_path = os.path.join(printer_dir, "kcd_job_start.sh")
-    job_cancel_path = os.path.join(printer_dir, "kcd_job_cancel.sh")
-    job_pause_path = os.path.join(printer_dir, "kcd_job_pause.sh")
-    job_resume_path = os.path.join(printer_dir, "kcd_job_resume.sh")
-    end_script_path = os.path.join(printer_dir, "send_print_cost.sh")
-
-    if not write_script(job_start_path, job_start_script):
-        println("Failed to write kcd_job_start.sh; aborting.")
-        return
-    if not write_script(job_cancel_path, job_cancel_script):
-        println("Failed to write kcd_job_cancel.sh; aborting.")
-        return
-    if not write_script(job_pause_path, job_pause_script):
-        println("Failed to write kcd_job_pause.sh; aborting.")
-        return
-    if not write_script(job_resume_path, job_resume_script):
-        println("Failed to write kcd_job_resume.sh; aborting.")
-        return
-    if not write_script(end_script_path, end_script):
-        println("Failed to write send_print_cost.sh; aborting.")
-        return
-    if auto_mode:
-        println(f"[auto] Wrote kcd_job_start.sh to {job_start_path}")
-        println(f"[auto] Wrote kcd_job_cancel.sh to {job_cancel_path}")
-        println(f"[auto] Wrote kcd_job_pause.sh to {job_pause_path}")
-        println(f"[auto] Wrote kcd_job_resume.sh to {job_resume_path}")
-        println(f"[auto] Wrote send_print_cost.sh to {end_script_path}")
-
-    _ensure_include_in_printer_cfg(printer_dir, "print_cost.cfg")
-    if auto_mode:
-        println("[auto] Checked [include print_cost.cfg] in printer.cfg")
-
-    try:
-        installer_macro.run_macro_integration(printer_name, printer_dir)
-    except Exception as e:
-        println(f"WARNING: Macro integration wizard failed: {e}")
-        println("You may need to add KCD blocks to your macros manually.")
-        _emit_system_event(
-            "warning",
-            "Manual action required (installer)",
-            "Macro integration failed; you may need to add KCD blocks to PRINT_START/END_PRINT manually.",
-            meta={"action": "install_client_local", "printer": printer_name},
-        )
-
-    save_state("master_url", master_url)
-    save_state("api_key", api_key)
-    save_state("printer_dir", printer_dir)
-    save_state("script_path", end_script_path)
-    save_state("printer_name", printer_name)
-
-    # Persist per-printer Moonraker URL for thumbnail fetching (critical for Docker installs).
-    try:
-        s = load_settings(SETTINGS_FILE)
-        if not isinstance(s, dict):
-            s = {}
-        if printer_name not in s or not isinstance(s.get(printer_name), dict):
-            s[printer_name] = {}
-        s[printer_name]["moonraker_url"] = moonraker_url
-        save_settings(SETTINGS_FILE, DATA_DIR, s)
-        if auto_mode:
-            println(f"[auto] Saved Moonraker URL for {printer_name}: {moonraker_url}")
-    except Exception as e:
-        println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
-
-    try:
-        sql_state = _detect_sql_state()
-        if moonraker_url and sql_state.get("status") in ("sql_capable",):
-            if _sync_printer_to_sql(printer_name, moonraker_url):
-                println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
-        elif moonraker_url and sql_state.get("status") == "sql_needs_migration":
-            if _ensure_sql_capable(import_from_csv=False):
-                if _sync_printer_to_sql(printer_name, moonraker_url):
-                    println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
-    except Exception as e:
-        println(f"WARNING: failed to sync printer to SQL: {e}")
-
-    register_client({
-        "type": "local",
-        "printer_name": printer_name,
-        "cfg_dir": printer_dir,
-        "script_path": end_script_path,
-        "moonraker_url": moonraker_url,
-    })
-
-    println("\nLocal client installation complete.")
-    println(f"  Printer: {printer_name}")
-    println(f"  Config dir: {printer_dir}")
-    println(f"  print_cost.cfg: {cfg_path}")
-    println(f"  Job-start script: {job_start_path}")
-    println(f"  Job-cancel script: {job_cancel_path}")
-    println(f"  Job-pause script: {job_pause_path}")
-    println(f"  Job-resume script: {job_resume_path}")
-    println(f"  Cost script: {end_script_path}")
+        result = repair_client(directory, name, moonraker, master, key, apply=True, relocate=relocate, reactivate=reactivate)
+        save_state("master_url", master)
+        println(json.dumps(result, indent=2))
+        println("Inspect active macro hooks with: python3 install.py macro-plan --config-dir " + shlex.quote(directory))
+    except (ValueError, RuntimeError, OSError) as exc:
+        println(f"Client install/repair failed: {exc}")
 
 
 def install_client_remote() -> None:
-    """
-    Install a remote Klipper client over SSH.
-    """
-    println("\n=== Remote Client Installation ===")
-
-    auto_mode = prompt_yes_no(
-        "Use auto mode (use saved master settings and known remote printers)?", default=True
-    )
-
-    master_url = load_state("master_url", "http://localhost:5000")
-    state_api = load_state("api_key", "")
-    secret_api = _load_secret_api_key()
-    default_api = state_api or secret_api or secrets.token_hex(16)
-
-    if auto_mode and master_url and default_api:
-        println(f"[auto] Using saved master URL: {master_url}")
-        api_key = default_api
-    else:
-        if auto_mode and (not master_url or not default_api):
-            println("[auto] Saved master URL/API missing; falling back to manual entry.")
-        auto_mode = False
-        println(f"Current master URL: {master_url}")
-        master_url = _safe_input(f"Master URL for dashboard [{master_url}]: ").strip() or master_url
-        api_key = _safe_input(f"API key for this printer [{default_api}]: ").strip() or default_api
-
-    remote = ""
-    printer_name = ""
-    printer_dir = ""
-    default_moonraker = ""
-
-    registry = get_client_registry()
-    remote_clients = [c for c in registry if c.get("type") == "remote"]
-
-    if auto_mode and remote_clients:
-        println("\n[auto] Registered remote printers:")
-        for i, c in enumerate(remote_clients, 1):
-            println(f"  {i}) {c.get('printer_name')} @ {c.get('host')} ({c.get('config_dir')})")
-        choice = prompt_choice(
-            f"Select printer to install/update [1-{len(remote_clients)}] or press Enter to cancel auto mode: ",
-            range(1, len(remote_clients) + 1),
-            allow_empty=True,
-        )
-        if choice:
-            entry = remote_clients[choice - 1]
-            remote = entry.get("host", "")
-            printer_name = entry.get("printer_name", "")
-            printer_dir = entry.get("config_dir", "")
-            default_moonraker = entry.get("moonraker_url", "")
-        else:
-            auto_mode = False
-    elif auto_mode:
-        println("[auto] No registered remote printers found; falling back to manual setup.")
-        auto_mode = False
-
-    if not auto_mode:
-        remote = _safe_input("Remote host (user@hostname): ").strip()
-        if not remote:
-            println("Remote host is required; aborting.")
-            return
-
-        printer_name = _safe_input("Printer name for dashboard (e.g., SV08): ").strip()
-        if not printer_name:
-            println("Printer name is required; aborting.")
-            return
-
-
-    if not printer_dir:
-        candidates: list[str] = []
-        try:
-            candidates = r.remote_find_printer_data(remote)
-        except Exception as e:
-            println(f"WARNING: Failed to scan remote for printer_data dirs: {e}")
-
-        if candidates:
-            if auto_mode:
-                println("[auto] Scanning remote for printer_data directories...")
-            println("\nFound the following remote printer_data/config candidates:")
-            for i, path in enumerate(candidates, 1):
-                println(f"  {i}) {path}")
-            valid_range = list(range(1, len(candidates) + 1))
-            while True:
-                choice = _safe_input(
-                    f"Select [1-{len(candidates)}] or enter a custom path: "
-                ).strip()
-                if choice == "":
-                    printer_dir = candidates[0]
-                    break
-                if choice.isdigit():
-                    idx = int(choice)
-                    if idx in valid_range:
-                        printer_dir = candidates[idx - 1]
-                        break
-                    println(
-                        f"That's not an option. Please choose {_format_valid_options(valid_range)}."
-                    )
-                    continue
-                printer_dir = choice
-                break
-        else:
-            printer_dir = _safe_input("Remote printer config dir (folder with printer.cfg): ").strip()
-
-    if not printer_dir:
-        println("No remote config directory provided; aborting.")
-        return
-
-    moonraker_url = _configure_moonraker_url_remote(printer_name, default_moonraker)
-    if not moonraker_url:
-        println("Moonraker URL not set; thumbnails will be disabled until configured.")
-
-    remote_cfg_path = os.path.join(printer_dir, "print_cost.cfg")
-    remote_job_start = os.path.join(printer_dir, "kcd_job_start.sh")
-    remote_job_cancel = os.path.join(printer_dir, "kcd_job_cancel.sh")
-    remote_job_pause = os.path.join(printer_dir, "kcd_job_pause.sh")
-    remote_job_resume = os.path.join(printer_dir, "kcd_job_resume.sh")
-    remote_end_script = os.path.join(printer_dir, "send_print_cost.sh")
-    remote_printer_cfg = os.path.join(printer_dir, "printer.cfg")
-
-    cfg_text = _render_print_cost_cfg(printer_dir, printer_name)
-    job_start_script = generate_job_start_script(master_url, api_key)
-    job_cancel_script = generate_job_cancel_script(master_url, api_key)
-    job_pause_script = generate_job_pause_script(master_url, api_key)
-    job_resume_script = generate_job_resume_script(master_url, api_key)
-    end_script = generate_job_end_script(master_url, api_key)
-
-    ok1 = r.remote_write_file(remote, remote_cfg_path, cfg_text, mode=0o644)
-    ok2 = r.remote_write_file(remote, remote_job_start, job_start_script, mode=0o755)
-    ok3 = r.remote_write_file(remote, remote_job_cancel, job_cancel_script, mode=0o755)
-    ok4 = r.remote_write_file(remote, remote_job_pause, job_pause_script, mode=0o755)
-    ok5 = r.remote_write_file(remote, remote_job_resume, job_resume_script, mode=0o755)
-    ok6 = r.remote_write_file(remote, remote_end_script, end_script, mode=0o755)
-
-    if not (ok1 and ok2 and ok3 and ok4 and ok5 and ok6):
-        println("ERROR: Failed to write one or more files on the remote host; aborting.")
-        return
-    if auto_mode:
-        println(f"[auto] Deployed print_cost.cfg to {remote_cfg_path}")
-        println(f"[auto] Deployed kcd_job_start.sh to {remote_job_start}")
-        println(f"[auto] Deployed kcd_job_cancel.sh to {remote_job_cancel}")
-        println(f"[auto] Deployed kcd_job_pause.sh to {remote_job_pause}")
-        println(f"[auto] Deployed kcd_job_resume.sh to {remote_job_resume}")
-        println(f"[auto] Deployed send_print_cost.sh to {remote_end_script}")
-
-    include_line = "[include print_cost.cfg]"
-    if not r.remote_append_line_if_missing(remote, remote_printer_cfg, include_line):
-        println("WARNING: Failed to ensure include line in remote printer.cfg; please check manually.")
-        _emit_system_event(
-            "warning",
-            "Manual action required (remote installer)",
-            "Could not ensure [include print_cost.cfg] on the remote printer.cfg. Please verify it manually.",
-            meta={"action": "install_client_remote", "printer": printer_name, "host": remote, "config_dir": printer_dir},
-        )
-    elif auto_mode:
-        println("[auto] Verified [include print_cost.cfg] in printer.cfg.")
-
+    from .remote_workflow import remote_operation
+    println("\n=== Remote client installation / repair ===")
+    host = _safe_input("SSH alias or user@host: ").strip()
     try:
-        run_remote_macro_integration(printer_name, remote, printer_dir)
-    except Exception as e:
-        println(f"WARNING: Remote macro integration failed: {e}")
-        println("You may need to add KCD blocks to your macros on the remote host manually.")
-        _emit_system_event(
-            "warning",
-            "Manual action required (remote installer)",
-            "Remote macro integration failed; you may need to add KCD blocks to START/END macros manually.",
-            meta={"action": "install_client_remote", "printer": printer_name, "host": remote, "config_dir": printer_dir},
-        )
-    save_state("master_url", master_url)
-    save_state("api_key", api_key)
-
-    if moonraker_url:
-        try:
-            s = load_settings(SETTINGS_FILE)
-            if not isinstance(s, dict):
-                s = {}
-            if printer_name not in s or not isinstance(s.get(printer_name), dict):
-                s[printer_name] = {}
-            s[printer_name]["moonraker_url"] = moonraker_url
-            save_settings(SETTINGS_FILE, DATA_DIR, s)
-            if auto_mode:
-                println(f"[auto] Saved Moonraker URL for {printer_name}: {moonraker_url}")
-        except Exception as e:
-            println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
-
-        try:
-            sql_state = _detect_sql_state()
-            if sql_state.get("status") in ("sql_capable",):
-                if _sync_printer_to_sql(printer_name, moonraker_url):
-                    println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
-            elif sql_state.get("status") == "sql_needs_migration":
-                if _ensure_sql_capable(import_from_csv=False):
-                    if _sync_printer_to_sql(printer_name, moonraker_url):
-                        println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
-        except Exception as e:
-            println(f"WARNING: failed to sync printer to SQL: {e}")
-
-    register_client({
-        "type": "remote",
-        "printer_name": printer_name,
-        "host": remote,
-        "config_dir": printer_dir,
-        "moonraker_url": moonraker_url,
-    })
-
-    println("\nRemote client installation complete.")
-    println(f"  Printer: {printer_name}")
-    println(f"  Remote: {remote}")
-    println(f"  Remote config dir: {printer_dir}")
-    println(f"  print_cost.cfg: {remote_cfg_path}")
-    println(f"  Job-start script: {remote_job_start}")
-    println(f"  Job-cancel script: {remote_job_cancel}")
-    println(f"  Job-pause script: {remote_job_pause}")
-    println(f"  Job-resume script: {remote_job_resume}")
-    println(f"  Cost script: {remote_end_script}")
+        candidates = remote_operation(host, "discover", {})
+        for index, c in enumerate(candidates, 1):
+            println(f"  {index}) {c['config_dir']} [{c['classification']}] identity={c['printer_name'] or 'unset'} port={c['moonraker_port'] or 'unknown'}")
+        println("  0) Custom configuration directory")
+        selected = prompt_choice("Select configuration: ", range(len(candidates)+1))
+        candidate = candidates[selected-1] if selected else {}
+        directory = candidate.get("config_dir") or _safe_input("Remote config directory: ").strip()
+        name = _safe_input(f"Printer identity [{candidate.get('printer_name', '')}]: ").strip() or candidate.get("printer_name", "")
+        master = _safe_input("Master URL reachable from the remote printer: ").strip()
+        key = prompt_secret("Master API key", _load_secret_api_key())
+        moonraker = _safe_input("Moonraker URL reachable from Master (include actual port): ").strip()
+        payload = dict(config_dir=directory, name=name, moonraker=moonraker, master=master, key=key,
+                       relocate=prompt_yes_no("Explicit relocation of the same historical identity?", default=False),
+                       reactivate=prompt_yes_no("Explicitly reactivate retired printer?", default=False),
+                       host=host, installation_type="remote")
+        println(json.dumps(remote_operation(host, "repair", payload), indent=2))
+        if prompt_yes_no("Apply this remote repair?", default=False):
+            payload["apply"] = True
+            println(json.dumps(remote_operation(host, "repair", payload), indent=2))
+    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        println("Remote installation incomplete: " + str(exc))
 
 
-# Legacy helper used by remote flow (uses per-file contents)
 def _render_print_cost_cfg(printer_dir: str, printer_name: str) -> str:
     template = """
 # Auto-generated by installer
@@ -1912,96 +1652,7 @@ gcode:
 
 
 def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: str) -> None:
-    """
-    Download .cfg files from remote printer_dir, run local macro integration, upload back.
-    """
-    prefs = _get_remote_macro_prefs(remote, printer_dir)
-    tmp_dir = tempfile.mkdtemp(prefix="kcd_remote_cfg_")
-    try:
-        cfg_files = r.remote_list_cfg_files(remote, printer_dir)
-        if not cfg_files:
-            println(f"No .cfg files found in remote dir {printer_dir}; skipping macro integration.")
-            return
-
-        local_paths = []
-        for remote_path in cfg_files:
-            fname = os.path.basename(remote_path)
-            local_path = os.path.join(tmp_dir, fname)
-            content = r.remote_read_file(remote, remote_path)
-            if not content:
-                continue
-            with open(local_path, "w", encoding="utf-8") as f:
-                f.write(content)
-            local_paths.append((remote_path, local_path))
-
-        if not local_paths:
-            println("Failed to download any remote .cfg files; skipping macro integration.")
-            return
-
-        # Prefer stored defaults if they still exist in the scan results.
-        default_end_macro = None
-        default_end_file = None
-        default_start_macro = None
-        default_start_file = None
-        default_cancel_macro = None
-        default_cancel_file = None
-
-        end_pref = prefs.get("end") if isinstance(prefs, dict) else None
-        if isinstance(end_pref, dict):
-            pref_file = end_pref.get("file")
-            pref_macro = end_pref.get("macro")
-            if pref_file and pref_macro:
-                end_candidates, _ = installer_macro.find_macros_in_dir(tmp_dir)
-                if any(f == pref_file and m == pref_macro for (f, m, _ln) in end_candidates):
-                    default_end_file = pref_file
-                    default_end_macro = pref_macro
-
-        start_pref = prefs.get("start") if isinstance(prefs, dict) else None
-        if isinstance(start_pref, dict):
-            pref_file = start_pref.get("file")
-            pref_macro = start_pref.get("macro")
-            if pref_file and pref_macro:
-                start_candidates = installer_macro.find_start_macros_in_dir(tmp_dir)
-                if any(f == pref_file and m == pref_macro for (f, m, _ln) in start_candidates):
-                    default_start_file = pref_file
-                    default_start_macro = pref_macro
-
-        cancel_pref = prefs.get("cancel") if isinstance(prefs, dict) else None
-        if isinstance(cancel_pref, dict):
-            pref_file = cancel_pref.get("file")
-            pref_macro = cancel_pref.get("macro")
-            if pref_file and pref_macro:
-                cancel_candidates = installer_macro.find_cancel_macros_in_dir(tmp_dir)
-                if any(f == pref_file and m == pref_macro for (f, m, _ln) in cancel_candidates):
-                    default_cancel_file = pref_file
-                    default_cancel_macro = pref_macro
-
-        end_macro, end_file = installer_macro.prompt_macro_insertion(
-            printer_name, tmp_dir, default_macro=default_end_macro, default_file=default_end_file
-        )
-        start_macro, start_file = installer_macro.prompt_start_macro_insertion(
-            printer_name, tmp_dir, default_macro=default_start_macro, default_file=default_start_file
-        )
-        cancel_macro, cancel_file = installer_macro.prompt_cancel_macro_insertion(
-            printer_name, tmp_dir, default_macro=default_cancel_macro, default_file=default_cancel_file
-        )
-
-        for remote_path, local_path in local_paths:
-            with open(local_path, "r", encoding="utf-8") as f:
-                updated = f.read()
-            r.remote_write_file(remote, remote_path, updated, mode=0o644)
-
-        # Persist selections (match remote client by host + config_dir).
-        if end_macro and end_file:
-            _save_remote_macro_prefs(remote, printer_dir, end={"file": end_file, "macro": end_macro})
-        if start_macro and start_file:
-            _save_remote_macro_prefs(remote, printer_dir, start={"file": start_file, "macro": start_macro})
-        if cancel_macro and cancel_file:
-            _save_remote_macro_prefs(remote, printer_dir, cancel={"file": cancel_file, "macro": cancel_macro})
-
-        println("Remote macro integration completed successfully.")
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    println("Use install.py macro-plan on the printer host to inspect active includes and preview targeted macro changes.")
 
 
 # ----------------------------------------------------------------------
@@ -2045,255 +1696,32 @@ def uninstall_master() -> None:
         println("Removed files: " + ", ".join(removed_files))
 
 
-def uninstall_client_local(printer_name: str) -> None:
-    """
-    Remove local client artifacts and registry entry.
-    """
-    entry = _find_registry_entry(printer_name, "local")
-    if not entry:
-        println(f"No local client found for printer '{printer_name}'.")
+def _retire_client(printer_name: str) -> None:
+    from .workflow import master_request
+    master = load_state("master_url", os.environ.get("KCD_MASTER_URL", "http://localhost:5000"))
+    master = _safe_input(f"Master URL [{master}]: ").strip() or master
+    if not prompt_yes_no("Retire this identity while retaining history and custom macro files?", default=False):
         return
+    try:
+        result = master_request(master, prompt_secret("Master API key", _load_secret_api_key()),
+                                {"action":"retire", "printer_name":printer_name})
+        println(json.dumps(result,indent=2))
+        println("Custom hooks and files are retained to avoid invalid Klipper references. Remove reviewed hooks before deleting files. Use --reactivate when reinstalling this identity.")
+    except (ValueError, RuntimeError, OSError) as exc:
+        println("Retirement failed: " + str(exc))
 
-    cfg_dir = entry.get("cfg_dir", "")
-    if not cfg_dir or not os.path.isdir(cfg_dir):
-        println(f"Config directory not found for '{printer_name}': {cfg_dir}")
-    else:
-        for fname in (
-            "print_cost.cfg",
-            "kcd_job_start.sh",
-            "kcd_job_cancel.sh",
-            "kcd_job_pause.sh",
-            "kcd_job_resume.sh",
-            "send_print_cost.sh",
-        ):
-            path = os.path.join(cfg_dir, fname)
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                    println(f"Deleted {path}")
-                except Exception as e:
-                    println(f"Failed to delete {path}: {e}")
-        _remove_include_line(cfg_dir, "print_cost.cfg")
 
-    unregister_client(lambda c: c.get("type") == "local" and c.get("printer_name") == printer_name)
-    println(f"Local client uninstall complete for '{printer_name}'.")
-    _emit_system_event(
-        "deleted",
-        "Client removed",
-        f"Uninstalled local client files for printer {printer_name!r}.",
-        meta={"action": "uninstall_client_local", "printer": printer_name},
-    )
+def uninstall_client_local(printer_name: str) -> None:
+    _retire_client(printer_name)
 
 
 def uninstall_client_remote(printer_name: str) -> None:
-    """
-    Remove remote client artifacts via SSH and registry entry.
-    """
-    entry = _find_registry_entry(printer_name, "remote")
-    if not entry:
-        println(f"No remote client found for printer '{printer_name}'.")
-        return
+    _retire_client(printer_name)
 
-    host = entry.get("host", "")
-    config_dir = entry.get("config_dir", "")
-    if not host or not config_dir:
-        println(f"Remote entry incomplete for '{printer_name}'.")
-    else:
-
-
-        remote_files = [
-            os.path.join(config_dir, "print_cost.cfg"),
-            os.path.join(config_dir, "kcd_job_start.sh"),
-            os.path.join(config_dir, "kcd_job_cancel.sh"),
-            os.path.join(config_dir, "kcd_job_pause.sh"),
-            os.path.join(config_dir, "kcd_job_resume.sh"),
-            os.path.join(config_dir, "send_print_cost.sh"),
-        ]
-        for path in remote_files:
-            code, out, err = r.ssh_run(host, f"rm -f '{path}'")
-            if code == 0:
-                println(f"Deleted remote {path}")
-            else:
-                println(f"Failed to delete remote {path}: {err or out}")
-
-        printer_cfg = os.path.join(config_dir, "printer.cfg")
-        cmd = f"if [ -f '{printer_cfg}' ]; then sed -i '/\\[include print_cost\\.cfg\\]/d' '{printer_cfg}'; fi"
-        code, out, err = r.ssh_run(host, cmd)
-        if code != 0:
-            println(f"Failed to update remote printer.cfg: {err or out}")
-
-    unregister_client(lambda c: c.get("type") == "remote" and c.get("printer_name") == printer_name)
-    println(f"Remote client uninstall complete for '{printer_name}'.")
-    _emit_system_event(
-        "deleted",
-        "Client removed",
-        f"Uninstalled remote client files for printer {printer_name!r}.",
-        meta={"action": "uninstall_client_remote", "printer": printer_name, "host": host, "config_dir": config_dir},
-    )
-
-
-# ----------------------------------------------------------------------
-# Update helpers
-# ----------------------------------------------------------------------
 
 def update_client_local(printer_name: str) -> None:
-    """
-    Refresh local client scripts/config and rerun macro integration.
-    """
-    entry = _find_registry_entry(printer_name, "local")
-    if not entry:
-        println(f"No local client found for printer '{printer_name}'.")
-        return
-
-    cfg_dir = entry.get("cfg_dir", "")
-    if not cfg_dir or not os.path.isdir(cfg_dir):
-        println(f"Config directory not found for '{printer_name}': {cfg_dir}")
-        return
-
-    master_url = load_state("master_url", "http://localhost:5000")
-    state_api = load_state("api_key", "")
-    secret_api = _load_secret_api_key()
-    api_key = state_api or secret_api or secrets.token_hex(16)
-
-    ok, cfg_path = make_print_cost_cfg(cfg_dir, printer_name)
-    if not ok:
-        println("Failed to write print_cost.cfg; aborting update.")
-        return
-
-    job_start_script = generate_job_start_script(master_url, api_key)
-    job_cancel_script = generate_job_cancel_script(master_url, api_key)
-    job_pause_script = generate_job_pause_script(master_url, api_key)
-    job_resume_script = generate_job_resume_script(master_url, api_key)
-    end_script = generate_job_end_script(master_url, api_key)
-    job_start_path = os.path.join(cfg_dir, "kcd_job_start.sh")
-    job_cancel_path = os.path.join(cfg_dir, "kcd_job_cancel.sh")
-    job_pause_path = os.path.join(cfg_dir, "kcd_job_pause.sh")
-    job_resume_path = os.path.join(cfg_dir, "kcd_job_resume.sh")
-    end_script_path = os.path.join(cfg_dir, "send_print_cost.sh")
-
-    if not write_script(job_start_path, job_start_script):
-        println("Failed to write kcd_job_start.sh; aborting update.")
-        return
-    if not write_script(job_cancel_path, job_cancel_script):
-        println("Failed to write kcd_job_cancel.sh; aborting update.")
-        return
-    if not write_script(job_pause_path, job_pause_script):
-        println("Failed to write kcd_job_pause.sh; aborting update.")
-        return
-    if not write_script(job_resume_path, job_resume_script):
-        println("Failed to write kcd_job_resume.sh; aborting update.")
-        return
-    if not write_script(end_script_path, end_script):
-        println("Failed to write send_print_cost.sh; aborting update.")
-        return
-
-    _ensure_include_in_printer_cfg(cfg_dir, "print_cost.cfg")
-
-    try:
-        installer_macro.run_macro_integration(printer_name, cfg_dir)
-    except Exception as e:
-        println(f"WARNING: Macro integration wizard failed: {e}")
-
-    save_state("master_url", master_url)
-    save_state("api_key", api_key)
-    save_state("printer_dir", cfg_dir)
-    save_state("script_path", end_script_path)
-
-    register_client({
-        "type": "local",
-        "printer_name": printer_name,
-        "cfg_dir": cfg_dir,
-        "script_path": end_script_path,
-    })
-
-    println(f"Local client update complete for '{printer_name}'.")
+    install_client_local()
 
 
 def update_client_remote(printer_name: str) -> None:
-    """
-    Refresh remote client scripts/config via SSH.
-    """
-    entry = _find_registry_entry(printer_name, "remote")
-    if not entry:
-        println(f"No remote client found for printer '{printer_name}'.")
-        return
-
-    host = entry.get("host", "")
-    config_dir = entry.get("config_dir", "")
-    if not host or not config_dir:
-        println(f"Remote entry incomplete for '{printer_name}'.")
-        return
-
-    master_url = load_state("master_url", "http://localhost:5000")
-    state_api = load_state("api_key", "")
-    secret_api = _load_secret_api_key()
-    api_key = state_api or secret_api or secrets.token_hex(16)
-
-    cfg_text = _render_print_cost_cfg(config_dir, printer_name)
-    job_start_script = generate_job_start_script(master_url, api_key)
-    job_cancel_script = generate_job_cancel_script(master_url, api_key)
-    job_pause_script = generate_job_pause_script(master_url, api_key)
-    job_resume_script = generate_job_resume_script(master_url, api_key)
-    end_script = generate_job_end_script(master_url, api_key)
-
-
-
-    remote_cfg_path = os.path.join(config_dir, "print_cost.cfg")
-    remote_job_start = os.path.join(config_dir, "kcd_job_start.sh")
-    remote_job_cancel = os.path.join(config_dir, "kcd_job_cancel.sh")
-    remote_job_pause = os.path.join(config_dir, "kcd_job_pause.sh")
-    remote_job_resume = os.path.join(config_dir, "kcd_job_resume.sh")
-    remote_end_script = os.path.join(config_dir, "send_print_cost.sh")
-
-    ok1 = r.remote_write_file(host, remote_cfg_path, cfg_text, mode=0o644)
-    ok2 = r.remote_write_file(host, remote_job_start, job_start_script, mode=0o755)
-    ok3 = r.remote_write_file(host, remote_job_cancel, job_cancel_script, mode=0o755)
-    ok4 = r.remote_write_file(host, remote_job_pause, job_pause_script, mode=0o755)
-    ok5 = r.remote_write_file(host, remote_job_resume, job_resume_script, mode=0o755)
-    ok6 = r.remote_write_file(host, remote_end_script, end_script, mode=0o755)
-
-    if not (ok1 and ok2 and ok3 and ok4 and ok5 and ok6):
-        println("Failed to update one or more remote files; aborting.")
-        return
-
-    include_line = "[include print_cost.cfg]"
-    if not r.remote_append_line_if_missing(host, os.path.join(config_dir, "printer.cfg"), include_line):
-        println("WARNING: Could not ensure include line on remote printer.cfg.")
-
-    save_state("master_url", master_url)
-    save_state("api_key", api_key)
-
-    if moonraker_url:
-        try:
-            s = load_settings(SETTINGS_FILE)
-            if not isinstance(s, dict):
-                s = {}
-            if printer_name not in s or not isinstance(s.get(printer_name), dict):
-                s[printer_name] = {}
-            s[printer_name]["moonraker_url"] = moonraker_url
-            save_settings(SETTINGS_FILE, DATA_DIR, s)
-            if auto_mode:
-                println(f"[auto] Saved Moonraker URL for {printer_name}: {moonraker_url}")
-        except Exception as e:
-            println(f"WARNING: failed to save moonraker_url to settings.json: {e}")
-
-        try:
-            sql_state = _detect_sql_state()
-            if sql_state.get("status") in ("sql_capable",):
-                if _sync_printer_to_sql(printer_name, moonraker_url):
-                    println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
-            elif sql_state.get("status") == "sql_needs_migration":
-                if _ensure_sql_capable(import_from_csv=False):
-                    if _sync_printer_to_sql(printer_name, moonraker_url):
-                        println(f"[auto] Synced {printer_name} to SQL (moonraker_url).")
-        except Exception as e:
-            println(f"WARNING: failed to sync printer to SQL: {e}")
-
-    register_client({
-        "type": "remote",
-        "printer_name": printer_name,
-        "host": host,
-        "config_dir": config_dir,
-    })
-
-    println(f"Remote client update complete for '{printer_name}'.")
+    install_client_remote()
