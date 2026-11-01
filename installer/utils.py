@@ -1,4 +1,5 @@
-﻿# --------------------------------------------------------------------------------------
+from pathlib import Path
+# --------------------------------------------------------------------------------------
 # File: installer/utils.py
 # Description: Utility helpers for Print Cost Dashboard installer.
 #   - Installer state (DATA_DIR/STATE_FILE constants, key-based load/save)
@@ -372,7 +373,29 @@ def _perform_master_install(
     println(f"[{len(steps) + 1}/{len(steps) + 3}] Writing config files...")
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        ensure_api_key(secret_file=os.path.join(DATA_DIR, "secret.json"), data_dir=DATA_DIR)
+        credential_path=Path(DATA_DIR)/"secret.json"
+        key=ensure_api_key(secret_file=str(credential_path),data_dir=DATA_DIR)
+        if credential_path.exists():
+            if json.loads(credential_path.read_text()).get('api_key') != key:
+                raise ValueError('Environment credential differs from persisted credential; configure the service credential authority explicitly')
+        else:
+            from core.file_io import atomic_write
+            atomic_write(credential_path,json.dumps({'api_key':key}),0o600)
+        if os.name=='posix' and os.geteuid()==0 and os.environ.get('SUDO_USER'):
+            import pwd
+            account=pwd.getpwnam(os.environ['SUDO_USER'])
+            directory=Path(DATA_DIR)
+            if directory.stat().st_uid not in (0,account.pw_uid):
+                raise ValueError('Data directory belongs to another user; resolve ownership explicitly')
+            if directory.stat().st_uid==0:
+                from core import db
+                with db.connect_db() as connection:
+                    if connection.execute('SELECT COUNT(*) FROM printers').fetchone()[0]:
+                        raise ValueError('Existing root-owned printer data requires explicit ownership repair before changing service user')
+            os.chown(directory,account.pw_uid,account.pw_gid)
+            for name in ('secret.json','kcd.db','kcd.db-wal','kcd.db-shm'):
+                path=directory/name
+                if path.exists() and path.stat().st_uid==0:os.chown(path,account.pw_uid,account.pw_gid)
     except Exception as e:
         println(f"Failed to ensure config files: {e}")
         return False
@@ -392,7 +415,9 @@ def _perform_master_install(
     println(f"[{len(steps) + 3}/{len(steps) + 3}] Enabling and starting service...")
     if _run_cmd("systemctl daemon-reload") != 0:
         return False
-    if _run_cmd(f"systemctl enable --now {service_name}") != 0:
+    if _run_cmd(f"systemctl enable {service_name}") != 0:
+        return False
+    if _run_cmd(f"systemctl restart {service_name}") != 0:
         return False
 
     for attempt in range(10):
