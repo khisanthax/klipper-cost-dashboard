@@ -101,11 +101,24 @@ def main():
                 total=conn.execute("select total_cost from jobs where filename='test.gcode'").fetchone()[0]
                 assert abs(total-1.25)<.01,total
             assert not any((data/f).exists() for f in ['settings.json','install_state.json','print_costs.csv','live_jobs.json'])
+            # Docker's SIGTERM must drain Waitress and retain an active SQL job.
+            request('/job-start',{'printer_name':'One','filename':'restart.gcode','start_time':time.time()-60})
+            stopped_at=time.monotonic()
+            process.terminate();process.wait(timeout=8)
+            assert process.returncode==0 and time.monotonic()-stopped_at<6
+            process=subprocess.Popen([sys.executable,'-m','kcd.server','--port',str(port)],cwd=ROOT,env=env,stdout=log,stderr=log)
+            for _ in range(100):
+                try:request('/health');break
+                except OSError:time.sleep(.1)
+            resumed=request('/job-pause',{'printer_name':'One'})
+            assert resumed['success'] and resumed['job']['filename']=='restart.gcode'
+            request('/job-resume',{'printer_name':'One'})
+            request('/job-end',{'printer_name':'One'})
             from installer import utils
             for generator in [utils.generate_job_start_script,utils.generate_job_end_script,utils.generate_job_pause_script,utils.generate_job_resume_script,utils.generate_job_cancel_script]:
                 script=generator('http://master:6060',"test-'-$-key")
                 subprocess.run(['bash','-n'],input=script,text=True,check=True)
-            print('Production smoke passed: fresh SQL HTTP server, two printers, repeat registration, auth, pause/resume, completion dedup, cancellation, pages, costs, integrity and shell syntax')
+            print('Production smoke passed: fresh SQL HTTP server, two printers, repeat registration, auth, pause/resume, completion dedup, cancellation, pages, costs, integrity, graceful SIGTERM/live-job restart and shell syntax')
         finally:
             process.terminate()
             try:process.wait(timeout=10)

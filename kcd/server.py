@@ -1,6 +1,13 @@
 """Single-process production server; initialize defaults only for a brand-new SQL DB."""
 import argparse
 import os
+import signal
+
+
+def _shutdown(_signum, _frame):
+    # Waitress catches SystemExit, waits for active worker threads, then exits.
+    # An explicit handler also works when Python is Docker's PID 1.
+    raise SystemExit(0)
 
 
 def initialize_fresh_master():
@@ -20,6 +27,7 @@ def main():
     initialize_fresh_master()
     from waitress import serve
     from app import app
+    signal.signal(signal.SIGTERM,_shutdown)
     # In-memory live state is serialized and persisted in SQL. Multiple worker
     # processes are intentionally unsupported; use one process with threads.
     serve(app, host="0.0.0.0", port=args.port, threads=4, max_request_body_size=1024*1024)

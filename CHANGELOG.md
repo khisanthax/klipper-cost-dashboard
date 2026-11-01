@@ -3,6 +3,7 @@
 ## v0.7.1 - 2026-11-01
 
 - Allocate fractional cents across Recalculate Center preview rows so displayed components and totals agree; retain full SQL calculation precision and suppress negative zero adjustments.
+- Drain Waitress on SIGTERM, including Docker PID 1, and verify active SQL jobs survive a server restart.
 - Identify selected filament profiles as the conversion source. Prevent same-name profile creation or rename from replacing another profile identity.
 
 ## v0.7.0 - 2026-11-01
