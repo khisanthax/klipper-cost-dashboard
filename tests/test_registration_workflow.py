@@ -215,6 +215,29 @@ class DiscoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'active user macro'):
                 macro_plan(tmp,'auto.cfg','PRINT_START','start',apply=True)
 
+    def test_shared_pause_macro_gets_guarded_hook(self):
+        from installer.macro_plan import macro_plan
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'printer.cfg';p.write_text('[gcode_macro PAUSE]\ngcode:\n    PAUSE_BASE\n')
+            result=macro_plan(tmp,'printer.cfg','PAUSE','pause',apply=True)
+            text=p.read_text()
+            self.assertIn("{% if 'gcode_macro KCD_JOB_PAUSE' in printer %}",text)
+            self.assertIn('    PAUSE_BASE',text)
+            self.assertIn('{% endif %}\n',text)
+            self.assertFalse(macro_plan(tmp,'printer.cfg','PAUSE','pause',apply=True)['applied'])
+
+    def test_old_managed_config_gains_only_missing_helper_definitions(self):
+        from installer.workflow import client_plan
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'printer.cfg').write_text('[include print_cost.cfg]\n')
+            old='[gcode_macro _KCD_VARS]\nvariable_printer_name: "One"\ngcode:\n    RESPOND MSG="custom"\n'
+            (root/'print_cost.cfg').write_text(old)
+            plan=client_plan(tmp,'One','http://master:6060','fake-key')
+            after=plan[root/'print_cost.cfg'][0]
+            self.assertTrue(after.startswith(old))
+            self.assertIn('[gcode_macro KCD_JOB_PAUSE]',after)
+            self.assertEqual(after.count('[gcode_macro _KCD_VARS]'),1)
+
     def test_secret_corruption_is_not_silently_replaced(self):
         from core.storage import ensure_api_key
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"KCD_API_KEY":""}):
