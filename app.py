@@ -17,6 +17,7 @@ from contextlib import closing
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import flask
+from importlib.metadata import version
 from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
@@ -73,7 +74,7 @@ from core.readiness import (
 from core.numeric import finite_float, optional_finite_float, NumericValidationError
 
 app = Flask(__name__)
-app.logger.info("Flask version: %s", getattr(flask, "__version__", "unknown"))
+app.logger.info("Flask version: %s", version("flask"))
 
 if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
     app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
@@ -374,15 +375,67 @@ def require_printer_api_key(view_func):
             ), 503
 
         supplied_key = str(request.headers.get("X-API-Key", "") or "")
-        if not supplied_key or not hmac.compare_digest(supplied_key, server_key):
+        from core.auth import valid_api_key
+        if not valid_api_key(supplied_key, server_key):
             return jsonify({"status": "error", "error": "Unauthorized"}), 403
+        if request.method in {"POST", "PUT", "PATCH"} and request.is_json and not isinstance(request.get_json(silent=True), dict):
+            return jsonify(error="Expected a JSON object"), 400
         return view_func(*args, **kwargs)
 
     return wrapped
 
 
+@app.route("/api/installer/registration", methods=["GET", "POST"])
+@require_printer_api_key
+def installer_registration():
+    from core.registration import register_printer, registered_clients, RegistrationConflict
+    if request.method == "GET":
+        return jsonify(backend=os.getenv("KCD_STORAGE_BACKEND", "csv"), clients=registered_clients(),
+                       readiness=check_sql_only_readiness())
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify(error="Expected a JSON object"), 400
+    try:
+        if payload.get("action") == "retire":
+            name = str(payload.get("printer_name") or "").strip()
+            if live.get_job(name):
+                return jsonify(error="Printer has an active job; retire only while idle"), 409
+            from core.printer_lifecycle import delete_printer
+            if _is_sql_only():
+                delete_printer(name)
+            else:
+                pricing.delete_printer(name, delete_csv=False)
+            return jsonify(retired=True, printer_name=name, files_retained=True)
+        metadata = payload.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            raise ValueError("Invalid installer metadata")
+        config_dir = metadata.get("cfg_dir") or metadata.get("config_dir")
+        if config_dir:
+            from installer.discovery import probe_endpoint
+            probe = probe_endpoint(str(payload.get("moonraker_url") or ""))
+            if not probe or probe["config_dir"] != config_dir:
+                raise ValueError("Master cannot verify the selected Moonraker config root; check network route and instance port")
+        result = register_printer(payload.get("printer_name"), payload.get("moonraker_url"),
+                                  metadata=payload.get("metadata"),
+                                  relocate=payload.get("relocate") is True,
+                                  reactivate=payload.get("reactivate") is True)
+        if not _is_sql_only():
+            settings = load_settings(SETTINGS_FILE)
+            prices = settings.setdefault(result["printer_name"], {})
+            for key, value in DEFAULT_PRICING.items():
+                prices.setdefault(key, value)
+            prices["moonraker_url"] = payload["moonraker_url"]
+            save_settings(SETTINGS_FILE, DATA_DIR, settings)
+        return jsonify(**result, readiness=check_sql_only_readiness())
+    except RegistrationConflict as exc:
+        return jsonify(error=str(exc)), 409
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
+
 @app.post("/log-print")
 @require_printer_api_key
+@live.synchronized
 def log_print():
     """API endpoint to log print data from 3D printers."""
     payload = request.get_json(force=True, silent=True)
@@ -595,6 +648,10 @@ def log_print():
         mr_total_duration,
         mr_calc_duration,
     )
+    # Klipper print_duration excludes pauses. New clients label that basis so
+    # the stored duration is wall time and compute_costs subtracts pauses once.
+    if duration_seconds is not None and payload.get("duration_basis") == "active":
+        duration_seconds += paused_seconds_total
 
     app.logger.info(
         "job-finalize: printer=%s file=%s payload_dur=%s live_dur=%s mr_print=%s mr_total=%s mr_calc=%s chosen=%s",
@@ -613,9 +670,23 @@ def log_print():
         cost_data = compute_costs(printer_name, duration_seconds, filament_mm, paused_seconds_total=paused_seconds_total)
 
     row_duration = duration_seconds if duration_seconds is not None else ""
+    event_id = payload.get("event_id")
+    if event_id is not None:
+        try:
+            event_id = str(uuid.UUID(str(event_id)))
+        except ValueError:
+            return jsonify(error="event_id must be a UUID"), 400
+    identity = ("history:"+str(history_job_id)) if history_job_id is not None else ("event:"+event_id) if event_id else None
+    job_uid = str(uuid.uuid5(uuid.NAMESPACE_URL, "kcd:"+printer_name+":"+identity)) if identity else str(uuid.uuid4())
+    if _is_sql_only():
+        with db_module.connect_db() as conn:
+            if conn.execute("SELECT 1 FROM jobs WHERE job_uid=?", (job_uid,)).fetchone():
+                if live_metadata and live_metadata.get("filename") == filename and float(live_metadata.get("actual_start_time") or 0) <= float(payload["timestamp"]):
+                    live.end_job(printer_name)
+                return jsonify(status="ok", duplicate=True)
     row = {
         "timestamp": ts,
-        "job_uid": str(uuid.uuid4()),
+        "job_uid": job_uid,
         "printer": printer_name,
         "filename": filename,
         "duration_seconds": row_duration,
@@ -715,6 +786,7 @@ def health():
 
 @app.post("/job-start")
 @require_printer_api_key
+@live.synchronized
 def job_start():
     """Start tracking a new print job."""
     from core import live
@@ -774,6 +846,7 @@ def job_start():
 
 @app.post("/job-update")
 @require_printer_api_key
+@live.synchronized
 def job_update():
     """Update an active print job."""
     from core import live
@@ -830,6 +903,7 @@ def job_update():
 
 @app.post("/job-pause")
 @require_printer_api_key
+@live.synchronized
 def job_pause():
     """Pause an active print job."""
     from core import live
@@ -882,6 +956,7 @@ def job_pause():
 
 @app.post("/job-resume")
 @require_printer_api_key
+@live.synchronized
 def job_resume():
     """Resume a paused print job."""
     from core import live
@@ -927,6 +1002,7 @@ def job_resume():
 
 @app.post("/job-cancel")
 @require_printer_api_key
+@live.synchronized
 def job_cancel():
     """Cancel an active print job."""
     from core import live
@@ -966,7 +1042,7 @@ def job_cancel():
         filename = str(active_before.get("filename") or "").strip()
 
     # Mark canceled in live state (this also removes it from active jobs).
-    live_result = live.cancel_job(printer_name, reason)
+    live_result = live.cancel_job(printer_name, reason, remove=False)
     if live_result and (elapsed_seconds is None or elapsed_seconds <= 0):
         elapsed_seconds = float(live_result.get("elapsed_seconds") or 0.0)
 
@@ -979,6 +1055,16 @@ def job_cancel():
     #   don't append a new canceled row.
     if live_result is None:
         def _find_recent_status():
+            if _is_sql_only():
+                with db_module.connect_db() as conn:
+                    recent = conn.execute("SELECT j.status,j.ended_at FROM jobs j JOIN printers p ON j.printer_id=p.id WHERE p.name=? AND (?='' OR j.filename=?) ORDER BY j.ended_at DESC LIMIT 1", (printer_name, str(filename or ""), str(filename or ""))).fetchone()
+                if not recent:
+                    return None
+                try:
+                    timestamp = datetime.fromisoformat(str(recent["ended_at"]).replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    timestamp = 0
+                return {"status": recent["status"], "timestamp": timestamp}
             rows, _err = load_rows_raw(CSV_FILE)
             if not rows:
                 return None
@@ -1057,11 +1143,14 @@ def job_cancel():
         elapsed_seconds,
     )
 
+    live.end_job(printer_name)
+
     return jsonify({"success": True, "job": live_result, "history_job_uid": row["job_uid"]})
 
 
 @app.post("/job-end")
 @require_printer_api_key
+@live.synchronized
 def job_end():
     """Mark a print job as completed."""
     from core import live

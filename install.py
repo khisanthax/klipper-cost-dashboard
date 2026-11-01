@@ -5,6 +5,13 @@ Print Cost Dashboard Installer
 
 Refactored to use modular installer package.
 """
+from installer.bootstrap import configure_runtime
+
+configure_runtime()
+from kcd.server import initialize_fresh_master
+
+initialize_fresh_master()
+
 from installer.utils import println, load_state, save_state, prompt_choice, prompt_yes_no
 from installer.setup import master_setup, install_client_local, install_client_remote
 from installer.utils import (
@@ -53,9 +60,9 @@ def show_current_settings():
     println(f"Master Host: {load_state('master_host', 'Not set')}")
     println(f"Master Port: {load_state('master_port', DEFAULT_PORT)}")
     println(f"Service Name: {load_state('master_service_name', DEFAULT_SERVICE_NAME)}")
-    println(f"Storage Backend: {load_state('master_storage_backend', 'csv')}")
-    println(f"Reports Backend: {load_state('master_reports_backend', 'csv')}")
-    println(f"API Key: {load_state('api_key', 'Not set')}")
+    println(f"Storage Backend: {os.getenv('KCD_STORAGE_BACKEND', 'csv')}")
+    println(f"Reports Backend: {os.getenv('KCD_REPORTS_BACKEND', 'csv')}")
+    println(f"API Key: {'[configured]' if load_state('api_key', '') else '[not set]'}")
     println(f"Printer Dir: {load_state('printer_dir', 'Not set')}")
     println(f"Script Path: {load_state('script_path', 'Not set')}")
 
@@ -175,6 +182,11 @@ def reset_install_state():
     println("It will NOT delete your data/print_costs.csv or data/settings.json.")
     confirm = prompt_yes_no("Are you sure?", default=False)
     if confirm:
+        if os.environ.get("KCD_STORAGE_BACKEND") == "sql":
+            from core.storage import _save_user_settings_sql
+            _save_user_settings_sql("installer_metadata", {})
+            println("Installer preferences reset. SQL printer identities, installation records and business state retained.")
+            return
         if os.path.exists(STATE_FILE):
             try:
                 os.remove(STATE_FILE)
@@ -215,4 +227,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        from installer.cli import main as cli_main
+        raise SystemExit(cli_main())
     main()

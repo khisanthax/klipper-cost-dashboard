@@ -1,0 +1,10 @@
+.git
+.worktrees
+.venv
+data
+__pycache__
+**/__pycache__
+tests/.tmp
+*.log
+*.backup
+**/*.kcd-backup-*

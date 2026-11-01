@@ -13,6 +13,7 @@
 import re
 import os
 import glob
+from core.file_io import atomic_write
 
 
 # ======================================================================
@@ -164,6 +165,14 @@ def _apply_insert_hook_or_auto(lines, start_index, end_index, patterns_for_auto)
 # END macro discovery
 # ======================================================================
 
+def _active_cfg_paths(config_dir):
+    from installer.discovery import active_config_files
+    paths, errors = active_config_files(config_dir)
+    if errors:
+        raise ValueError("Resolve active include errors before macro integration: " + "; ".join(errors))
+    return [str(p) for p in paths if p.name != "print_cost.cfg"]
+
+
 def find_macros_in_dir(config_dir):
     """
     Scans all .cfg files in the directory for macros that look like print end macros.
@@ -177,10 +186,10 @@ def find_macros_in_dir(config_dir):
     # Case insensitive match for PRINT_END, END_PRINT, etc.
     target_names = ["PRINT_END", "END_PRINT", "PRINT_END_MACRO", "END_PRINT_MACRO"]
 
-    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+    cfg_files = _active_cfg_paths(config_dir)
 
     for path in cfg_files:
-        filename = os.path.basename(path)
+        filename = os.path.relpath(path, config_dir)
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -261,6 +270,9 @@ def insert_run_shell_command(macro_name, path, printer_name):
         return False, f"Macro '{macro_name}' not found"
 
     macro_block = lines[start_index:end_index]
+    if any(re.search(r"^\s*(?:RUN_SHELL_COMMAND\s+CMD=send_print_cost|KCD_JOB_END)\b", ln, re.I) for ln in macro_block):
+        return True, "Command already present"
+
 
     # If a KCD END_PRINT block is already present, skip repatching.
     if any(KCD_START_END_MARKER in ln for ln in macro_block) and any(KCD_END_END_MARKER in ln for ln in macro_block):
@@ -305,8 +317,7 @@ def insert_run_shell_command(macro_name, path, printer_name):
 
     # Write back
     try:
-        with open(path, "w") as f:
-            f.writelines(lines)
+        atomic_write(path, "".join(lines), 0o644)
         return True, "Success"
     except Exception as e:
         return False, f"Write error: {e}"
@@ -465,10 +476,10 @@ def find_start_macros_in_dir(config_dir):
 
     macros = []
     target_names = ["PRINT_START", "START_PRINT", "PRINT_BEGIN", "START_JOB"]
-    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+    cfg_files = _active_cfg_paths(config_dir)
 
     for path in cfg_files:
-        filename = os.path.basename(path)
+        filename = os.path.relpath(path, config_dir)
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -496,10 +507,10 @@ def find_cancel_macros_in_dir(config_dir):
 
     macros = []
     target_names = ["CANCEL_PRINT", "PRINT_CANCEL", "CANCEL_JOB", "ABORT_PRINT"]
-    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+    cfg_files = _active_cfg_paths(config_dir)
 
     for path in cfg_files:
-        filename = os.path.basename(path)
+        filename = os.path.relpath(path, config_dir)
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -527,10 +538,10 @@ def find_pause_macros_in_dir(config_dir):
 
     macros = []
     target_names = {"PAUSE", "PAUSE_PRINT", "PRINT_PAUSE"}
-    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+    cfg_files = _active_cfg_paths(config_dir)
 
     for path in cfg_files:
-        filename = os.path.basename(path)
+        filename = os.path.relpath(path, config_dir)
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -557,10 +568,10 @@ def find_resume_macros_in_dir(config_dir):
 
     macros = []
     target_names = {"RESUME", "RESUME_PRINT", "PRINT_RESUME"}
-    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+    cfg_files = _active_cfg_paths(config_dir)
 
     for path in cfg_files:
-        filename = os.path.basename(path)
+        filename = os.path.relpath(path, config_dir)
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -589,10 +600,10 @@ def find_filament_change_macros_in_dir(config_dir):
 
     macros = []
     target_names = {"M600", "FILAMENT_CHANGE"}
-    cfg_files = glob.glob(os.path.join(config_dir, "*.cfg"))
+    cfg_files = _active_cfg_paths(config_dir)
 
     for path in cfg_files:
-        filename = os.path.basename(path)
+        filename = os.path.relpath(path, config_dir)
         try:
             with open(path, "r") as f:
                 lines = f.readlines()
@@ -671,8 +682,7 @@ def insert_filament_change_macro_call(macro_name, path, call_line):
         lines[gcode_start + 1:gcode_start + 1] = kcd_block
 
     try:
-        with open(path, "w") as f:
-            f.writelines(lines)
+        atomic_write(path, "".join(lines), 0o644)
         return True, "Success"
     except Exception as e:
         return False, f"Write error: {e}"
@@ -805,8 +815,7 @@ def insert_pause_macro_call(macro_name, path, macro_to_call):
                 lines[gcode_start + 1:gcode_start + 1] = kcd_block
 
     try:
-        with open(path, "w") as f:
-            f.writelines(lines)
+        atomic_write(path, "".join(lines), 0o644)
         return True, "Success"
     except Exception as e:
         return False, f"Write error: {e}"
@@ -885,8 +894,7 @@ def insert_resume_macro_call(macro_name, path, macro_to_call):
                 lines[gcode_start + 1:gcode_start + 1] = kcd_block
 
     try:
-        with open(path, "w") as f:
-            f.writelines(lines)
+        atomic_write(path, "".join(lines), 0o644)
         return True, "Success"
     except Exception as e:
         return False, f"Write error: {e}"
@@ -980,8 +988,7 @@ def insert_cancel_macro_call(macro_name, path, macro_to_call):
                 lines[gcode_start + 1:gcode_start + 1] = kcd_block
 
     try:
-        with open(path, "w") as f:
-            f.writelines(lines)
+        atomic_write(path, "".join(lines), 0o644)
         return True, "Success"
     except Exception as e:
         return False, f"Write error: {e}"
@@ -1180,8 +1187,7 @@ def insert_macro_call(macro_name, path, macro_to_call):
             lines[gcode_start + 1:gcode_start + 1] = kcd_block
 
     try:
-        with open(path, "w") as f:
-            f.writelines(lines)
+        atomic_write(path, "".join(lines), 0o644)
         return True, "Success"
     except Exception as e:
         return False, f"Write error: {e}"

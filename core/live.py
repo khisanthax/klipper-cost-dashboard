@@ -5,6 +5,9 @@ Tracks active print jobs per printer with status, timing, and cost estimation su
 """
 import time
 import os
+import threading
+import copy
+from functools import wraps
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
 from core.sql_only import is_sql_only
@@ -14,6 +17,21 @@ LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
 
 # In-memory job state: printer_name -> job_dict
 _jobs = {}
+_lock = threading.RLock()
+
+
+def synchronized(function):
+    @wraps(function)
+    def call(*args, **kwargs):
+        with _lock:
+            snapshot = copy.deepcopy(_jobs)
+            try:
+                return function(*args, **kwargs)
+            except Exception:
+                _jobs.clear()
+                _jobs.update(snapshot)
+                raise
+    return call
 
 
 def _is_sql_only() -> bool:
@@ -24,7 +42,8 @@ def _load_state():
     """Load live job state from disk."""
     global _jobs
     if _is_sql_only():
-        _jobs = {}
+        from core.storage import _load_user_settings_sql
+        _jobs = (_load_user_settings_sql("live_jobs") or {}).get("jobs", {})
         return
     data = load_json_file(LIVE_JOBS_FILE)
     _jobs = data.get("jobs", {}) if data else {}
@@ -33,10 +52,13 @@ def _load_state():
 def _save_state():
     """Save live job state to disk."""
     if _is_sql_only():
+        from core.storage import _save_user_settings_sql
+        _save_user_settings_sql("live_jobs", {"jobs": _jobs})
         return
     save_json_file(LIVE_JOBS_FILE, DATA_DIR, {"jobs": _jobs})
 
 
+@synchronized
 def start_job(printer_name, filename, start_time=None, estimated_duration=None, 
               estimated_filament=None, profile_id=None):
     """
@@ -79,6 +101,7 @@ def start_job(printer_name, filename, start_time=None, estimated_duration=None,
     return job
 
 
+@synchronized
 def update_job(printer_name, **kwargs):
     """
     Update fields of an existing job.
@@ -107,6 +130,7 @@ def update_job(printer_name, **kwargs):
     return job
 
 
+@synchronized
 def pause_job(printer_name, reason=None):
     """
     Pause an active job.
@@ -141,6 +165,7 @@ def pause_job(printer_name, reason=None):
     return job
 
 
+@synchronized
 def resume_job(printer_name):
     """
     Resume a paused job.
@@ -169,7 +194,8 @@ def resume_job(printer_name):
     return job
 
 
-def cancel_job(printer_name, reason=None):
+@synchronized
+def cancel_job(printer_name, reason=None, *, remove=True):
     """
     Cancel an active job.
     
@@ -207,11 +233,13 @@ def cancel_job(printer_name, reason=None):
         del job["pause_time"]
 
     # Remove from active jobs so "Now Printing" clears immediately.
-    del _jobs[printer_name]
-    _save_state()
+    if remove:
+        del _jobs[printer_name]
+        _save_state()
     return job
 
 
+@synchronized
 def end_job(printer_name):
     """
     Mark a job as completed and remove from active jobs.
@@ -237,6 +265,7 @@ def end_job(printer_name):
     return job
 
 
+@synchronized
 def get_job(printer_name):
     """
     Get the current job for a printer.
@@ -254,6 +283,7 @@ def get_job(printer_name):
     return _enrich_job_with_costs(job)
 
 
+@synchronized
 def list_active_jobs():
     """
     Get all active jobs (printing or paused).
@@ -328,6 +358,7 @@ def _enrich_job_with_costs(job):
     return job
 
 
+@synchronized
 def get_job_metadata_for_logging(printer_name):
     """
     Get metadata from live job for CSV logging.
@@ -354,6 +385,7 @@ def get_job_metadata_for_logging(printer_name):
 
     return {
         "actual_start_time": job.get("start_time"),
+        "elapsed_seconds": max(0.0, time.time()-float(job.get("start_time") or time.time())-total_paused),
         "total_paused_duration": total_paused,
         "profile_id": job.get("profile_id"),
         "filename": job.get("filename"),

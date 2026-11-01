@@ -1,6 +1,7 @@
 name: Release Validation
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -49,3 +50,4 @@ jobs:
           test "$(stat -c %a "$backup_archive")" = 600
           docker run --rm kcd-release-ci test -f /app/tools/validate_sql_only.py
           docker run --rm -e KCD_API_KEY=ci-secret kcd-release-ci python tools/validate_sql_only.py
+          docker run --rm kcd-release-ci python tools/smoke_production.py

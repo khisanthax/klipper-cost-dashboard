@@ -35,6 +35,11 @@ target architecture and the strictest operating contract.
 
 ## Docker Quick Start
 
+For instance discovery, client repair, identity relocation, macro previews and
+credential rotation, see [installation and recovery](docs/installation-recovery.md).
+The [November production audit](docs/production-audit-2026-11.md) records findings,
+repairs and verification evidence.
+
 ```bash
 mkdir -p kcd && cd kcd
 curl -fsSL https://raw.githubusercontent.com/khisanthax/klipper-cost-dashboard/main/docker-compose.yml -o docker-compose.yml
