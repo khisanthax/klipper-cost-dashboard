@@ -51,8 +51,8 @@ def client_plan(config_dir, name, master, key):
         if not re.search(r'^\s*variable_printer_name:', config, re.M):
             raise ValueError("Legacy print_cost.cfg needs manual migration; refusing to replace custom macros")
         config = re.sub(r'^(\s*variable_printer_name:)\s*.*$', lambda m: m[1]+' "'+name+'"', config, flags=re.M)
-        config = re.sub(r'^(command:\s*)(\S*/)(kcd_job_\w+\.sh|send_print_cost\.sh)',
-                        lambda m: m[1]+str(directory)+"/"+m[3], config, flags=re.M)
+        config = re.sub(r'^(command:\s*)(?:bash\s+)?(\S*/)(kcd_job_\w+\.sh|send_print_cost\.sh)',
+                        lambda m: m[1]+"bash "+str(directory)+"/"+m[3], config, flags=re.M)
         # Upgrade older managed integrations by appending only absent helper
         # definitions. Existing start/end logic and custom settings are retained.
         rendered = utils._render_print_cost_cfg(str(directory), name)
