@@ -28,7 +28,7 @@ with db.connect_db() as conn:
   meters=60 if i<14 else 67.294
   material=meters*3*15/1000
   db.upsert_job(conn,dict(job_uid='mask-'+str(i),printer='Idle',filename='mask-'+str(i)+'.gcode',status='completed',timestamp=time.time()-i,duration_seconds=3600,duration_hours=1,filament_mm=meters*1000,filament_meters=meters,filament_grams=meters*3,filament_weight_kind='estimated',grams_per_meter=3,rate_per_hour=0,filament_mode='per_kg',filament_rate=15,time_cost=0,material_cost=material,total_cost=material))
- for i in range(2000):
+ for i in range(int(os.environ.get('KCD_AUDIT_HISTORY_JOBS','2000'))):
   db.upsert_job(conn,dict(job_uid='bulk-'+str(i),printer='Idle',filename='bulk-'+str(i)+'.gcode',status='completed',timestamp=time.time()-86400-i,duration_seconds=60,duration_hours=1/60,filament_mm=1000,filament_meters=1,grams_per_meter=3,rate_per_hour=0,filament_mode='per_kg',filament_rate=15,time_cost=0,material_cost=.045,total_cost=.045))
 projects.assign_jobs(['mask-'+str(i) for i in range(15)],project.id)
 live.start_job('Printing','active.gcode',start_time=time.time()-600)
@@ -40,7 +40,10 @@ print(project.id)
 
 def main():
     from playwright.sync_api import sync_playwright
-    artifacts=ROOT/'browser-artifacts'/('dashboard-workflows' if '--workflows-only' in sys.argv else 'dashboard-audit');artifacts.mkdir(parents=True,exist_ok=True)
+    count=int(sys.argv[sys.argv.index('--history-jobs')+1]) if '--history-jobs' in sys.argv else 2000
+    if not 100<=count<=10000:raise SystemExit('Disposable history size must be 100–10000 jobs')
+    label='dashboard-workflows' if '--workflows-only' in sys.argv else 'dashboard-audit' if count==2000 else 'dashboard-audit-'+str(count)
+    artifacts=ROOT/'browser-artifacts'/label;artifacts.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='kcd-ux-') as tmp:
         moons=[];urls={}
         class Moonraker(BaseHTTPRequestHandler):
@@ -55,7 +58,7 @@ def main():
             moon=ThreadingHTTPServer(('127.0.0.1',0),Moonraker);moon.state=state;moon.identity=name;moons.append(moon)
             threading.Thread(target=moon.serve_forever,daemon=True).start();urls[name]=f'http://127.0.0.1:{moon.server_port}'
         urls['Offline']='http://127.0.0.1:1'
-        env={**os.environ,'KCD_DATA_DIR':tmp,'KCD_STORAGE_BACKEND':'sql','KCD_API_KEY':'disposable-ux-key','KCD_AUDIT_MOONS':json.dumps(urls)}
+        env={**os.environ,'KCD_DATA_DIR':tmp,'KCD_STORAGE_BACKEND':'sql','KCD_API_KEY':'disposable-ux-key','KCD_AUDIT_MOONS':json.dumps(urls),'KCD_AUDIT_HISTORY_JOBS':str(count)}
         project=subprocess.run([sys.executable,'-c',SEED],cwd=ROOT,env=env,text=True,capture_output=True,check=True).stdout.strip().splitlines()[-1]
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         base=f'http://127.0.0.1:{port}'

@@ -111,7 +111,7 @@
                 <button type="submit" class="btn btn-primary w-100">Create</button>
             </div>
         </form>
-        <div class="text-muted small mt-2">Deleting a project unassigns its jobs; it does not delete history.</div>
+        <div class="text-muted small mt-2">Deleting a project removes its manual jobs, planned items and project pricing snapshots. Tracked print history is retained and unassigned.</div>
     </div>
 </div>
 
@@ -240,7 +240,7 @@
                                             <input type="hidden" name="action" value="delete_project">
                                             <input type="hidden" name="project_id" value="{{ p.id }}">
                                             <button type="submit" class="btn btn-outline-danger"
-                                                    onclick='return confirm({{ ("Delete project " ~ p.name ~ "? Jobs will be unassigned and history will remain.")|tojson }})'>
+                                                    onclick='return confirm({{ ("Delete project " ~ p.name ~ "? Manual jobs, planned items and project pricing snapshots will be deleted. Tracked jobs will be unassigned and history retained.")|tojson }})'>
                                                 Delete Project
                                             </button>
                                         </form>

@@ -50,6 +50,8 @@ def exercise(page,context,base,project,data,artifacts):
     page.get_by_role('button',name='Clear Selection',exact=True).click();assert page.locator('#historyPostForm input:checked').count()==0
     boxes.first.check();page.goto(base+'/?history_page=2');assert page.locator('#historyPostForm input:checked').count()==0
     page.goto(base+'/');assert page.locator('#historyPostForm input:checked').count()==0
+    page.locator('#historyPerPage').select_option('100');page.wait_for_url('**history_per_page=100*')
+    assert page.locator('#historyPostForm input[name=delete_rows]').count()==100
     # Existing RaRa acceptance: saved historical totals, project-only snapshot.
     originals=query('SELECT * FROM jobs ORDER BY job_uid')
     page.goto(base+'/projects/'+project+'/pricing')
@@ -95,12 +97,31 @@ def exercise(page,context,base,project,data,artifacts):
     manual=query('SELECT * FROM manual_jobs WHERE project_id=?',created['id'])[0]
     assert manual['cost_override']==2 and manual['filament_g']==1000
     panel=open_project(pid);assert '-$13.00' in panel.inner_text()
+    panel.locator('[data-kcd-manual-open=edit][data-manual-job-id="'+manual['manual_job_id']+'"]').click()
+    modal=page.get_by_role('dialog');modal.get_by_label('Cost override ($)',exact=True).fill('0')
+    click(modal.get_by_role('button',name='Save',exact=True))
+    assert query('SELECT cost_override FROM manual_jobs WHERE manual_job_id=?',manual['manual_job_id'])[0]['cost_override']==0
+    panel=open_project(pid)
     upload=form('upload_plan_gcode',panel)
     upload.locator('[name=gcode_file]').set_input_files({'name':'planned.gcode','mimeType':'text/plain','buffer':b'; estimated printing time (normal mode) = 1h\n; filament used [g] = 500\nG1 X0\n'})
     upload.locator('[name=manual_time_hours]').fill('1');upload.locator('[name=manual_filament_g]').fill('500')
     click(upload.get_by_role('button',name='Add Planned Item',exact=True))
     plan=query('SELECT * FROM planned_items WHERE project_id=?',created['id'])[0]
     assert abs(plan['est_cost']-7.5)<1e-8,plan
+    panel=open_project(pid);panel.locator('[data-kcd-plan-open=edit][data-plan-id="'+plan['plan_id']+'"]').click()
+    page.locator('#kcdPlanFilamentG').fill('750')
+    click(page.get_by_role('dialog').get_by_role('button',name='Save',exact=True))
+    assert abs(query('SELECT est_cost FROM planned_items WHERE plan_id=?',plan['plan_id'])[0]['est_cost']-11.25)<1e-8
+    panel=open_project(pid);click(form('convert_plan_to_manual',panel).get_by_role('button',name='Convert → Manual',exact=True))
+    converted=query('SELECT * FROM planned_items WHERE plan_id=?',plan['plan_id'])[0]
+    assert converted['converted_to_manual_job_id'] and converted['status']=='fulfilled'
+    assert len(query('SELECT * FROM manual_jobs WHERE project_id=?',created['id']))==2
+    panel=open_project(pid);page.once('dialog',lambda dialog:dialog.accept());click(form('delete_plan_item',panel).get_by_role('button',name='Delete',exact=True))
+    assert not query('SELECT * FROM planned_items WHERE plan_id=?',plan['plan_id'])
+    assert len(query('SELECT * FROM manual_jobs WHERE project_id=?',created['id']))==2
+    panel=open_project(pid);deletion=form('delete_manual_job',panel).filter(has=page.locator('input[name=manual_job_id][value="'+manual['manual_job_id']+'"]'))
+    page.once('dialog',lambda dialog:dialog.accept());click(deletion.get_by_role('button',name='Delete',exact=True))
+    assert not query('SELECT * FROM manual_jobs WHERE manual_job_id=?',manual['manual_job_id'])
     # Project defaults can be explicitly cleared without modifying saved history.
     panel=open_project(pid);edit=form('update_project',panel)
     edit.locator('[name=project_filament_profile_id]').select_option('');edit.locator('[name=pricing_amount]').fill('');edit.locator('[name=hourly_rate_override]').fill('')
@@ -170,6 +191,13 @@ def exercise(page,context,base,project,data,artifacts):
     # SQL-only backup/display/pause controls are actual UI actions.
     page.goto(base+'/settings/pause');page.locator('#pause_include_default').check();click(page.get_by_role('button',name='Save pause settings',exact=True))
     assert json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['pause_include_paused_time_default']
+    page.goto(base+'/settings/other')
+    display=form('update_columns').filter(has=page.locator('input[name=table][value=recalc_jobs]'))
+    display.locator('input[name=columns][value=material_cost]').uncheck()
+    click(display.get_by_role('button',name='Save Recalculate Columns',exact=True))
+    assert 'material_cost' not in json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['tables']['recalc_jobs']['visible_columns']
+    page.goto(base+'/recalculate');material_header=page.locator('#recalc-table th[data-col=material_cost]')
+    assert material_header.count()==1 and not material_header.is_visible()
     page.goto(base+'/settings/other');click(form('backup_now').get_by_role('button',name='Backup now',exact=True))
     assert list(Path(data,'backups').glob('kcd_backup_*.tar.gz'))
     assert 'Backup' in page.locator('body').inner_text()

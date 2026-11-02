@@ -59,6 +59,15 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## New entry template
 
+### 2026-11-02 — Dashboard candidate implementation complete; final acceptance
+
+- **Status:** implemented and prepared for normal code review in [PR 59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59); not merged, released or deployed.
+- **Changes:** completed profile-assignment deletion guards and numeric UID isolation; safe quoted confirmations; bounded historical thumbnail recovery with two server/browser slots, endpoint failure backoff and metadata-only HEAD. Expanded real project manual/planned CRUD, conversion/deletion, Display Settings saves and 100-row History workflows. Added a 500-job fixture alongside the 2,015-job suite. Updated roadmap, changelog, [dashboard guide](docs/dashboard-usage.md), [audit report](docs/dashboard-audit-v0.7.3.md) and recovery documentation.
+- **Verification:** code commit `e9a8752510b57f097b719d2ee4236bf8ad58f685` passed [Release Validation 41479235682](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41479235682), including 226 Linux tests, SQL-only checks, 66 responsive page/layout checks, desktop/mobile axe, financial/History/thumbnail/installer browser suites, SSH/systemd, Docker smoke and actual v0.7.2-to-candidate persistence upgrade. Expanded final local project/display workflow passed. Final documentation and added-workflow commit requires the same CI and will be checked before reporting completion; PR checks are authoritative for that head.
+- **Financial evidence:** RaRa synthetic 15-job fixture: 907.294 m, 2,721.882 g, $40.82823 raw / $40.83 displayed at $0/hour and $15/kg. PETG/PLA/ABS independent geometry/spool expectations matched stored values. Project-only overlays do not overwrite jobs; global recalculation preserves originals and rejects changed-profile/selection previews.
+- **Production:** read-only v0.7.2 baseline and four-printer Settings/Diagnostics smoke verified; 1,036 jobs retained. No production mutation/restart/deployment for this milestone; existing backups and v0.7.1 rollback artifacts preserved. SV07 retained event discrepancy is flagged by candidate, not automatically repaired.
+- **Limitations / next action:** required approving review before merge/release. Chromium viewport/CSS zoom and automated axe are not physical-device, native-toolbar-zoom or screen-reader certification; long soak and physical firmware actions not tested. Complete final PR validation, obtain normal review, then follow the established release/digest/backup/deployment process. No v0.7.3 release or deployment is claimed.
+
 ### YYYY-MM-DD — Task title
 
 - **Status:**
