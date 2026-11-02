@@ -1,7 +1,7 @@
 <!-- Column Visibility -->
 <div class="card mb-4">
     <div class="card-header">
-        <h5 class="mb-0">Table Column Visibility</h5>
+        <h2 class="h5 mb-0">Table Column Visibility</h2>
     </div>
     <div class="card-body">
         {% set project_column_labels = {
@@ -20,7 +20,7 @@
             These settings are stored by the active KCD backend and apply across devices and browsers.
         </div>
 
-        <h6 class="mb-2">Print History (Dashboard)</h6>
+        <h3 class="h6 mb-2">Print History (Dashboard)</h3>
         <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="history">
@@ -41,7 +41,7 @@
             <button type="submit" class="btn btn-primary">Save Print History Columns</button>
         </form>
 
-        <h6 class="mb-2">Recalculate Center (Jobs table)</h6>
+        <h3 class="h6 mb-2">Recalculate Center (Jobs table)</h3>
         <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="recalc_jobs">
@@ -62,7 +62,7 @@
             <button type="submit" class="btn btn-primary">Save Recalculate Columns</button>
         </form>
 
-        <h6 class="mb-2">Projects (Unassigned jobs)</h6>
+        <h3 class="h6 mb-2">Projects (Unassigned jobs)</h3>
         <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="projects_unassigned">
@@ -83,7 +83,7 @@
             <button type="submit" class="btn btn-primary">Save Unassigned Columns</button>
         </form>
 
-        <h6 class="mb-2">Projects (Jobs in this project)</h6>
+        <h3 class="h6 mb-2">Projects (Jobs in this project)</h3>
         <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="projects_project_jobs">
@@ -104,7 +104,7 @@
             <button type="submit" class="btn btn-primary">Save Project Job Columns</button>
         </form>
 
-        <h6 class="mb-2">Projects (Manual jobs)</h6>
+        <h3 class="h6 mb-2">Projects (Manual jobs)</h3>
         <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="projects_manual_jobs">
@@ -125,7 +125,7 @@
             <button type="submit" class="btn btn-primary">Save Manual Job Columns</button>
         </form>
 
-        <h6 class="mb-2">Projects (Planned items)</h6>
+        <h3 class="h6 mb-2">Projects (Planned items)</h3>
         <form method="post" class="mb-0">
             <input type="hidden" name="action" value="update_columns">
             <input type="hidden" name="table" value="projects_planned_items">
@@ -151,7 +151,7 @@
 <!-- Backups & Export -->
 <div class="card mb-4">
     <div class="card-header">
-        <h5 class="mb-0">Backups &amp; Export</h5>
+        <h2 class="h5 mb-0">Backups &amp; Export</h2>
     </div>
     <div class="card-body">
         <div class="text-muted small mb-3">
@@ -178,16 +178,16 @@
                 </div>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Frequency</label>
+                <label class="form-label">Frequency
                 <select class="form-select" name="auto_backup_frequency" {% if sql_only %}disabled{% endif %}>
                     <option value="daily" {% if backup_settings and backup_settings.auto_backup_frequency == 'daily' %}selected{% endif %}>Daily</option>
                     <option value="weekly" {% if backup_settings and backup_settings.auto_backup_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
-                </select>
+                </select></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Keep</label>
+                <label class="form-label">Keep
                 <input type="number" class="form-control" name="auto_backup_keep" min="1" max="100"
-                    value="{{ backup_settings.auto_backup_keep if backup_settings else 7 }}" {% if sql_only %}disabled{% endif %}>
+                    value="{{ backup_settings.auto_backup_keep if backup_settings else 7 }}" {% if sql_only %}disabled{% endif %}></label>
                 <div class="text-muted small">Max 100</div>
             </div>
             <div class="col-md-3 d-grid">

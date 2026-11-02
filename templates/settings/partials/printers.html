@@ -12,7 +12,7 @@
 {% for p in printers %}
 <div class="card mb-4">
     <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
-        <h5 class="mb-0">{{ p }}</h5>
+        <h2 class="h5 mb-0">{{ p }}</h2>
         <div class="d-flex flex-wrap gap-2">
             <form method="post" class="d-flex flex-wrap gap-1 align-items-center m-0">
                 <input type="hidden" name="action" value="set_active_filament_profile">
@@ -50,7 +50,7 @@
         <form method="post">
             <input type="hidden" name="printer" value="{{ p }}">
 
-            <h6 class="card-subtitle mb-2 text-muted">Default Pricing (Fallback)</h6>
+            <h3 class="h6 card-subtitle mb-2 text-muted">Default Pricing (Fallback)</h3>
             <p class="text-muted small mb-3">Applies when no active profile is set for this printer. Hourly rate is always set here.</p>
             <div class="row g-3">
                 <div class="col-md-3">
@@ -93,7 +93,7 @@
                 </div>
 
                 <button type="submit" class="btn btn-outline-danger" name="action" value="delete_printer"
-                        onclick="return confirm('Delete printer {{ p }}?')">
+                        onclick='return confirm({{ ("Delete printer " ~ p ~ "?")|tojson }})'>
                     Delete printer
                 </button>
             </div>
@@ -148,7 +148,7 @@
 {% if discovered_printers %}
 <div class="card mb-4 border-warning">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">Discovered Printers (History Only)</h5>
+        <h2 class="h5 mb-0">Discovered Printers (History Only)</h2>
         <span class="text-muted small">Not shown by default in Settings</span>
     </div>
     <div class="card-body">
@@ -160,7 +160,7 @@
                 <form method="post" class="m-0">
                     <input type="hidden" name="printer" value="{{ p }}">
                     <button type="submit" class="btn btn-sm btn-outline-danger" name="action" value="delete_printer"
-                            onclick="return confirm('Hide printer {{ p }} from Settings? (History will remain)')">
+                            onclick='return confirm({{ ("Hide printer " ~ p ~ " from Settings? (History will remain)")|tojson }})'>
                         Hide
                     </button>
                 </form>

@@ -27,6 +27,16 @@ infer material proportions from nozzle size or printer address.
 
 ## Three price views
 
+In the v0.7.3 candidate, Projects can select a filament profile directly. Save
+copies that profile's explicit price/unit and conversion factor into the project
+defaults. A selected profile takes precedence over custom fields on that save.
+Manual/planned work uses those saved defaults; tracked jobs still require an
+explicit project pricing preview/apply. Changing the source profile later does
+not silently rewrite the saved project defaults or its applied snapshots: select
+the profile and Save again, then preview/apply tracked pricing deliberately.
+Recorded job weights and recorded conversion factors remain authoritative for
+tracked jobs; a project factor is a fallback when that measurement is unavailable.
+
 * **Saved historical:** persisted job prices shown in History and Reports.
 * **Project-adjusted snapshot:** an explicitly previewed/applied overlay for
   tracked jobs in that project. It leaves the jobs table unchanged. Manual jobs
@@ -79,7 +89,21 @@ Repeat `--job-uid` for multiple jobs. Back up first. CSV compatibility retains a
 private timestamped pre-recalculation CSV backup and uses an atomic replacement;
 dual storage still cannot provide one transaction across CSV and SQLite.
 
+Assigned filament/hourly profiles must be replaced or changed explicitly to base
+pricing before deletion. This prevents dangling references and unannounced
+future-price changes. Deleting an inactive profile retains historical prices,
+recorded units/factors and original-price snapshots. A project retains its copied
+defaults; a missing original profile cannot be used for a new selection.
+
 ## Permanent thumbnail archive
+
+The v0.7.3 candidate keeps archived image URLs direct. Images needing source
+recovery are queued two at a time in the browser, and remote historical recovery
+uses at most two server slots so control/health requests remain available.
+Network/auth failures share a 30-second per-endpoint backoff; existing per-job
+negative results remain short-lived. HEAD diagnostics never initiate remote
+recovery. Busy recovery retries are bounded, then explain that reload is needed.
+None of these transient caches or limits deletes permanent objects.
 
 SQL-only print-start captures an available slicer image into
 `data/thumbnails/objects/<sha256>.<extension>`. Live SQL metadata retains that

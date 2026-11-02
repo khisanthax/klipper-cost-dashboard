@@ -257,6 +257,19 @@ def list_history_rows_sql(query: HistoryQuery, page: int, per_page: int, error: 
         )
 
 
+def printer_card_rows(start_dt,end_dt):
+    """Today's jobs plus each printer's latest job, independent of History filters."""
+    if not is_sql_only():
+        rows,_error=load_rows_raw(CSV_FILE)
+        return rows
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn)
+        where="""WHERE (CAST(strftime('%s',COALESCE(j.ended_at,j.created_at)) AS INTEGER) BETWEEN ? AND ?)
+        OR j.id IN (SELECT id FROM (SELECT id,ROW_NUMBER() OVER
+        (PARTITION BY printer_id ORDER BY COALESCE(ended_at,created_at) DESC,id DESC) AS position FROM jobs) WHERE position=1)"""
+        return _fetch_sql_rows(conn,where,[int(start_dt.timestamp()),int(end_dt.timestamp())],None,None)
+
+
 def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limit: Optional[int], offset: Optional[int]) -> List[dict]:
     ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
     sql = f"""

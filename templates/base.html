@@ -11,6 +11,16 @@
 
     <!-- Custom styles -->
     <style>
+        label.form-label { display: block; }
+        :focus-visible { outline: 3px solid #212529; outline-offset: 3px; }
+        .navbar .btn-outline-light { --bs-btn-color: #fff; }
+        .btn-outline-primary { --bs-btn-color: #0a58ca; }
+        .btn-outline-secondary { --bs-btn-color: #545b62; }
+        .btn-outline-danger { --bs-btn-color: #b02a37; }
+        .btn-outline-info { --bs-btn-color: #087990; }
+        .text-warning { color: #805600 !important; }
+        .pagination { flex-wrap: wrap; gap: .125rem; }
+        .page-link { min-width: 2rem; min-height: 2rem; display: flex; align-items: center; justify-content: center; }
         .navbar-brand {
             font-weight: bold;
         }
@@ -107,8 +117,9 @@
 </head>
 
 <body>
+    <a class="visually-hidden-focusable" href="#main-content">Skip to main content</a>
     <!-- Navigation Header -->
-    <nav class="navbar navbar-dark bg-primary">
+    <nav class="navbar navbar-dark bg-primary" aria-label="Primary navigation">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('index') }}">Klipper Cost Dashboard</a>
             <div class="d-flex flex-wrap gap-2 ms-auto">
@@ -127,15 +138,22 @@
     </nav>
 
     <!-- Main Content Area -->
-    <div class="container my-4">
+    <main class="container my-4" id="main-content">
         {% block content %}
         {% endblock %}
-    </div>
+    </main>
 
     <!-- Bootstrap JS Bundle -->
     <script src="{{ url_for('static', filename='vendor/bootstrap-5.3.8/bootstrap.bundle.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/kcd_table.js') }}"></script>
     <script src="{{ url_for('static', filename='js/thumbnail_status.js') }}"></script>
+    <script>
+      document.querySelectorAll('a.disabled, .page-item.disabled a').forEach(link => {
+        link.setAttribute('aria-disabled','true');
+        link.setAttribute('tabindex','-1');
+        link.addEventListener('click',event=>event.preventDefault());
+      });
+    </script>
 </body>
 
 </html>

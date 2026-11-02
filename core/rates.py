@@ -132,6 +132,10 @@ def delete_rate_profile(profile_id):
     if _is_sql_only():
         return _delete_rate_profile_sql(profile_id)
 
+    from core.config import SETTINGS_FILE
+    from core.storage import load_settings
+    assigned=[name for name,cfg in load_settings(SETTINGS_FILE).items() if isinstance(cfg,dict) and str(cfg.get('active_rate_profile_id'))==str(profile_id)]
+    if assigned:raise ValueError('Profile is assigned to '+', '.join(sorted(assigned))+'. Select replacement or base pricing before deleting it')
     data = _load_data()
     profiles = data.get("profiles", {})
     if profile_id in profiles:
@@ -229,15 +233,38 @@ def _delete_rate_profile_sql(profile_id: str) -> bool:
         return False
     with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
+        conn.execute('BEGIN IMMEDIATE')
         row = conn.execute(
-            "SELECT id FROM hourly_rate_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
-            (profile_id, profile_id),
+            "SELECT id,profile_uid FROM hourly_rate_profiles WHERE COALESCE(NULLIF(profile_uid,''),CAST(id AS TEXT)) = ?",
+            (profile_id,),
         ).fetchone()
         if not row:
             return False
+        from core.printer_lifecycle import _load_setting
+        settings=_load_setting(conn,'printer_settings') or _load_setting(conn,'settings')
+        aliases={str(row['profile_uid'] or row['id'])}
+        assigned=[name for name,cfg in settings.items() if isinstance(cfg,dict) and str(cfg.get('active_rate_profile_id')) in aliases]
+        if assigned:raise ValueError('Profile is assigned to '+', '.join(sorted(assigned))+'. Select replacement or base pricing before deleting it')
         conn.execute(
             "DELETE FROM hourly_rate_profiles WHERE id = ?",
             (row["id"] if isinstance(row, sqlite3.Row) else row[0],),
         )
         conn.commit()
         return True
+
+
+def set_printer_rate_profile_sql(printer,profile_id):
+    """Validate and assign under the same lock used by profile deletion."""
+    from core.printer_lifecycle import _load_setting,_save_setting
+    selected=str(profile_id or '').strip()
+    with closing(db_module.connect_db()) as conn:
+        db_module.apply_migrations(conn);conn.execute('BEGIN IMMEDIATE')
+        if not conn.execute('SELECT 1 FROM printers WHERE name=?',(printer,)).fetchone():return False
+        if selected and selected!='none' and not conn.execute("SELECT 1 FROM hourly_rate_profiles WHERE COALESCE(NULLIF(profile_uid,''),CAST(id AS TEXT))=?",(selected,)).fetchone():return False
+        settings=_load_setting(conn,'printer_settings') or _load_setting(conn,'settings')
+        cfg=settings.setdefault(printer,{})
+        if not selected or selected=='none':cfg.pop('active_rate_profile_id',None)
+        else:cfg['active_rate_profile_id']=selected
+        _save_setting(conn,'printer_settings',settings)
+        conn.commit()
+    return True

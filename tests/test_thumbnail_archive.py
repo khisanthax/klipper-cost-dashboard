@@ -20,6 +20,7 @@ class ArchiveTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)/'data';self.root.mkdir()
         for p in [patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql','KCD_SQL_ONLY_FAIL_FAST':'0'}),
+                  patch.object(archive,'_source_failures',{}),
                   patch.object(db,'_db_path',lambda:str(self.root/'kcd.db')),
                   patch.object(archive,'ARCHIVE_ROOT',self.root/'thumbnails/objects'),
                   patch.object(thumbnails,'_CACHE_ROOT',str(self.root/'thumb_cache')),
@@ -92,6 +93,7 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(archive.fetch_image('One','part.gcode')[1],'source_unavailable')
             with patch('urllib.request.urlopen',side_effect=urllib.error.URLError('offline')):
                 self.assertEqual(archive.fetch_image('One','part.gcode')[1],'network_error')
+            archive._source_failures.clear()  # Independent source-mode fixture; bypass the tested outage backoff.
             with patch('urllib.request.urlopen',return_value=Response(json.dumps({'result':{'thumbnails':[]}}).encode())):
                 self.assertEqual(archive.fetch_image('One','part.gcode')[1],'no_slicer_thumbnail')
             with patch('urllib.request.urlopen',return_value=Response(json.dumps({'result':{'modified':1800000000,'thumbnails':[]}}).encode())):

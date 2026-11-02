@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.3 - Unreleased
+
+- Add bounded current Moonraker observations, loaded client identity checks and stale-event warnings without modifying retained jobs; update live estimates without reloading forms.
+- Protect assigned pricing profiles from deletion, preserve explicit zero overrides, expose project profile snapshots and unknown weights, and remove repeated project catalog reads.
+- Repair History session selection, bulk error messages, independent printer Today totals, report charts and quoted confirmation dialogs.
+- Bound missing-thumbnail recovery and endpoint retries while preserving permanent archives and metadata-only status checks.
+- Improve shared labels, keyboard navigation, contrast and responsive layouts. Gate changes on 66 page/layout checks, axe, financial/project workflows and an actual v0.7.2 Docker upgrade.
+- Document the candidate's acceptance findings, pricing semantics, evidence and explicit production/release limitations.
+
 ## v0.7.2 - 2026-11-01
 
 - Gate installer releases on actual terminal menus, disposable OpenSSH deployment, native systemd installation/upgrade/uninstall/reinstall, Docker authority detection and real Chromium workflows in SQL, CSV and dual modes. Retain screenshots, traces and redacted transcripts.

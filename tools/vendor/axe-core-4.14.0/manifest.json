@@ -1,0 +1,7 @@
+{
+  "package": "axe-core",
+  "version": "4.14.0",
+  "source": "https://registry.npmjs.org/axe-core/-/axe-core-4.14.0.tgz",
+  "sha256": "20c09fe157a8a34a30e241aaa1fcdade657734f08ab379ecfbeb7d45cc46e878",
+  "use": "Injected by browser acceptance only; not loaded by KCD pages"
+}

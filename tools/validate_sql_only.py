@@ -95,6 +95,7 @@ def _run_validation() -> int:
             client = kcd_app.app.test_client()
             endpoints = [
                 "/health",
+                "/api/printer-status",
                 "/",
                 "/reports",
                 "/projects",

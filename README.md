@@ -321,3 +321,5 @@ workflow, including the full unit suite, compile checks, SQL-only isolation,
 production Docker build, and in-container CLI/tool smoke tests, before merge.
 
 Pricing units, original-price recovery and permanent thumbnail administration: [operator guide](docs/pricing-and-thumbnail-recovery.md).
+
+Dashboard pricing, selection and live-state workflows: [v0.7.3 candidate guide](docs/dashboard-usage.md). Tested scope and limitations: [dashboard acceptance audit](docs/dashboard-audit-v0.7.3.md). Verified release/deployment state: [LOGBOOK](LOGBOOK.md).

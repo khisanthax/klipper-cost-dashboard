@@ -54,6 +54,19 @@ def configuration_from_form(form):
 
 
 def project_price_from_form(form):
+    selected=str(form.get('project_filament_profile_id') or '').strip()
+    if selected:
+        from core import profiles
+        profile=profiles.get_profile(selected)
+        if not profile:raise NumericValidationError('Selected project filament profile no longer exists; select another profile or custom pricing')
+        profile=normalize_profile(profile)
+        mode=profile.get('price_input_mode') or profile['filament_mode']
+        amount=profile.get('spool_price') if mode=='spool' else profile['filament_rate']
+        spec=price_spec(mode,amount,profile.get('net_spool_grams') or 1000)
+        factor=number(profile.get('grams_per_meter'),'Profile grams per meter',positive=True)
+        spec.update(grams_per_meter=factor,profile_id=selected,profile_name=profile.get('name') or selected)
+        per_kg=spec['rate'] if spec['mode']=='per_kg' else spec['rate']*1000 if spec['mode']=='per_gram' else spec['rate']*1000/factor
+        return float(per_kg),{k:str(v) for k,v in spec.items()}
     if not str(form.get('pricing_amount','')).strip():return None,None
     spec=price_spec(form.get('pricing_mode','spool'),form['pricing_amount'],form.get('net_spool_grams',1000))
     conversion_config=configuration_from_form(form)
@@ -123,12 +136,27 @@ def quantize(value):
 
 def describe_job(row,profile=None):
     """Presentation metadata only; never recalculate a saved historical cost."""
-    measure=conversion(row,profile)
+    try:
+        measure=conversion(row,profile)
+    except NumericValidationError as exc:
+        # A malformed historical measurement must not hide its saved price or
+        # prevent the rest of a history/report page from rendering.
+        measure={'grams':None,'grams_per_meter':None,'conversion_source':'Invalid recorded measurement: '+str(exc)}
     row['_weight_grams']=float(measure['grams']) if measure['grams'] is not None else None
     row['_weight_factor']=measure['grams_per_meter']
     row['_weight_source']=measure['conversion_source']
     row['_price_unit']={'per_meter':'$/m','per_gram':'$/g','per_kg':'$/kg'}.get(row.get('filament_mode'),'Unknown unit')
     return row
+
+
+def summarize_weights(rows,profiles):
+    """Known mass only; never substitute zero for an unknown job measurement."""
+    total=Decimal(0);unknown=0
+    for row in rows:
+        describe_job(row,profiles.get(row.get('filament_profile_id')))
+        if row['_weight_grams'] is None:unknown+=1
+        else:total+=Decimal(str(row['_weight_grams']))
+    return {'known_grams':total,'unknown_weights':unknown}
 
 
 def reconcile_display(rows):

@@ -12,6 +12,7 @@ import hashlib
 import time
 import re
 import hmac
+import threading
 from functools import wraps
 from contextlib import closing
 from pathlib import Path
@@ -195,12 +196,18 @@ def get_job_thumbnail_url(
     return url
 
 
+_thumbnail_recovery_slots=threading.BoundedSemaphore(2)
+
+
 @app.get('/jobs/<job_uid>/thumbnail')
 def job_thumbnail(job_uid):
     """Lazy retrieval keeps remote printer failures out of HTML rendering."""
     asset=archived_thumbs.get_job_asset(job_uid)
     if asset:return archived_thumbnail(asset)
     status=archived_thumbs.get_job_status(job_uid)
+    if request.method=='HEAD':
+        state=status['status'] if status.get('checked_at') else 'recovery_deferred'
+        return ('',404,{'X-KCD-Thumbnail-Status':state,'Cache-Control':'no-store'})
     checked=status.get('checked_at')
     if checked:
         try:
@@ -215,8 +222,12 @@ def job_thumbnail(job_uid):
     except (AttributeError,ValueError):pass
     asset=archived_thumbs.recover_cached_job(job_uid,row['printer'],row['filename'],row['thumbnail'],ended)
     if not asset:
-        result=archived_thumbs.capture_job(job_uid,row['printer'],row['filename'],ended_at=ended,historical=True)
-        asset=result['asset'];status=result
+        if not _thumbnail_recovery_slots.acquire(blocking=False):
+            return ('',404,{'X-KCD-Thumbnail-Status':'recovery_deferred','Cache-Control':'no-store'})
+        try:
+            result=archived_thumbs.capture_job(job_uid,row['printer'],row['filename'],ended_at=ended,historical=True)
+            asset=result['asset'];status=result
+        finally:_thumbnail_recovery_slots.release()
     if asset:return archived_thumbnail(asset)
     return ('',404,{'X-KCD-Thumbnail-Status':status['status'],'Cache-Control':'no-store'})
 
@@ -1274,6 +1285,33 @@ def job_end():
 # WEB PAGES
 # ============================================================================
 
+@app.get('/api/printer-status')
+def printer_status():
+    """Read telemetry without rewriting history or clearing retained live state."""
+    from core import monitoring
+    from core.filament import conversion,material_cost,price_spec
+    endpoints={name:thumbs.resolve_moonraker_base_url(name) or '' for name in get_canonical_printer_names()}
+    observations=monitoring.statuses(endpoints)
+    for name,item in observations.items():
+        stored=live.get_job(name)
+        item['tracking_warning']=None
+        if stored and (not item['connected'] or item['state'] not in ('printing','paused') or item.get('filename')!=stored.get('filename')):
+            item['tracking_warning']='Stored job differs from current Moonraker state. Review tracking; no job was automatically cleared or finalized.'
+        if item['connected'] and item['state'] in ('printing','paused'):
+            try:
+                cfg=pricing._get_effective_filament_pricing(name)
+                measure=conversion({'filament_mm':item['filament_mm'],'grams_per_meter':cfg['grams_per_meter']})
+                seconds=item['total_seconds'] if pricing._include_paused_time_for_printer(name) else item['print_seconds']
+                item['grams']=float(measure['grams'])
+                item['time_cost']=pricing.compute_live_time_cost(name,seconds)
+                item['material_cost']=float(material_cost(measure,price_spec(cfg['filament_mode'],cfg['filament_rate'])))
+                item['total_cost']=item['time_cost']+item['material_cost']
+                item['conversion_source']=str(cfg['grams_per_meter'])+' g/m; current printer pricing'
+            except (ValueError,RuntimeError,TypeError):
+                item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
+    return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     """Main dashboard page."""
@@ -1430,7 +1468,7 @@ def index():
     )
     history_rows_page = history_result.rows_page
     history_pager = history_result.pager
-    error = history_result.error
+    error = history_result.error or error
 
     history_pager = _pager_links(
         endpoint="index",
@@ -1473,7 +1511,10 @@ def index():
     
     # Compute printer summaries for status cards
     from core.reports import compute_printer_summaries
-    printer_summaries = compute_printer_summaries(rows, active_jobs)
+    now_for_cards=datetime.now(TIMEZONE_OBJ)
+    today_for_cards=now_for_cards.replace(hour=0,minute=0,second=0,microsecond=0)
+    card_rows=history_repo.printer_card_rows(today_for_cards,now_for_cards)
+    printer_summaries = compute_printer_summaries(card_rows, active_jobs)
 
     # Enrich printer summaries with active filament/rate profile names
     all_profiles = profiles.get_all_profiles()
@@ -1501,9 +1542,9 @@ def index():
                 try:
                     with db_module.connect_db() as conn:
                         latest=conn.execute("SELECT job_uid FROM jobs j JOIN printers p ON p.id=j.printer_id WHERE p.name=? AND j.filename=? ORDER BY j.ended_at DESC LIMIT 1",(pname,card_filename)).fetchone()
-                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card",job_uid=latest[0] if latest else None) if card_filename else None
+                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card",job_uid=latest[0]) if latest else None
                 except Exception:
-                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card") if card_filename else None
+                    ps["_thumb_card"] = None
         else:
             ps["_thumb_card"] = None
 
@@ -1518,12 +1559,13 @@ def index():
         job["_thumb_cards_enabled"] = bool(thumbs_enabled and thumbs_on_cards)
         if thumbs_enabled and thumbs_on_cards:
             fname = str(job.get("filename") or "").strip()
-            job["_thumb_small"] = url_for("archived_thumbnail",digest=job["thumbnail_asset"]) if job.get("thumbnail_asset") else (get_job_thumbnail_url(pname, fname, size_hint="small") if fname else None)
+            job["_thumb_small"] = url_for("archived_thumbnail",digest=job["thumbnail_asset"]) if job.get("thumbnail_asset") else None
         else:
             job["_thumb_small"] = None
 
-    from core.filament import describe_job
+    from core.filament import describe_job,summarize_weights
     all_filament_profiles=profiles.get_all_profiles()
+    summary.update(summarize_weights(rows,all_filament_profiles))
     for row in history_rows_page:
         describe_job(row,all_filament_profiles.get(row.get('filament_profile_id')))
 
@@ -1592,9 +1634,11 @@ def reports_page():
     """Reports page with monthly breakdown and top printers."""
     data = reports_repo.get_reports_data(request.args)
     start,end,_label,_quick=get_date_range_from_params(request.args)
-    recent=history_repo.list_history_rows(history_repo.HistoryQuery(start_dt=start,end_dt=end),page=1,per_page=10).rows_page
-    from core.filament import describe_job
+    history=history_repo.list_history_rows(history_repo.HistoryQuery(start_dt=start,end_dt=end),page=1,per_page=10)
+    recent=history.rows_page
+    from core.filament import describe_job,summarize_weights
     all_profiles=profiles.get_all_profiles()
+    data.setdefault('summary',{}).update(summarize_weights(history.rows_all,all_profiles))
     printer_settings=load_settings(SETTINGS_FILE)
     for row in recent:
         describe_job(row,all_profiles.get(row.get('filament_profile_id')))
@@ -1877,6 +1921,8 @@ def recalculate_page():
 
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
+    from core.filament import describe_job
+    for row in rows_page:describe_job(row,filament_profiles.get(row.get('filament_profile_id')))
     rate_profiles = rates.list_rate_profiles()
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     recalc_visible_cols = get_visible_columns_for_table(
@@ -2847,11 +2893,12 @@ def projects_page():
 
     # Build view models (derived totals always computed from current membership)
     project_rows = []
+    project_filament_profiles=profiles.get_all_profiles()
     for pid, p in projects_map.items():
         jobs = project_jobs.get(pid, [])
         manual_jobs = manual_jobs_by_project.get(pid, [])
         from core import project_pricing
-        from core.filament import conversion,reconcile_display
+        from core.filament import describe_job,reconcile_display
         overlays=project_pricing.saved_overlays(pid) if _is_sql_only() else {}
         for job in jobs:
             components=projects.compute_tracked_job_cost_components(job)
@@ -2860,7 +2907,8 @@ def projects_page():
             if overlay:
                 components={key:float(overlay['after'][key]) for key in ('time_cost','material_cost','adjustment','total_cost')}
             job.update(components)
-            measurement=conversion(job,profiles.get_profile(job.get('filament_profile_id')) if job.get('filament_profile_id') else {})
+            describe_job(job,project_filament_profiles.get(job.get('filament_profile_id')))
+            measurement={'grams':job['_weight_grams'],'grams_per_meter':job['_weight_factor'],'conversion_source':job['_weight_source']}
             if overlay:
                 measurement={**measurement,**{k:overlay[k] for k in ('grams','grams_per_meter','conversion_source')}}
             job['_weight_grams']=float(measurement['grams']) if measurement['grams'] is not None else None
@@ -2952,7 +3000,7 @@ def projects_page():
                 "name": p.name,
                 "notes": p.notes,
                 "hourly_rate_override": p.hourly_rate_override,
-                "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
+                "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter"),"profile_id":p.filament_price.get("profile_id")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
                 "adjusted_jobs": len(overlays),
                 "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
                 "labor_only": bool(p.labor_only),
@@ -3084,6 +3132,7 @@ def projects_page():
         unassigned_jobs_page=unassigned_jobs_page,
         unassigned_pager=unassigned_pager,
         projects_by_id={p["id"]: p for p in project_rows},
+        filament_profiles=project_filament_profiles,
     )
 
 
@@ -3403,7 +3452,6 @@ def _settings_view(tab: str):
             else:
                 summary = import_moonraker_history_to_csv(
                     csv_file=CSV_FILE,
-      history_source="SQL" if _is_sql_only() else "CSV",
                     headers=HEADERS,
                     printer_name=printer,
                     base_url=base_url,
@@ -3608,7 +3656,11 @@ def _settings_view(tab: str):
                     profile_obj = profiles.get_profile(profile_id)
                 except Exception:
                     profile_obj = None
-                profiles.delete_profile(profile_id)
+                try:
+                    deleted=profiles.delete_profile(profile_id)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+                if not deleted:return redirect(url_for(_settings_endpoint_for_action(action),error='Filament profile not found; nothing was deleted'))
                 profile_name = ""
                 try:
                     profile_name = str((profile_obj or {}).get("name") or "").strip()
@@ -3704,7 +3756,11 @@ def _settings_view(tab: str):
                     rate_obj = rates.get_rate_profile(profile_id)
                 except Exception:
                     rate_obj = None
-                rates.delete_rate_profile(profile_id)
+                try:
+                    deleted=rates.delete_rate_profile(profile_id)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+                if not deleted:return redirect(url_for(_settings_endpoint_for_action(action),error='Hourly profile not found; nothing was deleted'))
                 rate_name = ""
                 try:
                     rate_name = str((rate_obj or {}).get("name") or "").strip()
@@ -3724,6 +3780,10 @@ def _settings_view(tab: str):
             if printer:
                 if _is_sql_only() and not _sql_only_printer_exists(printer):
                     return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
+                if _is_sql_only():
+                    if not rates.set_printer_rate_profile_sql(printer,profile_id):
+                        return redirect(url_for(_settings_endpoint_for_action(action),error=f'Rate profile not found: {profile_id}'))
+                    return redirect(url_for(_settings_endpoint_for_action(action)))
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
