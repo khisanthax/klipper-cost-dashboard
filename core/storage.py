@@ -147,7 +147,7 @@ def _copy_if_missing(src: str, dest: str) -> bool:
 
 def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     """
-    Ensure runtime files exist, bootstrapping from examples when missing.
+    Ensure runtime files exist without registering example printers.
     """
     if _is_sql_only():
         # SQL-only mode must not auto-create runtime files.
@@ -165,10 +165,8 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
 
     if not os.path.exists(settings_file):
-        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
-            initial = {}
-            with open(settings_file, 'w') as f:
-                json.dump(initial, f, indent=2)
+        with open(settings_file, 'w') as f:
+            json.dump({}, f, indent=2)
 
     if not os.path.exists(csv_file):
         if not _copy_if_missing(CSV_EXAMPLE_FILE, csv_file):
@@ -185,11 +183,8 @@ def ensure_settings_exists(settings_file, default_pricing):
         return
     require_file_reads_allowed("settings.json", caller_hint="core.storage.ensure_settings_exists")
     if not os.path.exists(settings_file):
-        from core.config import SETTINGS_EXAMPLE_FILE
-        if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
-            initial = {}
-            with open(settings_file, "w") as f:
-                json.dump(initial, f, indent=2)
+        with open(settings_file, "w") as f:
+            json.dump({}, f, indent=2)
 
 
 def load_settings(settings_file):

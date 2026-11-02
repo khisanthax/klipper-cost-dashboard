@@ -10,6 +10,19 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class InstallerAcceptanceTests(unittest.TestCase):
+    def test_fresh_legacy_settings_do_not_register_examples(self):
+        from core import config,storage
+        import json
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'csv'}),patch.object(config,'DATA_DIR',tmp):
+            settings=Path(tmp)/'settings.json'
+            for create in (lambda:storage.ensure_runtime_files(str(settings),str(Path(tmp)/'history.csv')),lambda:storage.ensure_settings_exists(str(settings),config.DEFAULT_PRICING)):
+                create()
+                self.assertEqual(json.loads(settings.read_text()),{})
+                settings.unlink()
+            settings.write_text('{"Existing":{"rate_per_hour":7}}')
+            storage.ensure_settings_exists(str(settings),config.DEFAULT_PRICING)
+            self.assertEqual(json.loads(settings.read_text())['Existing']['rate_per_hour'],7)
+
     def test_client_credential_is_bound_to_selected_master(self):
         from installer import utils
         with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{},clear=True),patch.object(utils,'load_state',return_value=''),patch.object(utils,'_load_secret_api_key') as unrelated:
