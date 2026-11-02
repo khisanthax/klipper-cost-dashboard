@@ -1,5 +1,9 @@
 # Install, repair, relocate and recover clients
 
+See the [November installer acceptance matrix](installer-acceptance-2026-11.md)
+for reproducible real-terminal, SSH, systemd, Docker and browser tests, confirmed
+repairs, and explicitly unverified environments.
+
 Upgrade the Master before using the registration API. The installer is Python
 3.11+ with standard-library client dependencies; a source Master also installs
 the pinned requirements. Docker supports amd64 and Raspberry Pi architectures.
@@ -38,6 +42,10 @@ The credential prompt is hidden. Alternatively use `KCD_API_KEY` or a private
 `--key-file` JSON file containing `api_key`. Do not put credentials in shell
 arguments, screenshots, logs or Git. Client scripts are owner-only. Their fixed
 `--kcd-self-check` diagnostic verifies authentication without emitting job events.
+Existing local script credentials are reused only for the same Master URL.
+Standalone printer hosts must supply the Master's key, rather than their own
+locally generated key. Fresh legacy-mode settings start without example printers;
+registration supplies pricing. Existing settings and prices are preserved.
 
 Use `--relocate` only for the SAME historical printer changing host/IP/port;
 use a new `--printer` name for cloned hardware. `--reactivate` explicitly restores
@@ -90,6 +98,12 @@ in isolation. v0.7 adds additive thumbnail/pricing tables and nullable columns;
 retain them and their image objects during rollback. Restore a consistent backup
 only if data verification requires it.
 Do not overwrite unrelated services or discard new jobs during rollback.
+
+Source Master uninstall stops/disables only the saved service belonging to the
+current checkout and retains a private unit backup, database, credential, client
+files and repository. Reinstall against the same data directory to recover it.
+It never deletes Dockerfile/Compose source. A Docker-owned data directory blocks
+source uninstall: manage that service through its established Compose deployment.
 
 ## Credential rotation
 

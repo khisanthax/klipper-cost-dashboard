@@ -773,7 +773,6 @@ def _set_client_registry(clients: List[Dict[str, Any]]) -> None:
 
 def register_client(entry: Dict[str, Any]) -> None:
     registry = get_client_registry()
-    t = entry.get("type")
     pn = entry.get("printer_name")
     new = []
     replaced = False
@@ -1783,7 +1782,9 @@ def _retire_client(printer_name: str) -> None:
     if not prompt_yes_no("Retire this identity while retaining history and custom macro files?", default=False):
         return
     try:
-        result = master_request(master, prompt_secret("Master API key", _load_secret_api_key()),
+        entry = next((c for c in get_client_registry() if c.get('printer_name') == printer_name), {})
+        directory = entry.get('cfg_dir') if entry.get('type') == 'local' else None
+        result = master_request(master, prompt_secret("Master API key", _client_api_key(master, directory)),
                                 {"action":"retire", "printer_name":printer_name})
         println(json.dumps(result,indent=2))
         println("Custom hooks and files are retained to avoid invalid Klipper references. Remove reviewed hooks before deleting files. Use --reactivate when reinstalling this identity.")
