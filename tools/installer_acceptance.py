@@ -43,7 +43,7 @@ def exercise(env,base,moons,tmp,*,browser=True):
         assert '"applied": true' in output and '[auto] Moonraker reachable' in output
     if os.name=='posix':terminal(['2','1','0',directory,'One'],expected=1)
     assert not json.loads(cli(common).stdout)['changes']
-    if os.name=='posix':
+    if os.name=='posix' and env['KCD_STORAGE_BACKEND']=='sql':
         output=terminal(['3','4','1','0',directory,base,'','n','n','y','6','5'])
         assert '"applied": true' in output
         output=terminal(['3','2','1','','y','','6','5'])
@@ -125,4 +125,4 @@ except RuntimeError as exc:print(str(exc))
             assert not errors,errors
         finally:
             context.tracing.stop(path=str(artifacts/'trace.zip'));browser.close()
-    print('Installer acceptance passed: real menu/cancel/EOF, SQL inventory, idempotency, missing-file repair, wrong credential/port, macro preview/inactive protection and four browser layouts')
+    print('Installer acceptance passed ('+env['KCD_STORAGE_BACKEND']+'): real menu/cancel/EOF, inventory, idempotency, missing-file repair, wrong credential/port, macro preview/inactive protection and four browser layouts')

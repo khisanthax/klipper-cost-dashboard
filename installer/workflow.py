@@ -121,5 +121,9 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
         raise RuntimeError("Master registered; client files incomplete. Private per-file backups exist. Rerun the same repair; no history was moved") from None
     if not registration.get("readiness", {}).get("ready"):
         raise RuntimeError("Client files written; Master readiness failed. Registration is retained; inspect Master readiness and rerun repair")
+    from . import utils
+    if not utils.is_sql_only():
+        utils.register_client({**metadata,'printer_name':name,'moonraker_url':moonraker})
+        utils.save_state('master_url',master)
     return {"applied": True, "changes": changes, "registration": registration,
             "macro_action": "Inspect active hooks with macro-plan; reload Klipper only while idle if configuration changed"}

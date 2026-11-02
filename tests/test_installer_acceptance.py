@@ -10,6 +10,23 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 class InstallerAcceptanceTests(unittest.TestCase):
+    def test_client_credential_is_bound_to_selected_master(self):
+        from installer import utils
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{},clear=True),patch.object(utils,'load_state',return_value=''),patch.object(utils,'_load_secret_api_key') as unrelated:
+            (Path(tmp)/'kcd_job_start.sh').write_text("MASTER_URL=http://master:6060\nAPI_KEY='private fixture key'\n")
+            self.assertEqual(utils._client_api_key('http://master:6060/',tmp),'private fixture key')
+            self.assertEqual(utils._client_api_key('http://other:6060',tmp),'')
+            self.assertEqual(utils._client_api_key('http://other:6060'),'')
+            unrelated.assert_not_called()
+
+    def test_legacy_registry_relocation_replaces_location(self):
+        from installer import utils
+        old=[{'printer_name':'One','type':'local'},{'printer_name':'Two','type':'local'}]
+        with patch.object(utils,'get_client_registry',return_value=old),patch.object(utils,'_set_client_registry') as save:
+            entry={'printer_name':'One','type':'remote','host':'fixture'}
+            utils.register_client(entry)
+            save.assert_called_once_with([entry,old[1]])
+
     def test_unhealthy_master_cannot_report_success(self):
         from installer import utils
         with tempfile.TemporaryDirectory() as tmp,patch.object(utils,'DATA_DIR',tmp),patch.dict(os.environ,{'KCD_API_KEY':'fixture-master-key'}),patch.object(utils,'_run_cmd',return_value=0),patch.object(utils,'_write_systemd_service',return_value='/fixture/service'),patch.object(utils,'_service_is_active',return_value='failed'),patch.object(utils,'_check_port_open',return_value=False),patch.object(utils,'_check_url',return_value=(False,'fixture unavailable')),patch('time.sleep'):

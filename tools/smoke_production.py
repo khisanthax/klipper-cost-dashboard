@@ -25,6 +25,10 @@ def main():
             sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
         env={**os.environ,'KCD_STORAGE_BACKEND':'sql','KCD_REPORTS_BACKEND':'sql',
              'KCD_DATA_DIR':str(data),'KCD_API_KEY':'isolated-smoke-key','KCD_SQL_ONLY_FAIL_FAST':'1'}
+        if '--compat-backend' in sys.argv:
+            backend=sys.argv[sys.argv.index('--compat-backend')+1]
+            assert backend in ('csv','dual')
+            env['KCD_STORAGE_BACKEND']=backend;env['KCD_REPORTS_BACKEND']='auto' if backend=='dual' else 'csv'
         base=f'http://127.0.0.1:{port}'
         class Moonraker(BaseHTTPRequestHandler):
             def log_message(self,*args):pass

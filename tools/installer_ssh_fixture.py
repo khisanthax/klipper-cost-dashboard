@@ -7,6 +7,7 @@ import subprocess
 import time
 import uuid
 import sqlite3
+import sys
 from contextlib import closing
 
 
@@ -53,6 +54,14 @@ def exercise(env,base,moon,tmp):
             payload['apply']=True
             assert remote_operation('kcd-fixture','repair',payload)['applied']
             assert remote_operation('kcd-fixture','repair',payload)['changes']==[]
+            # Exercise the real remote installer menu, not just its transport API.
+            answers=['2','2','kcd-fixture','0',moon.config_root,'One',base,'',payload['moonraker'],'y','n','y','3','5']
+            menu=subprocess.run([sys.executable,'install.py'],input='\n'.join(answers)+'\n',env={**env,'PATH':os.environ['PATH']},text=True,capture_output=True,timeout=90)
+            assert menu.returncode==0 and '"applied": true' in menu.stdout,(menu.stdout[-2000:],menu.stderr[-400:])
+            assert env['KCD_API_KEY'] not in menu.stdout+menu.stderr
+            artifact=Path(__file__).resolve().parents[1]/'browser-artifacts'/'installer'
+            artifact.mkdir(parents=True,exist_ok=True)
+            (artifact/'remote-terminal.txt').write_text(menu.stdout)
             payload['key']='wrong-fixture-credential'
             try:remote_operation('kcd-fixture','repair',payload);raise AssertionError('Wrong key accepted')
             except RuntimeError:pass

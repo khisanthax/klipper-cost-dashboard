@@ -778,8 +778,9 @@ def register_client(entry: Dict[str, Any]) -> None:
     new = []
     replaced = False
     for c in registry:
-        if c.get("type") == t and c.get("printer_name") == pn:
-            new.append(entry)
+        if c.get("printer_name") == pn:
+            if not replaced:
+                new.append(entry)
             replaced = True
         else:
             new.append(c)
@@ -1518,6 +1519,29 @@ def master_setup(master_and_client: bool = False) -> None:
         install_client_local()
 
 
+def _client_api_key(master, directory=None):
+    """Reuse only a credential associated with the selected Master."""
+    if os.environ.get('KCD_API_KEY'):
+        return os.environ['KCD_API_KEY']
+    if directory:
+        try:
+            values = {}
+            for line in (Path(directory)/'kcd_job_start.sh').read_text().splitlines():
+                if line.startswith(('MASTER_URL=', 'API_KEY=')):
+                    key, value = line.split('=', 1)
+                    parsed = shlex.split(value)
+                    if len(parsed) == 1:
+                        values[key] = parsed[0]
+            if values.get('MASTER_URL', '').rstrip('/') == master.rstrip('/'):
+                return values.get('API_KEY', '')
+        except (OSError, ValueError):
+            pass
+    # A standalone printer's locally generated secret is not its Master's key.
+    if (os.environ.get('KCD_MASTER_CONTAINER') or load_state('master_service_name', '')) and load_state('master_url', '').rstrip('/') == master.rstrip('/'):
+        return _load_secret_api_key()
+    return ''
+
+
 def install_client_local(printer_name=None) -> None:
     from .discovery import discover_local
     from .workflow import repair_client
@@ -1541,7 +1565,7 @@ def install_client_local(printer_name=None) -> None:
         return
     master_default = load_state("master_url", os.environ.get("KCD_MASTER_URL", "http://localhost:5000"))
     master = _safe_input(f"Master URL reachable by printer [{master_default}]: ").strip() or master_default
-    key = prompt_secret("Master API key", _load_secret_api_key())
+    key = prompt_secret("Master API key", _client_api_key(master, directory))
     moonraker = _configure_moonraker_url_local(name)
     if not moonraker:
         return
@@ -1573,10 +1597,13 @@ def install_client_remote(printer_name=None) -> None:
         if selected is None:
             return
         candidate = candidates[selected-1] if selected else {}
+        if printer_name and candidate.get('printer_name') and candidate['printer_name'] != printer_name:
+            println("Selected configuration belongs to a different identity; update cancelled without changes.")
+            return
         directory = candidate.get("config_dir") or _safe_input("Remote config directory: ").strip()
         name = printer_name or _safe_input(f"Printer identity [{candidate.get('printer_name', '')}]: ").strip() or candidate.get("printer_name", "")
         master = _safe_input("Master URL reachable from the remote printer: ").strip()
-        key = prompt_secret("Master API key", _load_secret_api_key())
+        key = prompt_secret("Master API key", _client_api_key(master))
         moonraker = _safe_input("Moonraker URL reachable from Master (include actual port): ").strip()
         payload = dict(config_dir=directory, name=name, moonraker=moonraker, master=master, key=key,
                        relocate=prompt_yes_no("Explicit relocation of the same historical identity?", default=False),
@@ -1586,6 +1613,9 @@ def install_client_remote(printer_name=None) -> None:
         if prompt_yes_no("Apply this remote repair?", default=False):
             payload["apply"] = True
             println(json.dumps(remote_operation(host, "repair", payload), indent=2))
+            if not is_sql_only():
+                register_client({'printer_name':name,'type':'remote','host':host,'config_dir':directory,'master_url':master,'moonraker_url':moonraker})
+                save_state('master_url',master)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         println("Remote installation incomplete: " + str(exc))
 
