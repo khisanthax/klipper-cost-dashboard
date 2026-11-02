@@ -12,6 +12,7 @@ import hashlib
 import time
 import re
 import hmac
+import threading
 from functools import wraps
 from contextlib import closing
 from pathlib import Path
@@ -195,12 +196,18 @@ def get_job_thumbnail_url(
     return url
 
 
+_thumbnail_recovery_slots=threading.BoundedSemaphore(2)
+
+
 @app.get('/jobs/<job_uid>/thumbnail')
 def job_thumbnail(job_uid):
     """Lazy retrieval keeps remote printer failures out of HTML rendering."""
     asset=archived_thumbs.get_job_asset(job_uid)
     if asset:return archived_thumbnail(asset)
     status=archived_thumbs.get_job_status(job_uid)
+    if request.method=='HEAD':
+        state=status['status'] if status.get('checked_at') else 'recovery_deferred'
+        return ('',404,{'X-KCD-Thumbnail-Status':state,'Cache-Control':'no-store'})
     checked=status.get('checked_at')
     if checked:
         try:
@@ -215,8 +222,12 @@ def job_thumbnail(job_uid):
     except (AttributeError,ValueError):pass
     asset=archived_thumbs.recover_cached_job(job_uid,row['printer'],row['filename'],row['thumbnail'],ended)
     if not asset:
-        result=archived_thumbs.capture_job(job_uid,row['printer'],row['filename'],ended_at=ended,historical=True)
-        asset=result['asset'];status=result
+        if not _thumbnail_recovery_slots.acquire(blocking=False):
+            return ('',404,{'X-KCD-Thumbnail-Status':'recovery_deferred','Cache-Control':'no-store'})
+        try:
+            result=archived_thumbs.capture_job(job_uid,row['printer'],row['filename'],ended_at=ended,historical=True)
+            asset=result['asset'];status=result
+        finally:_thumbnail_recovery_slots.release()
     if asset:return archived_thumbnail(asset)
     return ('',404,{'X-KCD-Thumbnail-Status':status['status'],'Cache-Control':'no-store'})
 
@@ -3771,7 +3782,7 @@ def _settings_view(tab: str):
                     return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
                 if _is_sql_only():
                     if not rates.set_printer_rate_profile_sql(printer,profile_id):
-                        return redirect(url_for(_settings_endpoint_for_action(action),error='Rate profile not found; assignment was not changed'))
+                        return redirect(url_for(_settings_endpoint_for_action(action),error=f'Rate profile not found: {profile_id}'))
                     return redirect(url_for(_settings_endpoint_for_action(action)))
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:

@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 import re
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,6 +28,8 @@ ARCHIVE_ROOT = Path(DATA_DIR)/"thumbnails"/"objects"
 archive_lock = threading.RLock()
 _guard_state=threading.local()
 MAX_IMAGE_BYTES = 8*1024*1024
+_source_failures={}
+_source_failure_lock=threading.Lock()
 log = logging.getLogger(__name__)
 
 
@@ -138,6 +141,9 @@ def fetch_image(printer,filename,*,ended_at=None,historical=False):
     from core import thumbnails as cache
     base=cache.resolve_moonraker_base_url(printer)
     if not base:return None,'missing_endpoint',None
+    with _source_failure_lock:
+        failed=_source_failures.get(base)
+        if failed and time.monotonic()-failed[0]<30:return None,failed[1],None
     filename=cache._normalize_moonraker_filename(filename)
     if historical and not ended_at:return None,'insufficient_history',None
     def get(path,binary=False):
@@ -168,8 +174,18 @@ def fetch_image(printer,filename,*,ended_at=None,historical=False):
         data=get('/server/files/gcodes/'+urllib.parse.quote(rel,safe='/'),True)
         return retain_image(data),'archived',modified
     except urllib.error.HTTPError as exc:
-        return None,'source_unavailable' if exc.code==404 else 'source_auth_error' if exc.code in (401,403) else 'network_error',None
-    except (OSError,TimeoutError,ValueError,KeyError,TypeError):return None,'network_error',None
+        state='source_unavailable' if exc.code==404 else 'source_auth_error' if exc.code in (401,403) else 'network_error'
+        if exc.code!=404:
+            with _source_failure_lock:
+                if len(_source_failures)>=128:_source_failures.clear()
+                _source_failures[base]=(time.monotonic(),state)
+        return None,state,None
+    except (OSError,TimeoutError):
+        with _source_failure_lock:
+            if len(_source_failures)>=128:_source_failures.clear()
+            _source_failures[base]=(time.monotonic(),'network_error')
+        return None,'network_error',None
+    except (ValueError,KeyError,TypeError):return None,'network_error',None
 
 
 def capture_job(job_uid,printer,filename,*,live_asset=None,ended_at=None,historical=False):

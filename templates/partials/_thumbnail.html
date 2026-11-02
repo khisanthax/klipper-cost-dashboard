@@ -7,12 +7,13 @@
 {% set _size = size|default("small") %}
 {% if thumb_url %}
   <img
-    src="{{ thumb_url }}"
+    {% if thumb_url.startswith('/jobs/') %}data-kcd-src="{{ thumb_url }}"{% else %}src="{{ thumb_url }}"{% endif %}
     alt="{{ alt|default('Thumbnail') }}"
     class="kcd-thumb kcd-thumb-{{ _size }}"
     loading="lazy"
     decoding="async"
   >
+  {% if thumb_url.startswith('/jobs/') %}<noscript><img src="{{ thumb_url }}" alt="{{ alt|default('Thumbnail') }}" class="kcd-thumb kcd-thumb-{{ _size }}" loading="lazy"></noscript>{% endif %}
 {% else %}
   {% set _unavail = thumb_unavailable|default(false) %}
   <span class="kcd-thumb-wrap kcd-thumb-{{ _size }}">

@@ -153,3 +153,39 @@ class DashboardUXTests(unittest.TestCase):
             self.assertTrue(rates.delete_rate_profile('1'))
             self.assertIsNotNone(rates.get_rate_profile('first'))
             self.assertIsNone(rates.get_rate_profile('1'))
+
+    def test_thumbnail_timeouts_are_shared_per_endpoint(self):
+        from core import thumbnail_archive as archive,thumbnails
+        with patch.object(archive,'_source_failures',{}),patch.object(thumbnails,'resolve_moonraker_base_url',return_value='http://offline-fixture'),patch('urllib.request.urlopen',side_effect=TimeoutError) as network,patch.object(archive.time,'monotonic',return_value=0) as clock:
+            for filename in ('one.gcode','two.gcode','three.gcode'):
+                self.assertEqual(archive.fetch_image('Fixture',filename)[1],'network_error')
+            self.assertEqual(network.call_count,1)
+            clock.return_value=31
+            archive.fetch_image('Fixture','retry.gcode')
+            self.assertEqual(network.call_count,2)
+
+    def test_slow_thumbnail_recovery_does_not_consume_all_server_workers(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        from core import db
+        from core.registration import register_printer
+        import app
+        entered=threading.Barrier(3);release=threading.Event()
+        def slow(*args,**kwargs):
+            entered.wait(timeout=10);release.wait(timeout=10)
+            return dict(asset=None,status='network_error')
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql','KCD_SQL_ONLY_FAIL_FAST':'0'}),patch.object(db,'_db_path',lambda:str(Path(tmp)/'kcd.db')):
+            register_printer('Fixture','http://127.0.0.1:1')
+            with db.connect_db() as conn:
+                for i in range(3):db.upsert_job(conn,dict(job_uid='slow-'+str(i),printer='Fixture',filename='part.gcode',status='completed',time_cost=0,material_cost=0,total_cost=0))
+            with patch.object(app,'_thumbnail_recovery_slots',threading.BoundedSemaphore(2)),patch.object(app.archived_thumbs,'capture_job',side_effect=slow) as capture,ThreadPoolExecutor(max_workers=2) as pool:
+                futures=[pool.submit(lambda uid:app.app.test_client().get('/jobs/'+uid+'/thumbnail'),'slow-'+str(i)) for i in range(2)]
+                try:
+                    entered.wait(timeout=10)
+                    response=app.app.test_client().get('/jobs/slow-2/thumbnail')
+                    self.assertEqual(response.headers['X-KCD-Thumbnail-Status'],'recovery_deferred')
+                    self.assertEqual(app.app.test_client().get('/health').status_code,200)
+                    self.assertEqual(app.app.test_client().head('/jobs/slow-2/thumbnail').status_code,404)
+                    self.assertEqual(capture.call_count,2)
+                finally:release.set()
+                for future in futures:self.assertEqual(future.result().status_code,404)
