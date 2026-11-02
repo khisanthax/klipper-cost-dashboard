@@ -37,7 +37,7 @@
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="mb-0">Projects</h2>
+    <h1 class="h3">Projects</h1>
     <div class="d-flex align-items-center gap-3">
         <form method="post" class="mb-0">
             <input type="hidden" name="action" value="update_projects_display">
@@ -70,7 +70,7 @@
 <!-- Create Project -->
 <div class="card mb-4">
     <div class="card-header">
-        <h5 class="mb-0">Create Project</h5>
+        <h2 class="h5 mb-0">Create Project</h2>
     </div>
     <div class="card-body">
         <form method="post" class="row g-3">
@@ -90,6 +90,13 @@
             </div>
             <div class="col-12 border rounded p-2">
               <div class="small fw-semibold">Optional filament override</div>
+              <label class="form-label">Use filament profile pricing
+                <select name="project_filament_profile_id" class="form-select">
+                  <option value="">Custom pricing / defaults below</option>
+                  {% for fid, profile in (filament_profiles|default({})).items() %}<option value="{{ fid }}">{{ profile.name }}</option>{% endfor %}
+                </select>
+              </label>
+              <div class="small text-muted">A selected profile takes precedence over custom fields and saves a project pricing snapshot. Recorded job weights retain their own conversion.</div>
               {% set price_record={} %}{% set price_form='' %}{% set price_required=false %}
               {% include 'partials/_filament_price_inputs.html' %}
               <div class="small text-muted">Leave price blank for defaults. Tracked history changes only after a project pricing preview and explicit apply.</div>
@@ -111,7 +118,7 @@
 <!-- Projects Table -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">Projects</h5>
+        <h1 class="h3">Projects</h1>
         <span class="text-muted small">Totals are derived from assigned jobs</span>
     </div>
     <div class="card-body">
@@ -123,7 +130,7 @@
             Adjustment is the signed difference that reconciles Time Cost + Material Cost with the stored or overridden Total Cost.
         </div>
         {% endif %}
-        <div class="table-responsive">
+        <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
             <table class="table table-striped table-hover align-middle kcd-project-summary-table"
                 data-kcd-resizable="true" data-kcd-table-id="projects_table">
                 <thead class="table-light">
@@ -160,11 +167,12 @@
                         <td class="text-end">{{ p.totals.prints|int }}</td>
                         <td class="text-end">{{ "%.2f"|format(p.totals.hours) }}</td>
                         <td class="text-end">
-                            <div>{{ "%.2f"|format(p.totals.meters) }} m</div>
+                            <div class="fw-semibold">{{ '%.2f'|format(p.totals.get('tracked_filament_g',0) + (p.totals.filament_g or 0)) }} g known</div>
+                            <div class="small text-muted">{{ "%.2f"|format(p.totals.meters) }} m tracked length</div>
                             <div class="small">Tracked: {{ '%.2f'|format(p.totals.get("tracked_filament_g",0)) }} g ({{ '%.5f'|format(p.totals.get("tracked_filament_g",0) / 1000) }} kg)</div>
                             {% if p.totals.get("unknown_weights",0) %}<div class="text-warning small">{{ p.totals.get("unknown_weights",0) }} job(s) need weight conversion</div>{% endif %}
                             {% if p.totals.filament_g and p.totals.filament_g > 0 %}
-                            <div class="text-muted small">{{ "%.1f"|format(p.totals.filament_g) }} g</div>
+                            <div class="text-muted small">Manual: {{ "%.1f"|format(p.totals.filament_g) }} g</div>
                             {% endif %}
                         </td>
                         {% if show_cost_totals %}
@@ -199,6 +207,13 @@
                                                 <div class="text-muted small">$/hr</div>
                                             </div>
                                             <div class="col-12 border rounded p-2">
+                                              <label class="form-label">Use filament profile pricing
+                                                <select name="project_filament_profile_id" class="form-select">
+                                                  <option value="">Custom pricing / defaults below</option>
+                                                  {% for fid, profile in (filament_profiles|default({})).items() %}<option value="{{ fid }}" {% if p.price_record.get('profile_id')==fid %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}
+                                                </select>
+                                              </label>
+                                              <div class="small text-muted">Selected profile takes precedence on Save. Manual/planned costs use these defaults; tracked costs need a fresh preview and apply. Clear prices to restore defaults.</div>
                                               {% set price_record=p.price_record %}{% set price_form='' %}{% set price_required=false %}
                                               {% include 'partials/_filament_price_inputs.html' %}
                                             </div>
@@ -232,12 +247,12 @@
                                     </div>
 
                                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-                                        <h6 class="mb-0">Jobs in this project</h6>
+                                        <h3 class="h6 mb-0">Jobs in this project</h3>
                                     </div>
                                     {% if not p.jobs %}
                                     <div class="text-muted">No jobs assigned yet.</div>
                                     {% else %}
-                                    <div class="table-responsive">
+                                    <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
                                         {% set _proj_cols = projects_project_jobs_visible_cols if projects_project_jobs_visible_cols is defined and projects_project_jobs_visible_cols else ["date","thumbnail","printer","filename","status","hours","filament","time_cost","material_cost","adjustment","total_cost"] %}
                                         <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-table kcd-project-component-table"
                                             data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="project_{{ p.id }}_jobs_table">
@@ -320,7 +335,7 @@
                                     <hr class="my-4">
 
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-                                        <h6 class="mb-0">Manual Jobs</h6>
+                                        <h3 class="h6 mb-0">Manual Jobs</h3>
                                         <div class="d-flex align-items-center gap-2">
                                             <span class="text-muted small">Cost uses project defaults unless an override is set.</span>
                                             <button type="button" class="btn btn-sm btn-outline-primary"
@@ -333,7 +348,7 @@
                                     {% if not p.manual_jobs %}
                                     <div class="text-muted">No manual jobs for this project.</div>
                                     {% else %}
-                                    <div class="table-responsive">
+                                    <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
                                         <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-project-component-table"
                                             data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_manual_jobs_table">
                                             <thead class="table-light">
@@ -414,7 +429,7 @@
                                     <hr class="my-4">
 
                                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-                                        <h6 class="mb-0">Planned Items (Pre-Planner)</h6>
+                                        <h3 class="h6 mb-0">Planned Items (Pre-Planner)</h3>
                                         <span class="text-muted small">Upload a .gcode file to extract slicer estimates</span>
                                     </div>
 
@@ -495,7 +510,7 @@
                                     {% if not p.planned_items %}
                                     <div class="text-muted">No planned items for this project.</div>
                                     {% else %}
-                                    <div class="table-responsive">
+                                    <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
                                         <table class="table table-sm table-striped table-hover align-middle mb-0 kcd-project-component-table"
                                             data-kcd-resizable="true" data-kcd-table-id="project_{{ p.id }}_planned_items_table">
                                             <thead class="table-light">
@@ -623,7 +638,7 @@
 <!-- Unassigned Jobs -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">Unassigned Jobs</h5>
+        <h2 class="h5 mb-0">Unassigned Jobs</h2>
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <span class="text-muted small">Select jobs and assign them to a project</span>
         </div>
@@ -664,14 +679,14 @@
                 </div>
             </div>
 
-            <div class="table-responsive">
+            <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
                 <table class="table table-striped table-hover align-middle kcd-table" id="kcdUnassignedJobsTable"
                     data-kcd-resizable="true" data-kcd-sortable="true" data-kcd-table-id="projects_unassigned_jobs_table"
                     data-kcd-printer-filter="kcdUnassignedPrinterFilter">
                     <thead class="table-light">
                         {% set _unassigned_cols = projects_unassigned_visible_cols if projects_unassigned_visible_cols is defined and projects_unassigned_visible_cols else ["thumbnail","date","printer","filename","status","hours","filament","cost"] %}
                         <tr>
-                            <th style="width: 1%;" data-col="__select__" data-sortable="false"></th>
+                            <th style="width: 1%;" data-col="__select__" data-sortable="false"><span class="visually-hidden">Select jobs</span></th>
                             <th style="width: 72px;" data-col="thumbnail" data-sortable="false" class="{% if 'thumbnail' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Thumb</th>
                             <th data-col="date" data-sort-type="date" class="{% if 'date' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Date</th>
                             <th data-col="printer" data-sort-type="text" class="{% if 'printer' not in _unassigned_cols %}kcd-col-hidden{% endif %}">Printer</th>
@@ -942,12 +957,12 @@
 </script>
 
 <!-- Manual Job Modal -->
-<div class="modal fade" id="kcdManualJobModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="kcdManualJobModal" tabindex="-1" aria-hidden="true" aria-labelledby="kcdManualJobTitle">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <form method="post" id="kcdManualJobForm">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="kcdManualJobTitle">Manual Job</h5>
+                    <h2 class="h5 modal-title" id="kcdManualJobTitle">Manual Job</h2>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
@@ -1053,12 +1068,12 @@
 </script>
 
 <!-- Planned Item Modal -->
-<div class="modal fade" id="kcdPlanModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="kcdPlanModal" tabindex="-1" aria-hidden="true" aria-labelledby="kcdPlanTitle">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <form method="post" id="kcdPlanForm">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="kcdPlanTitle">Edit Planned Item</h5>
+                    <h2 class="h5 modal-title" id="kcdPlanTitle">Edit Planned Item</h2>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">

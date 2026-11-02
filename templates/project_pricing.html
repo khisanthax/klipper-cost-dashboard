@@ -9,7 +9,7 @@
   No changes have been applied by opening this page.
 </div>
 {% for item in plan.errors %}<div class="alert alert-warning">{{ item.filename }}: {{ item.error }}</div>{% endfor %}
-<div class="table-responsive">
+<div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
 <table class="table table-striped table-sm" id="project-pricing-preview">
 <thead><tr><th>Job / conversion</th><th>Source</th><th>View</th><th>Time ($)</th><th>Material ($)</th><th>Adjustment ($)</th><th>Total ($)</th></tr></thead>
 <tbody>

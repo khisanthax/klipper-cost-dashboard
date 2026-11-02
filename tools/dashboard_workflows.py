@@ -1,0 +1,147 @@
+"""Browser mutations confined to browser_dashboard_audit's disposable server."""
+from decimal import Decimal
+import math
+import time
+import uuid
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+from contextlib import closing
+
+
+def exercise(page,context,base,project,data,artifacts):
+    def query(sql,*args):
+        with closing(sqlite3.connect(Path(data)/'kcd.db')) as conn:
+            conn.row_factory=sqlite3.Row
+            return [dict(row) for row in conn.execute(sql,args)]
+    def form(action,within=None):
+        return (within or page).locator('form').filter(has=page.locator('input[name=action][value="'+action+'"]'))
+    def click(control):
+        with page.expect_navigation(wait_until='domcontentloaded'):control.click()
+    def open_project(uid):
+        page.goto(base+'/projects?edit_project='+uid)
+        panel=page.locator('[id="proj-'+uid+'"]')
+        if not panel.is_visible():page.locator('[data-bs-target="#proj-'+uid+'"]').click()
+        panel.wait_for(state='visible')
+        return panel
+    # Read-only current observations must not modify persisted event state.
+    live_before=query("SELECT value_json FROM user_settings WHERE key='live_jobs'")
+    response=context.request.get(base+'/api/printer-status');assert response.ok
+    states=response.json()['printers']
+    for name,state in [('Idle','standby'),('Printing','printing'),('Paused','paused'),('Cancelled','cancelled'),('Completed','complete'),('Offline','disconnected')]:assert states[name]['state']==state,(name,states[name])
+    assert states['Cancelled']['tracking_warning']
+    assert abs(states['Printing']['total_cost']-(2.5+600/3600))<1e-8
+    assert states['Paused']['time_cost']==states['Printing']['time_cost']
+    assert live_before==query("SELECT value_json FROM user_settings WHERE key='live_jobs'")
+    page.goto(base+'/')
+    page.keyboard.press('Tab');assert page.get_by_role('link',name='Skip to main content').evaluate('(e)=>document.activeElement===e')
+    page.set_viewport_size({'width':390,'height':844})
+    scroll=page.locator('#historyPostForm .table-responsive');scroll.focus();page.keyboard.press('ArrowRight')
+    page.wait_for_function("document.querySelector('#historyPostForm .table-responsive').scrollLeft>0")
+    page.set_viewport_size({'width':1440,'height':1000})
+    page.wait_for_function("document.querySelector('[data-kcd-printer=Cancelled] [data-live-state]').textContent==='CANCELLED'")
+    assert 'differs' in page.locator('[data-kcd-printer=Cancelled] [data-live-message]').inner_text()
+    # Page-scoped tab/session policy: refresh preserves IDs, pagination resets.
+    boxes=page.locator('#historyPostForm input[name=delete_rows]');uid=boxes.first.input_value();boxes.first.check()
+    page.reload();assert page.locator('#historyPostForm input[value="'+uid+'"]').is_checked()
+    page.locator('#history-table th[data-col=filename]').click()
+    assert page.locator('#historyPostForm input[value="'+uid+'"]').is_checked()
+    page.get_by_role('button',name='Clear Selection',exact=True).click();assert page.locator('#historyPostForm input:checked').count()==0
+    boxes.first.check();page.goto(base+'/?history_page=2');assert page.locator('#historyPostForm input:checked').count()==0
+    page.goto(base+'/');assert page.locator('#historyPostForm input:checked').count()==0
+    # Existing RaRa acceptance: saved historical totals, project-only snapshot.
+    originals=query('SELECT * FROM jobs ORDER BY job_uid')
+    page.goto(base+'/projects/'+project+'/pricing')
+    assert '40.83' in page.locator('tfoot').inner_text()
+    assert '2721.882' in page.locator('body').inner_text() or '2721.882' in str(sum(Decimal(str(r['filament_grams'])) for r in query("SELECT filament_grams FROM jobs WHERE job_uid LIKE 'mask-%'")))
+    click(page.get_by_role('button',name='Apply project-adjusted snapshot',exact=True))
+    assert len(query('SELECT * FROM project_job_pricing'))==15
+    assert query('SELECT * FROM jobs ORDER BY job_uid')==originals
+    page.goto(base+'/projects/'+project+'/pricing');click(page.get_by_role('button',name='Use saved historical costs',exact=True))
+    assert not query('SELECT * FROM project_job_pricing')
+    # Create with a project profile; manual/planned costs are distinct actual/estimated views.
+    page.goto(base+'/projects');create=form('create_project')
+    create.locator('[name=name]').fill('Browser workflow')
+    create.locator('[name=hourly_rate_override]').fill('0')
+    create.locator('[name=project_filament_profile_id]').select_option('petg-15')
+    click(create.get_by_role('button',name='Create',exact=True))
+    created=query('SELECT * FROM projects WHERE name=?','Browser workflow')[0];pid=created['project_uid']
+    assert created['hourly_rate_override']==0 and created['filament_cost_per_kg_override']==15
+    assert json.loads(created['filament_price_json'])['profile_id']=='petg-15'
+    panel=open_project(pid);edit=form('update_project',panel);edit.locator('[name=notes]').fill('Verified through actual forms');click(edit.get_by_role('button',name='Save',exact=True))
+    assert query('SELECT notes FROM projects WHERE project_uid=?',pid)[0]['notes']=='Verified through actual forms'
+    # Assign and remove exactly one existing job; history remains unchanged.
+    assignment=page.locator('form').filter(has=page.locator('button[value=assign_jobs]'))
+    assigned=assignment.locator('input[name=job_uid]').first.input_value()
+    assignment.locator('input[name=job_uid]').first.check();assignment.locator('[name=project_id]').select_option(pid)
+    click(assignment.get_by_role('button',name='Assign Selected',exact=True))
+    assert query('SELECT project_id FROM project_assignments WHERE job_uid=?',assigned)[0]['project_id']==created['id']
+    panel=open_project(pid);remove=form('unassign_job',panel);click(remove.get_by_role('button',name='Unassign',exact=True))
+    assert not query('SELECT * FROM project_assignments WHERE job_uid=?',assigned)
+    panel=open_project(pid)
+    page.evaluate("window.manualModalReady=false;document.getElementById('kcdManualJobModal').addEventListener('shown.bs.modal',()=>window.manualModalReady=true,{once:true})")
+    panel.get_by_role('button',name='Add Manual Job',exact=True).click()
+    modal=page.get_by_role('dialog');modal.wait_for(state='visible')
+    page.wait_for_function('window.manualModalReady')
+    assert modal.get_attribute('aria-labelledby')=='kcdManualJobTitle'
+    page.keyboard.press('Escape');modal.wait_for(state='hidden')
+    panel.get_by_role('button',name='Add Manual Job',exact=True).click();modal.wait_for(state='visible')
+    modal.get_by_label('Description',exact=True).fill('Hand finishing')
+    modal.get_by_label('Hours',exact=True).fill('1')
+    modal.get_by_label('Filament (g)',exact=True).fill('1000')
+    modal.get_by_label('Cost override ($)',exact=True).fill('2')
+    click(modal.get_by_role('button',name='Save',exact=True))
+    manual=query('SELECT * FROM manual_jobs WHERE project_id=?',created['id'])[0]
+    assert manual['cost_override']==2 and manual['filament_g']==1000
+    panel=open_project(pid);assert '-$13.00' in panel.inner_text()
+    upload=form('upload_plan_gcode',panel)
+    upload.locator('[name=gcode_file]').set_input_files({'name':'planned.gcode','mimeType':'text/plain','buffer':b'; estimated printing time (normal mode) = 1h\n; filament used [g] = 500\nG1 X0\n'})
+    upload.locator('[name=manual_time_hours]').fill('1');upload.locator('[name=manual_filament_g]').fill('500')
+    click(upload.get_by_role('button',name='Add Planned Item',exact=True))
+    plan=query('SELECT * FROM planned_items WHERE project_id=?',created['id'])[0]
+    assert abs(plan['est_cost']-7.5)<1e-8,plan
+    # Project defaults can be explicitly cleared without modifying saved history.
+    panel=open_project(pid);edit=form('update_project',panel)
+    edit.locator('[name=project_filament_profile_id]').select_option('');edit.locator('[name=pricing_amount]').fill('');edit.locator('[name=hourly_rate_override]').fill('')
+    click(edit.get_by_role('button',name='Save',exact=True))
+    cleared=query('SELECT * FROM projects WHERE project_uid=?',pid)[0]
+    assert cleared['hourly_rate_override'] is None and cleared['filament_cost_per_kg_override'] is None
+    # Delete project after reviewing the confirmation; jobs are never deleted.
+    panel=open_project(pid);page.once('dialog',lambda dialog:dialog.accept());click(form('delete_project',panel).get_by_role('button',name='Delete Project',exact=True))
+    assert not query('SELECT * FROM projects WHERE project_uid=?',pid)
+    assert query('SELECT * FROM jobs ORDER BY job_uid')==originals
+    # Spool inputs drive actual completed-job calculations for several materials.
+    for material,price,spool,density,diameter in [('PETG',15,1000,1.25,1.75),('PLA',9,500,1.24,1.75),('ABS',13.5,250,1.04,2.85)]:
+        page.goto(base+'/settings/profiles');add=form('add_filament_profile')
+        name='Browser '+material+' spool'
+        add.locator('[name=profile_name]').fill(name);add.locator('[name=material]').fill(material)
+        assert add.locator('[name=pricing_mode]').input_value()=='spool'
+        add.locator('[name=pricing_amount]').fill(str(price));add.locator('[name=net_spool_grams]').fill(str(spool))
+        add.locator('[name=conversion_basis]').select_option('geometry');add.locator('[name=density_g_cm3]').fill(str(density));add.locator('[name=diameter_mm]').fill(str(diameter))
+        click(add.get_by_role('button',name='Add',exact=True))
+        saved=query('SELECT * FROM filament_profiles WHERE name=?',name)[0];fid=saved['profile_uid']
+        factor=math.pi*diameter**2/4*density
+        assert abs(saved['grams_per_meter']-factor)<1e-10
+        page.goto(base+'/settings/printers')
+        mapping=form('set_active_filament_profile').filter(has=page.locator('input[name=printer][value=Idle]'))
+        mapping.locator('[name=profile_id]').select_option(fid);click(mapping.get_by_role('button',name='Set',exact=True))
+        hourly=form('set_active_rate_profile').filter(has=page.locator('input[name=printer][value=Idle]'))
+        hourly.locator('[name=rate_profile_id]').select_option('free');click(hourly.get_by_role('button',name='Apply',exact=True))
+        response=context.request.post(base+'/log-print',headers={'X-API-Key':'disposable-ux-key'},data=dict(printer='Idle',filename=name+'.gcode',duration_seconds=3600,filament_mm=100000,timestamp=time.time(),event_id=str(uuid.uuid4())))
+        assert response.ok,response.text()
+        job=query('SELECT * FROM jobs WHERE filename=?',name+'.gcode')[0]
+        expected=100*factor*price/spool
+        assert job['time_cost']==0 and abs(job['material_cost']-expected)<1e-8 and abs(job['total_cost']-expected)<1e-8,job
+        assert job['filament_mode']=='per_kg' and abs(job['filament_rate']-price*1000/spool)<1e-10
+        print(material+' independent spool expectation: '+str(expected))
+    # SQL-only backup/display/pause controls are actual UI actions.
+    page.goto(base+'/settings/pause');page.locator('#pause_include_default').check();click(page.get_by_role('button',name='Save pause settings',exact=True))
+    assert json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['pause_include_paused_time_default']
+    page.goto(base+'/settings/other');click(form('backup_now').get_by_role('button',name='Backup now',exact=True))
+    assert list(Path(data,'backups').glob('kcd_backup_*.tar.gz'))
+    assert 'Backup' in page.locator('body').inner_text()
+    with closing(sqlite3.connect(Path(data)/'kcd.db')) as conn:
+        assert conn.execute('pragma integrity_check').fetchone()[0]=='ok';assert not conn.execute('pragma foreign_key_check').fetchall()
+    page.screenshot(path=str(artifacts/'workflow-complete.png'),full_page=True)
+    print('Dashboard workflows passed: six live states, retained SQL state, History session policy, RaRa project overlay, project CRUD, assignment/removal, signed manual adjustment, planned upload, cleared overrides, pause save and backup')

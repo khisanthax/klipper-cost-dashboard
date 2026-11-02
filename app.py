@@ -2874,11 +2874,12 @@ def projects_page():
 
     # Build view models (derived totals always computed from current membership)
     project_rows = []
+    project_filament_profiles=profiles.get_all_profiles()
     for pid, p in projects_map.items():
         jobs = project_jobs.get(pid, [])
         manual_jobs = manual_jobs_by_project.get(pid, [])
         from core import project_pricing
-        from core.filament import conversion,reconcile_display
+        from core.filament import describe_job,reconcile_display
         overlays=project_pricing.saved_overlays(pid) if _is_sql_only() else {}
         for job in jobs:
             components=projects.compute_tracked_job_cost_components(job)
@@ -2887,7 +2888,8 @@ def projects_page():
             if overlay:
                 components={key:float(overlay['after'][key]) for key in ('time_cost','material_cost','adjustment','total_cost')}
             job.update(components)
-            measurement=conversion(job,profiles.get_profile(job.get('filament_profile_id')) if job.get('filament_profile_id') else {})
+            describe_job(job,project_filament_profiles.get(job.get('filament_profile_id')))
+            measurement={'grams':job['_weight_grams'],'grams_per_meter':job['_weight_factor'],'conversion_source':job['_weight_source']}
             if overlay:
                 measurement={**measurement,**{k:overlay[k] for k in ('grams','grams_per_meter','conversion_source')}}
             job['_weight_grams']=float(measurement['grams']) if measurement['grams'] is not None else None
@@ -2979,7 +2981,7 @@ def projects_page():
                 "name": p.name,
                 "notes": p.notes,
                 "hourly_rate_override": p.hourly_rate_override,
-                "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
+                "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter"),"profile_id":p.filament_price.get("profile_id")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
                 "adjusted_jobs": len(overlays),
                 "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
                 "labor_only": bool(p.labor_only),
@@ -3111,6 +3113,7 @@ def projects_page():
         unassigned_jobs_page=unassigned_jobs_page,
         unassigned_pager=unassigned_pager,
         projects_by_id={p["id"]: p for p in project_rows},
+        filament_profiles=project_filament_profiles,
     )
 
 
@@ -3430,7 +3433,6 @@ def _settings_view(tab: str):
             else:
                 summary = import_moonraker_history_to_csv(
                     csv_file=CSV_FILE,
-      history_source="SQL" if _is_sql_only() else "CSV",
                     headers=HEADERS,
                     printer_name=printer,
                     base_url=base_url,

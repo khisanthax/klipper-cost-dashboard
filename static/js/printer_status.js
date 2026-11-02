@@ -16,6 +16,10 @@
         const message=node.querySelector('[data-live-message]');
         if(message)message.textContent=item.tracking_warning||item.error||('Moonraker verified '+new Date(item.observed_at*1000).toLocaleTimeString());
         const active=item.connected&&['printing','paused'].includes(item.state);
+        const current=node.querySelector('[data-live-current]');
+        if(current)current.textContent=active?item.filename+' · '+(item.grams!=null?item.grams.toFixed(2)+' g':'weight unavailable')+' · '+(item.total_cost!=null?'$'+item.total_cost.toFixed(2)+' estimated':item.pricing_error||'price unavailable'):'';
+        const filename=node.querySelector('[data-live-filename]');
+        if(filename&&active)filename.textContent=item.filename;
         const cost=node.querySelector('[data-live-cost]');
         if(cost){cost.textContent=active&&item.total_cost!=null?'$'+item.total_cost.toFixed(2):item.pricing_error||item.tracking_warning||item.error||'No active print';cost.title='Live estimate includes material and time at current printer pricing; final billing applies the configured minimum hour.';}
         const filament=node.querySelector('[data-live-filament]');
@@ -25,6 +29,7 @@
       });
     } catch (_) {
       document.querySelectorAll('[data-live-message],[data-live-cost]').forEach(node=>node.textContent='Live status unavailable; displayed tracking may be stale');
+      document.querySelectorAll('[data-live-current],[data-live-filament],[data-live-elapsed]').forEach(node=>node.textContent='Unverified');
       document.querySelectorAll('[data-live-state]').forEach(node=>{node.textContent='UNVERIFIED';node.className='badge bg-secondary';});
     } finally {pending=false;}
   };

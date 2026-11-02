@@ -129,7 +129,7 @@ except RuntimeError as exc:print(str(exc))
                 endpoint=defaults.get_by_label('Moonraker URL',exact=True)
                 assert endpoint.is_visible() and endpoint.is_enabled()
                 endpoint.focus();assert endpoint.evaluate('(e)=>document.activeElement===e')
-                assert page.get_by_role('heading',level=5).all_text_contents()==['One','Two']
+                assert page.get_by_role('heading',level=2).all_text_contents()==['One','Two']
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),label+' page overflows horizontally'
                 page.screenshot(path=str(artifacts/(label+'.png')),full_page=True)
             page.evaluate("document.body.style.zoom=1")

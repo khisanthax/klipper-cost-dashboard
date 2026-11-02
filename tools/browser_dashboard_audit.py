@@ -82,12 +82,25 @@ def main():
                             response=page.goto(base+route,wait_until='load');page.evaluate('(z)=>document.body.style.zoom=z',zoom)
                             missing=page.locator('input:not([type=hidden]):not([type=submit]),select,textarea').evaluate_all('''es=>es.filter(e=>!e.disabled&&!e.labels?.length&&!e.getAttribute('aria-label')&&!e.getAttribute('aria-labelledby')&&!['button','reset'].includes(e.type)).map(e=>({tag:e.tagName,name:e.name,id:e.id}))''')
                             result={'route':route,'layout':label,'status':response.status,'seconds':round(time.monotonic()-start,3),'overflow':page.evaluate('document.documentElement.scrollWidth>innerWidth+1'),'unlabelled':missing}
+                            if label in ('desktop','mobile') and '--axe' in sys.argv:
+                                vendor=ROOT/'tools/vendor/axe-core-4.14.0'
+                                import hashlib
+                                assert hashlib.sha256((vendor/'axe.min.js').read_bytes()).hexdigest()==json.loads((vendor/'manifest.json').read_text())['sha256']
+                                page.add_script_tag(path=str(vendor/'axe.min.js'))
+                                audit=page.evaluate("async()=>{const r=await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa','best-practice']}});return {violations:r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),incomplete:r.incomplete.length}}")
+                                result['accessibility']=audit
                             results.append(result)
                             page.screenshot(path=str(artifacts/(route.replace('/','_').strip('_')+'-'+label+'.png')),full_page=True)
                             assert response.status==200,result
                     (artifacts/'page-audit.json').write_text(json.dumps({'pages':results,'browser_errors':errors},indent=2))
                     assert not errors,errors
                     print(json.dumps({'pages':len(results),'overflow_cases':sum(r['overflow'] for r in results),'unlabelled_cases':sum(len(r['unlabelled']) for r in results),'slowest_seconds':max(r['seconds'] for r in results)}))
+                    if '--baseline' not in sys.argv:
+                        assert not any(r['overflow'] or r['unlabelled'] for r in results),'Resolve layout/label findings in page-audit.json'
+                        assert not any(r.get('accessibility',{}).get('violations') for r in results),'Resolve automated accessibility findings in page-audit.json'
+                        page.set_viewport_size({'width':1440,'height':1000});page.goto(base+'/')
+                        from dashboard_workflows import exercise
+                        exercise(page,context,base,project,tmp,artifacts)
                 except Exception:
                     page.screenshot(path=str(artifacts/'failure.png'),full_page=True);raise
                 finally:context.tracing.stop(path=str(artifacts/'trace.zip'));browser.close()
