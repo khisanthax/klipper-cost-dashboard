@@ -1500,7 +1500,10 @@ def index():
     
     # Compute printer summaries for status cards
     from core.reports import compute_printer_summaries
-    printer_summaries = compute_printer_summaries(rows, active_jobs)
+    now_for_cards=datetime.now(TIMEZONE_OBJ)
+    today_for_cards=now_for_cards.replace(hour=0,minute=0,second=0,microsecond=0)
+    card_rows=history_repo.printer_card_rows(today_for_cards,now_for_cards)
+    printer_summaries = compute_printer_summaries(card_rows, active_jobs)
 
     # Enrich printer summaries with active filament/rate profile names
     all_profiles = profiles.get_all_profiles()
@@ -1549,8 +1552,9 @@ def index():
         else:
             job["_thumb_small"] = None
 
-    from core.filament import describe_job
+    from core.filament import describe_job,summarize_weights
     all_filament_profiles=profiles.get_all_profiles()
+    summary.update(summarize_weights(rows,all_filament_profiles))
     for row in history_rows_page:
         describe_job(row,all_filament_profiles.get(row.get('filament_profile_id')))
 
@@ -1619,9 +1623,11 @@ def reports_page():
     """Reports page with monthly breakdown and top printers."""
     data = reports_repo.get_reports_data(request.args)
     start,end,_label,_quick=get_date_range_from_params(request.args)
-    recent=history_repo.list_history_rows(history_repo.HistoryQuery(start_dt=start,end_dt=end),page=1,per_page=10).rows_page
-    from core.filament import describe_job
+    history=history_repo.list_history_rows(history_repo.HistoryQuery(start_dt=start,end_dt=end),page=1,per_page=10)
+    recent=history.rows_page
+    from core.filament import describe_job,summarize_weights
     all_profiles=profiles.get_all_profiles()
+    data.setdefault('summary',{}).update(summarize_weights(history.rows_all,all_profiles))
     printer_settings=load_settings(SETTINGS_FILE)
     for row in recent:
         describe_job(row,all_profiles.get(row.get('filament_profile_id')))
@@ -1904,6 +1910,8 @@ def recalculate_page():
 
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
+    from core.filament import describe_job
+    for row in rows_page:describe_job(row,filament_profiles.get(row.get('filament_profile_id')))
     rate_profiles = rates.list_rate_profiles()
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     recalc_visible_cols = get_visible_columns_for_table(

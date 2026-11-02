@@ -288,7 +288,7 @@
                             <td class="text-truncate{% if 'filename' not in _recalc_cols %} kcd-col-hidden{% endif %}" style="max-width: 420px;" title="{{ r.filename }}" data-col="filename">{{ r.filename }}</td>
                             <td class="text-nowrap{% if 'status' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="status">{{ r.status }}</td>
                             <td class="text-end{% if 'hours' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="hours">{{ "%.2f"|format(r.duration_hours|float) }}</td>
-                            <td class="text-end{% if 'filament' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="filament">{{ "%.2f"|format(r.filament_meters|float) }}</td>
+                            <td class="text-end{% if 'filament' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="filament"><strong>{{ '%.2f'|format(r._weight_grams) ~ ' g' if r.get('_weight_grams') is not none else 'Weight unknown' }}</strong><br><small title="{{ r.get('_weight_source','Preview to inspect conversion') }}">{{ '%.2f'|format(r.filament_meters|float) }} m</small></td>
                             <td class="text-end{% if 'time_cost' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="time_cost">{{ "%.2f"|format(r.time_cost|float) }}</td>
                             <td class="text-end{% if 'material_cost' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="material_cost">{{ "%.2f"|format(r.material_cost|float) }}</td>
                             <td class="text-end{% if 'total' not in _recalc_cols %} kcd-col-hidden{% endif %}" data-col="total">{{ "%.2f"|format(r.total_cost|float) }}</td>

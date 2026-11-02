@@ -94,3 +94,24 @@ class DashboardUXTests(unittest.TestCase):
             self.assertEqual(response.status_code,200)
             self.assertIn(b'Weight unknown',response.data)
             self.assertEqual(catalog.call_count,1)
+
+    def test_history_filters_do_not_zero_another_printers_today_card(self):
+        from core import db
+        from core.registration import register_printer
+        import time
+        import app
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql','KCD_SQL_ONLY_FAIL_FAST':'0'}),patch.object(db,'_db_path',lambda:str(Path(tmp)/'kcd.db')):
+            for name in ('Fixture','Other'):register_printer(name,'http://127.0.0.1:1')
+            with db.connect_db() as conn:
+                db.upsert_job(conn,dict(job_uid='today-other',printer='Other',filename='other-today.gcode',status='completed',timestamp=time.time()-10,time_cost=5,material_cost=0,total_cost=5))
+                db.upsert_job(conn,dict(job_uid='older-other',printer='Other',filename='older.gcode',status='completed',timestamp=time.time()-86400*3,time_cost=9,material_cost=0,total_cost=9))
+            response=app.app.test_client().get('/?printer=Fixture&range=yesterday')
+            self.assertEqual(response.status_code,200)
+            self.assertIn(b'$5.00',response.data)
+            self.assertIn(b'other-today.gcode',response.data)
+
+    def test_weight_aggregate_reports_missing_measurements_explicitly(self):
+        from core.filament import summarize_weights
+        result=summarize_weights([dict(filament_meters=1,grams_per_meter=3),dict(filament_meters=2)],{})
+        self.assertEqual(float(result['known_grams']),3)
+        self.assertEqual(result['unknown_weights'],1)

@@ -4,7 +4,8 @@
 <p>Tracked jobs keep their saved historical prices until you explicitly apply this project-only snapshot. Historical job records are retained unchanged. Manual jobs use current project defaults and their recorded grams; exact total overrides remain exact. Planned items are hypothetical estimates and are excluded from actual totals.</p>
 {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
 <div class="alert alert-info">
-  Tracked length: {{ plan.meters }} m · Estimated/recorded mass: {{ plan.grams }} g ({{ plan.grams / 1000 }} kg).<br>
+  Known estimated/recorded mass subtotal: {{ plan.grams }} g ({{ plan.grams / 1000 }} kg) · Tracked length: {{ plan.meters }} m.
+  {% if plan.unknown_weights %}<strong>{{ plan.unknown_weights }} jobs have unavailable measurements or calculation errors; they are not treated as zero weight.</strong>{% endif %}<br>
   Saved historical: ${{ '%.2f'|format(plan.before_totals.total_cost) }} → Project-adjusted preview: <strong>${{ '%.2f'|format(plan.after_totals.total_cost) }}</strong>.
   No changes have been applied by opening this page.
 </div>

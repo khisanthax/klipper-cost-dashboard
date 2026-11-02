@@ -149,6 +149,16 @@ def describe_job(row,profile=None):
     return row
 
 
+def summarize_weights(rows,profiles):
+    """Known mass only; never substitute zero for an unknown job measurement."""
+    total=Decimal(0);unknown=0
+    for row in rows:
+        describe_job(row,profiles.get(row.get('filament_profile_id')))
+        if row['_weight_grams'] is None:unknown+=1
+        else:total+=Decimal(str(row['_weight_grams']))
+    return {'known_grams':total,'unknown_weights':unknown}
+
+
 def reconcile_display(rows):
     """Allocate fractional cents so totals equal the displayed job components."""
     fields=('time_cost','material_cost','adjustment')

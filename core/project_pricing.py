@@ -62,6 +62,7 @@ def preview(project_uid):
     after_totals=reconcile_display([r['after'] for r in calculations])
     return {'project':project,'rows':calculations,'errors':errors,'fingerprint':fingerprint,
             'before_totals':before_totals,'after_totals':after_totals,
+            'unknown_weights':len(errors)+sum(r['grams'] is None for r in calculations),
             'grams':sum((r['grams'] for r in calculations if r['grams'] is not None),Decimal(0)),
             'meters':sum((r['meters'] for r in calculations if r['meters'] is not None),Decimal(0))}
 

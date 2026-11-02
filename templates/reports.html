@@ -38,6 +38,7 @@
 </div>
 
 <!-- Pause & Runout -->
+<p class="small">Known filament weight: <strong>{{ '%.2f'|format(summary.known_grams|default(0)) }} g</strong>{% if summary.unknown_weights %} · {{ summary.unknown_weights }} jobs have unknown weight{% endif %}. Saved historical costs are retained.</p>
 <div class="card mb-4">
     <div class="card-header">
         <h2 class="h5 mb-0">Pause & Runout</h2>

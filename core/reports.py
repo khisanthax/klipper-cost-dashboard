@@ -374,7 +374,7 @@ def compute_printer_summaries(rows, live_jobs_list):
             ts_raw = r.get("timestamp_raw")
             if ts_raw:
                 try:
-                    if float(ts_raw) >= today_ts:
+                    if today_ts <= float(ts_raw) <= datetime.now().timestamp():
                         summary["today_hours"] += float(r.get("duration_hours", 0) or 0)
                         summary["today_cost"] += float(r.get("total_cost", 0) or 0)
                 except (ValueError, TypeError):

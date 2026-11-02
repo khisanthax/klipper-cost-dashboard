@@ -40,7 +40,7 @@ print(project.id)
 
 def main():
     from playwright.sync_api import sync_playwright
-    artifacts=ROOT/'browser-artifacts'/'dashboard-audit';artifacts.mkdir(parents=True,exist_ok=True)
+    artifacts=ROOT/'browser-artifacts'/('dashboard-workflows' if '--workflows-only' in sys.argv else 'dashboard-audit');artifacts.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='kcd-ux-') as tmp:
         moons=[];urls={}
         class Moonraker(BaseHTTPRequestHandler):
@@ -73,6 +73,7 @@ def main():
                 page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 results=[]
                 routes=['/','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
+                if '--workflows-only' in sys.argv:routes=[]
                 try:
                     sizes=[(1920,1080,1,'large'),(1440,1000,1,'desktop'),(900,900,1,'narrow'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')]
                     if '--baseline' in sys.argv:sizes=[sizes[1],sizes[4]]
@@ -82,6 +83,8 @@ def main():
                             response=page.goto(base+route,wait_until='load');page.evaluate('(z)=>document.body.style.zoom=z',zoom)
                             missing=page.locator('input:not([type=hidden]):not([type=submit]),select,textarea').evaluate_all('''es=>es.filter(e=>!e.disabled&&!e.labels?.length&&!e.getAttribute('aria-label')&&!e.getAttribute('aria-labelledby')&&!['button','reset'].includes(e.type)).map(e=>({tag:e.tagName,name:e.name,id:e.id}))''')
                             result={'route':route,'layout':label,'status':response.status,'seconds':round(time.monotonic()-start,3),'overflow':page.evaluate('document.documentElement.scrollWidth>innerWidth+1'),'unlabelled':missing}
+                            if result['overflow']:
+                                result['overflow_elements']=page.locator('body *').evaluate_all("es=>es.filter(e=>!e.closest('.table-responsive')&&e.getBoundingClientRect().right>innerWidth+1).slice(0,15).map(e=>({tag:e.tagName,id:e.id,classes:e.className,right:e.getBoundingClientRect().right}))")
                             if label in ('desktop','mobile') and '--axe' in sys.argv:
                                 vendor=ROOT/'tools/vendor/axe-core-4.14.0'
                                 import hashlib
@@ -94,7 +97,7 @@ def main():
                             assert response.status==200,result
                     (artifacts/'page-audit.json').write_text(json.dumps({'pages':results,'browser_errors':errors},indent=2))
                     assert not errors,errors
-                    print(json.dumps({'pages':len(results),'overflow_cases':sum(r['overflow'] for r in results),'unlabelled_cases':sum(len(r['unlabelled']) for r in results),'slowest_seconds':max(r['seconds'] for r in results)}))
+                    print(json.dumps({'pages':len(results),'overflow_cases':sum(r['overflow'] for r in results),'unlabelled_cases':sum(len(r['unlabelled']) for r in results),'slowest_seconds':max((r['seconds'] for r in results),default=0)}))
                     if '--baseline' not in sys.argv:
                         assert not any(r['overflow'] or r['unlabelled'] for r in results),'Resolve layout/label findings in page-audit.json'
                         assert not any(r.get('accessibility',{}).get('violations') for r in results),'Resolve automated accessibility findings in page-audit.json'
