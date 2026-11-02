@@ -47,12 +47,12 @@ def main():
             def log_message(self,*args):pass
             def do_GET(self):
                 if self.path.startswith('/printer/objects/query'):
-                    result={'status':{'print_stats':{'state':self.server.state,'filename':'paused.gcode' if self.server.state=='paused' else 'active.gcode','print_duration':600,'total_duration':660,'filament_used':10000}}}
+                    result={'status':{'gcode_macro _KCD_VARS':{'printer_name':self.server.identity},'print_stats':{'state':self.server.state,'filename':'paused.gcode' if self.server.state=='paused' else 'active.gcode','print_duration':600,'total_duration':660,'filament_used':10000}}}
                 elif self.path=='/server/info':result={'klippy_connected':True}
                 else:self.send_response(404);self.end_headers();return
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps({'result':result}).encode())
         for name,state in [('Idle','standby'),('Printing','printing'),('Paused','paused'),('Cancelled','cancelled'),('Completed','complete')]:
-            moon=ThreadingHTTPServer(('127.0.0.1',0),Moonraker);moon.state=state;moons.append(moon)
+            moon=ThreadingHTTPServer(('127.0.0.1',0),Moonraker);moon.state=state;moon.identity=name;moons.append(moon)
             threading.Thread(target=moon.serve_forever,daemon=True).start();urls[name]=f'http://127.0.0.1:{moon.server_port}'
         urls['Offline']='http://127.0.0.1:1'
         env={**os.environ,'KCD_DATA_DIR':tmp,'KCD_STORAGE_BACKEND':'sql','KCD_API_KEY':'disposable-ux-key','KCD_AUDIT_MOONS':json.dumps(urls)}

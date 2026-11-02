@@ -12,9 +12,9 @@
         const name=node.dataset.kcdPrinter||node.dataset.kcdLiveJob;
         const item=printers[name];if(!item)return;
         const badge=node.querySelector('[data-live-state]');
-        if(badge){badge.textContent=item.state.toUpperCase();badge.className='badge '+({printing:'bg-success',paused:'bg-warning text-dark',error:'bg-danger',disconnected:'bg-danger'}[item.state]||'bg-secondary');}
+        if(badge){badge.textContent=item.state.toUpperCase();badge.className='badge '+({printing:'bg-success',paused:'bg-warning text-dark',error:'bg-danger',disconnected:'bg-danger',identity_mismatch:'bg-danger'}[item.state]||'bg-secondary');}
         const message=node.querySelector('[data-live-message]');
-        if(message)message.textContent=item.tracking_warning||item.error||('Moonraker verified '+new Date(item.observed_at*1000).toLocaleTimeString());
+        if(message)message.textContent=item.tracking_warning||item.error||item.identity_warning||('Moonraker verified '+new Date(item.observed_at*1000).toLocaleTimeString());
         const active=item.connected&&['printing','paused'].includes(item.state);
         const current=node.querySelector('[data-live-current]');
         if(current)current.textContent=active?item.filename+' · '+(item.grams!=null?item.grams.toFixed(2)+' g':'weight unavailable')+' · '+(item.total_cost!=null?'$'+item.total_cost.toFixed(2)+' estimated':item.pricing_error||'price unavailable'):'';

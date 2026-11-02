@@ -54,6 +54,14 @@ class DashboardUXTests(unittest.TestCase):
         self.assertFalse(result['connected'])
         self.assertEqual(result['state'],'disconnected')
 
+    def test_mismatched_loaded_identity_is_not_presented_as_this_printer(self):
+        from core import monitoring
+        with patch.object(monitoring,'_cache',{}),patch.object(monitoring,'probe',return_value=dict(state='printing',connected=True,reported_identity='Different')):
+            item=monitoring.statuses({'Expected':'http://fixture'})['Expected']
+        self.assertEqual(item['state'],'identity_mismatch')
+        self.assertFalse(item['connected'])
+        self.assertNotIn('reported_identity',item)
+
     def test_bulk_failure_message_survives_history_read(self):
         from core import db
         from core.registration import register_printer

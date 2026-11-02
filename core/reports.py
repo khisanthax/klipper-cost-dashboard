@@ -336,7 +336,7 @@ def compute_printer_summaries(rows, live_jobs_list):
     today_start = ts_to_local_dt(datetime.now().timestamp()).replace(hour=0, minute=0, second=0, microsecond=0)
     today_ts = today_start.timestamp()
     
-    for printer in printers:
+    for printer in sorted(printers):
             
         summary = {
             "status": "idle",
