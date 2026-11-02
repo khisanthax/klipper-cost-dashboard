@@ -25,6 +25,10 @@ def main():
             sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
         env={**os.environ,'KCD_STORAGE_BACKEND':'sql','KCD_REPORTS_BACKEND':'sql',
              'KCD_DATA_DIR':str(data),'KCD_API_KEY':'isolated-smoke-key','KCD_SQL_ONLY_FAIL_FAST':'1'}
+        if '--compat-backend' in sys.argv:
+            backend=sys.argv[sys.argv.index('--compat-backend')+1]
+            assert backend in ('csv','dual')
+            env['KCD_STORAGE_BACKEND']=backend;env['KCD_REPORTS_BACKEND']='auto' if backend=='dual' else 'csv'
         base=f'http://127.0.0.1:{port}'
         class Moonraker(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
@@ -38,7 +42,7 @@ def main():
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(body)
         mock=[]
         for name in ['One','Two']:
-            directory=Path(tmp)/name/'config';directory.mkdir(parents=True)
+            directory=Path(tmp)/(name+' printer')/'config';directory.mkdir(parents=True)
             (directory/'printer.cfg').write_text('[gcode_macro PRINT_START]\ngcode:\n    G28\n')
             server=ThreadingHTTPServer(('127.0.0.1',0),Moonraker);server.config_root=str(directory)
             threading.Thread(target=server.serve_forever,daemon=True).start();mock.append(server)
@@ -72,6 +76,14 @@ def main():
                     subprocess.run(command+['--apply'],cwd=ROOT,env=env,capture_output=True,text=True,check=True)
                 assert (Path(server.config_root)/'kcd_job_start.sh').exists()
             assert len(request('/api/installer/registration')['clients'])==2
+            if '--installer-acceptance' in sys.argv or '--installer-terminal-only' in sys.argv:
+                from installer_acceptance import exercise
+                exercise(env,base,mock,tmp,browser='--installer-terminal-only' not in sys.argv)
+            if '--installer-ssh' in sys.argv or '--installer-ssh-only' in sys.argv:
+                from installer_ssh_fixture import exercise as ssh_exercise
+                ssh_exercise(env,base,mock[0],tmp)
+            if '--installer-acceptance' in sys.argv or '--installer-ssh-only' in sys.argv or '--installer-terminal-only' in sys.argv:
+                return
             # Model Moonraker replacing a script with mode 0644. Its bash
             # interpreter still executes the diagnostic and restores 0700.
             executable=Path(mock[0].config_root)/'kcd_job_start.sh'

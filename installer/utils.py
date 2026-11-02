@@ -1,4 +1,5 @@
-﻿# --------------------------------------------------------------------------------------
+from pathlib import Path
+# --------------------------------------------------------------------------------------
 # File: installer/utils.py
 # Description: Utility helpers for Print Cost Dashboard installer.
 #   - Installer state (DATA_DIR/STATE_FILE constants, key-based load/save)
@@ -263,7 +264,7 @@ def _render_systemd_service(
 ) -> str:
     storage_backend = str(storage_backend or "").strip().lower()
     reports_backend = str(reports_backend or "").strip().lower()
-    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", service_name) or not 0 < int(port) < 65536:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", service_name) or not 0 < int(port) < 65536:
         raise ValueError("Invalid service name or port")
     if (storage_backend, reports_backend) not in {("csv", "csv"), ("dual", "auto"), ("sql", "sql")}:
         raise ValueError(
@@ -372,7 +373,29 @@ def _perform_master_install(
     println(f"[{len(steps) + 1}/{len(steps) + 3}] Writing config files...")
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        ensure_api_key(secret_file=os.path.join(DATA_DIR, "secret.json"), data_dir=DATA_DIR)
+        credential_path=Path(DATA_DIR)/"secret.json"
+        key=ensure_api_key(secret_file=str(credential_path),data_dir=DATA_DIR)
+        if credential_path.exists():
+            if json.loads(credential_path.read_text()).get('api_key') != key:
+                raise ValueError('Environment credential differs from persisted credential; configure the service credential authority explicitly')
+        else:
+            from core.file_io import atomic_write
+            atomic_write(credential_path,json.dumps({'api_key':key}),0o600)
+        if os.name=='posix' and os.geteuid()==0 and os.environ.get('SUDO_USER'):
+            import pwd
+            account=pwd.getpwnam(os.environ['SUDO_USER'])
+            directory=Path(DATA_DIR)
+            if directory.stat().st_uid not in (0,account.pw_uid):
+                raise ValueError('Data directory belongs to another user; resolve ownership explicitly')
+            if directory.stat().st_uid==0:
+                from core import db
+                with db.connect_db() as connection:
+                    if connection.execute('SELECT COUNT(*) FROM printers').fetchone()[0]:
+                        raise ValueError('Existing root-owned printer data requires explicit ownership repair before changing service user')
+            os.chown(directory,account.pw_uid,account.pw_gid)
+            for name in ('secret.json','kcd.db','kcd.db-wal','kcd.db-shm'):
+                path=directory/name
+                if path.exists() and path.stat().st_uid==0:os.chown(path,account.pw_uid,account.pw_gid)
     except Exception as e:
         println(f"Failed to ensure config files: {e}")
         return False
@@ -390,16 +413,23 @@ def _perform_master_install(
         return False
 
     println(f"[{len(steps) + 3}/{len(steps) + 3}] Enabling and starting service...")
-    _run_cmd("systemctl daemon-reload")
-    if _run_cmd(f"systemctl enable --now {service_name}") != 0:
+    if _run_cmd("systemctl daemon-reload") != 0:
+        return False
+    if _run_cmd(f"systemctl enable {service_name}") != 0:
+        return False
+    if _run_cmd(f"systemctl restart {service_name}") != 0:
         return False
 
-    status = _service_is_active(service_name)
-    println(f"Service status : {status}")
-    println(f"Port listening : {'yes' if _check_port_open(port) else 'no'}")
-    ok, detail = _check_url(url)
-    println(f"URL check      : {'ok' if ok else 'failed'} ({detail})")
-    return True
+    for attempt in range(10):
+        status = _service_is_active(service_name)
+        listening = _check_port_open(port)
+        ok, detail = _check_url(url)
+        if status == "active" and listening and ok:
+            return True
+        if attempt < 9:
+            __import__('time').sleep(1)
+    println(f"Master verification failed: service={status}, listening={listening}, URL check={detail}. Service/config retained for repair.")
+    return False
 
 
 def _master_install_or_status(
@@ -743,13 +773,13 @@ def _set_client_registry(clients: List[Dict[str, Any]]) -> None:
 
 def register_client(entry: Dict[str, Any]) -> None:
     registry = get_client_registry()
-    t = entry.get("type")
     pn = entry.get("printer_name")
     new = []
     replaced = False
     for c in registry:
-        if c.get("type") == t and c.get("printer_name") == pn:
-            new.append(entry)
+        if c.get("printer_name") == pn:
+            if not replaced:
+                new.append(entry)
             replaced = True
         else:
             new.append(c)
@@ -1413,9 +1443,13 @@ def master_setup(master_and_client: bool = False) -> None:
 
     try:
         port = int(port_str)
-    except ValueError:
-        port = DEFAULT_PORT
-        println(f"Invalid port, using {DEFAULT_PORT}.")
+        if not 0 < port < 65536 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]*', service_name):
+            raise ValueError('Port must be 1–65535 and service name must contain only letters, numbers, dot, underscore, @ or hyphen, starting with a letter or number')
+        from core.registration import validate_registration
+        validate_registration('Master',url)
+    except ValueError as exc:
+        println(f"Invalid Master configuration: {exc}. Saved configuration retained; no service changes made.")
+        return
 
     save_state("master_host", host)
     save_state("master_port", port)
@@ -1435,7 +1469,7 @@ def master_setup(master_and_client: bool = False) -> None:
     sql_state = _detect_sql_state()
     sql_enabled = False
     if sql_state.get("status") == "sql_capable":
-        println("[sql] SQL-capable install detected (CSV may also exist; running dual/compat mode).")
+        println("[sql] Existing SQL database detected; preserving the selected runtime storage contract.")
         sql_enabled = True
     elif sql_state.get("status") == "sql_needs_migration":
         println("[sql] SQLite DB detected but schema outdated; applying migrations...")
@@ -1450,7 +1484,7 @@ def master_setup(master_and_client: bool = False) -> None:
             sql_enabled = _ensure_sql_capable(import_from_csv=False)
 
     if sql_enabled:
-        println("[sql] SQL compatibility mode enabled: dual writes with automatic SQL Reports reads.")
+        println("[sql] Strict SQL-only storage selected." if is_sql_only() else "[sql] SQL compatibility mode enabled: dual writes with automatic SQL Reports reads.")
         try:
             s = load_settings(SETTINGS_FILE)
             if isinstance(s, dict):
@@ -1488,7 +1522,30 @@ def master_setup(master_and_client: bool = False) -> None:
         install_client_local()
 
 
-def install_client_local() -> None:
+def _client_api_key(master, directory=None):
+    """Reuse only a credential associated with the selected Master."""
+    if os.environ.get('KCD_API_KEY'):
+        return os.environ['KCD_API_KEY']
+    if directory:
+        try:
+            values = {}
+            for line in (Path(directory)/'kcd_job_start.sh').read_text().splitlines():
+                if line.startswith(('MASTER_URL=', 'API_KEY=')):
+                    key, value = line.split('=', 1)
+                    parsed = shlex.split(value)
+                    if len(parsed) == 1:
+                        values[key] = parsed[0]
+            if values.get('MASTER_URL', '').rstrip('/') == master.rstrip('/'):
+                return values.get('API_KEY', '')
+        except (OSError, ValueError):
+            pass
+    # A standalone printer's locally generated secret is not its Master's key.
+    if (os.environ.get('KCD_MASTER_CONTAINER') or load_state('master_service_name', '')) and load_state('master_url', '').rstrip('/') == master.rstrip('/'):
+        return _load_secret_api_key()
+    return ''
+
+
+def install_client_local(printer_name=None) -> None:
     from .discovery import discover_local
     from .workflow import repair_client
     candidates = discover_local()
@@ -1496,17 +1553,22 @@ def install_client_local() -> None:
     for index, candidate in enumerate(candidates, 1):
         println(f"  {index}) {candidate['config_dir']} [{candidate['classification']}] identity={candidate['printer_name'] or 'unset'} port={candidate['moonraker_port'] or 'unknown'}")
     println("  0) Enter a custom directory")
-    selected = prompt_choice("Select configuration: ", range(len(candidates)+1))
+    selected = prompt_choice("Select configuration (b to cancel): ", range(len(candidates)+1), cancel_inputs=["b"])
+    if selected is None:
+        return
     candidate = candidates[selected-1] if selected else {}
     directory = candidate.get("config_dir") or _safe_input("Config directory containing printer.cfg: ").strip()
     existing_name = candidate.get("printer_name", "")
-    name = _safe_input(f"Printer identity [{existing_name}]: ").strip() or existing_name
+    if printer_name and existing_name and printer_name!=existing_name:
+        println("Selected configuration belongs to a different identity; update cancelled without changes.")
+        return
+    name = printer_name or _safe_input(f"Printer identity [{existing_name}]: ").strip() or existing_name
     if not name:
         println("Identity is required. A clone must use its own identity; relocation keeps the existing identity.")
         return
     master_default = load_state("master_url", os.environ.get("KCD_MASTER_URL", "http://localhost:5000"))
     master = _safe_input(f"Master URL reachable by printer [{master_default}]: ").strip() or master_default
-    key = prompt_secret("Master API key", _load_secret_api_key())
+    key = prompt_secret("Master API key", _client_api_key(master, directory))
     moonraker = _configure_moonraker_url_local(name)
     if not moonraker:
         return
@@ -1525,7 +1587,7 @@ def install_client_local() -> None:
         println(f"Client install/repair failed: {exc}")
 
 
-def install_client_remote() -> None:
+def install_client_remote(printer_name=None) -> None:
     from .remote_workflow import remote_operation
     println("\n=== Remote client installation / repair ===")
     host = _safe_input("SSH alias or user@host: ").strip()
@@ -1534,12 +1596,17 @@ def install_client_remote() -> None:
         for index, c in enumerate(candidates, 1):
             println(f"  {index}) {c['config_dir']} [{c['classification']}] identity={c['printer_name'] or 'unset'} port={c['moonraker_port'] or 'unknown'}")
         println("  0) Custom configuration directory")
-        selected = prompt_choice("Select configuration: ", range(len(candidates)+1))
+        selected = prompt_choice("Select configuration (b to cancel): ", range(len(candidates)+1), cancel_inputs=["b"])
+        if selected is None:
+            return
         candidate = candidates[selected-1] if selected else {}
+        if printer_name and candidate.get('printer_name') and candidate['printer_name'] != printer_name:
+            println("Selected configuration belongs to a different identity; update cancelled without changes.")
+            return
         directory = candidate.get("config_dir") or _safe_input("Remote config directory: ").strip()
-        name = _safe_input(f"Printer identity [{candidate.get('printer_name', '')}]: ").strip() or candidate.get("printer_name", "")
+        name = printer_name or _safe_input(f"Printer identity [{candidate.get('printer_name', '')}]: ").strip() or candidate.get("printer_name", "")
         master = _safe_input("Master URL reachable from the remote printer: ").strip()
-        key = prompt_secret("Master API key", _load_secret_api_key())
+        key = prompt_secret("Master API key", _client_api_key(master))
         moonraker = _safe_input("Moonraker URL reachable from Master (include actual port): ").strip()
         payload = dict(config_dir=directory, name=name, moonraker=moonraker, master=master, key=key,
                        relocate=prompt_yes_no("Explicit relocation of the same historical identity?", default=False),
@@ -1549,6 +1616,9 @@ def install_client_remote() -> None:
         if prompt_yes_no("Apply this remote repair?", default=False):
             payload["apply"] = True
             println(json.dumps(remote_operation(host, "repair", payload), indent=2))
+            if not is_sql_only():
+                register_client({'printer_name':name,'type':'remote','host':host,'config_dir':directory,'master_url':master,'moonraker_url':moonraker})
+                save_state('master_url',master)
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         println("Remote installation incomplete: " + str(exc))
 
@@ -1648,7 +1718,8 @@ gcode:
     {% set params = printer_name ~ "|" ~ fname ~ "|" ~ dur ~ "|" ~ filament %}
     RUN_SHELL_COMMAND CMD=send_print_cost PARAMS="{params}"
 """
-    return template.replace("__PRINTER_DIR__", printer_dir).replace("__PRINTER_NAME__", printer_name)
+    template=re.sub(r'__PRINTER_DIR__/([A-Za-z0-9_]+\.sh)',lambda m:shlex.quote(printer_dir.rstrip('/\\')+'/'+m[1]),template)
+    return template.replace("__PRINTER_NAME__", printer_name)
 
 
 def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: str) -> None:
@@ -1660,14 +1731,39 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
 # ----------------------------------------------------------------------
 
 def uninstall_master() -> None:
-    """
-    Remove master-related installer state and optionally Docker/systemd artifacts.
-    """
+    """Remove only the selected source service, retaining data and source files."""
     println("\n=== Uninstall MASTER (dashboard) ===")
-    confirm = prompt_yes_no("This will clear saved master settings. Continue?", default=False)
+    if os.environ.get('KCD_MASTER_CONTAINER'):
+        println('Docker Master owns this directory. Manage its service through Docker Compose; installer uninstall made no changes.')
+        return
+    service = load_state('master_service_name', '')
+    if not service or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]*', service):
+        println('No valid saved source service. Inspect systemd and recover the service name before uninstalling.')
+        return
+    unit = Path('/etc/systemd/system')/(service+'.service')
+    if unit.is_symlink() or (unit.exists() and 'WorkingDirectory='+_repo_root() not in unit.read_text().splitlines()):
+        println('Service does not belong to this checkout; uninstall refused without changes.')
+        return
+    confirm = prompt_yes_no(f"Stop and remove source service {service}? Database, credentials, clients and repository files will be retained", default=False)
     if not confirm:
         println("Master uninstall cancelled.")
         return
+
+    if unit.exists():
+        try:
+            from core.file_io import atomic_write
+            backup = Path(DATA_DIR)/'backups'/(service+'.service.'+str(__import__('time').time_ns()))
+            atomic_write(backup,unit.read_text(),0o600,backup=False)
+            if _run_cmd('systemctl disable --now '+shlex.quote(service)) != 0:
+                println('Master uninstall incomplete: service stop/disable failed. Unit and saved settings retained.')
+                return
+            unit.unlink()
+            if _run_cmd('systemctl daemon-reload') != 0:
+                println('Master uninstall incomplete: unit removed but daemon-reload failed. Private unit backup and saved settings retained; rerun daemon-reload.')
+                return
+        except OSError:
+            println('Master uninstall incomplete: cannot back up/remove unit. Inspect permissions; saved settings and data retained.')
+            return
 
     for key in (
         "master_host",
@@ -1680,20 +1776,7 @@ def uninstall_master() -> None:
     ):
         save_state(key, "")
 
-    removed_files = []
-    for candidate in ("docker-compose.yml", "docker-compose.yaml", "Dockerfile", "/etc/systemd/system/print-cost-dashboard.service"):
-        if os.path.exists(candidate):
-            ans = prompt_yes_no(f"Delete {candidate}?", default=False)
-            if ans:
-                try:
-                    os.remove(candidate)
-                    removed_files.append(candidate)
-                except Exception as e:
-                    println(f"Failed to delete {candidate}: {e}")
-
-    println("Master uninstall complete.")
-    if removed_files:
-        println("Removed files: " + ", ".join(removed_files))
+    println("Master uninstall complete. Database, credentials, client integrations and repository retained; reinstall can reuse them.")
 
 
 def _retire_client(printer_name: str) -> None:
@@ -1703,7 +1786,9 @@ def _retire_client(printer_name: str) -> None:
     if not prompt_yes_no("Retire this identity while retaining history and custom macro files?", default=False):
         return
     try:
-        result = master_request(master, prompt_secret("Master API key", _load_secret_api_key()),
+        entry = next((c for c in get_client_registry() if c.get('printer_name') == printer_name), {})
+        directory = entry.get('cfg_dir') if entry.get('type') == 'local' else None
+        result = master_request(master, prompt_secret("Master API key", _client_api_key(master, directory)),
                                 {"action":"retire", "printer_name":printer_name})
         println(json.dumps(result,indent=2))
         println("Custom hooks and files are retained to avoid invalid Klipper references. Remove reviewed hooks before deleting files. Use --reactivate when reinstalling this identity.")
@@ -1720,8 +1805,8 @@ def uninstall_client_remote(printer_name: str) -> None:
 
 
 def update_client_local(printer_name: str) -> None:
-    install_client_local()
+    install_client_local(printer_name=printer_name)
 
 
 def update_client_remote(printer_name: str) -> None:
-    install_client_remote()
+    install_client_remote(printer_name=printer_name)

@@ -51,8 +51,8 @@ def client_plan(config_dir, name, master, key):
         if not re.search(r'^\s*variable_printer_name:', config, re.M):
             raise ValueError("Legacy print_cost.cfg needs manual migration; refusing to replace custom macros")
         config = re.sub(r'^(\s*variable_printer_name:)\s*.*$', lambda m: m[1]+' "'+name+'"', config, flags=re.M)
-        config = re.sub(r'^(command:\s*)(?:bash\s+)?(\S*/)(kcd_job_\w+\.sh|send_print_cost\.sh)',
-                        lambda m: m[1]+"bash "+str(directory)+"/"+m[3], config, flags=re.M)
+        config = re.sub(r"""^(command:\s*)(?:bash\s+)?((?:'[^']*/|"[^"]*/|/[^\r\n]*?/|[A-Za-z]:[^\r\n]*?/))(kcd_job_\w+\.sh|send_print_cost\.sh)['"]?""",
+                        lambda m: m[1]+"bash "+__import__('shlex').quote(str(directory)+"/"+m[3]), config, flags=re.M)
         # Upgrade older managed integrations by appending only absent helper
         # definitions. Existing start/end logic and custom settings are retained.
         rendered = utils._render_print_cost_cfg(str(directory), name)
@@ -69,6 +69,9 @@ def client_plan(config_dir, name, master, key):
     if current.resolve() not in files:
         printer = directory / "printer.cfg"
         plan[printer] = ("[include print_cost.cfg]\n"+printer.read_text(), 0o644)
+    for path in plan:
+        if not path.resolve().is_relative_to(directory):
+            raise ValueError('Managed file escapes the selected config directory; repair its symlink explicitly')
     return plan
 
 
@@ -82,10 +85,17 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
         raise ValueError("Moonraker discovery failed; verify its API, network address and authorization")
     if probe["config_dir"] != str(Path(config_dir).resolve()):
         raise ValueError("Moonraker serves a different config directory; select the matching instance/port")
+    existing=next((client for client in status.get('clients',[]) if client.get('printer_name')==name),None)
+    if existing and existing.get('hidden') and not reactivate:
+        raise ValueError('Printer is retired; explicit reactivation is required')
+    if existing and existing.get('moonraker_url') and existing['moonraker_url']!=moonraker and not relocate:
+        raise ValueError('Endpoint changed; explicit relocation is required to preserve this identity')
     plan = client_plan(config_dir, name, master, key)
     changes = []
     for path, (content, mode) in plan.items():
         old = path.read_text() if path.exists() else ""
+        if old==content and path.exists() and (__import__('os').name=='nt' or (__import__('os').stat(path).st_mode & 0o777)==mode):
+            continue
         if path.suffix == ".sh":
             changes.append(f"{path}: {'update' if path.exists() else 'create'} private client script (credential omitted)")
         else:
@@ -96,16 +106,24 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
     payload = {"printer_name": name, "moonraker_url": moonraker, "metadata": metadata,
                "relocate": relocate, "reactivate": reactivate}
     if not apply:
-        return {"applied": False, "changes": changes, "master_backend": status["backend"]}
+        return {"applied": False, "changes": changes, "master_backend": status["backend"], "macro_action":"Client files only. Inspect active print-event hooks with macro-plan; registration is validated only on apply."}
     # Registration is atomic on Master. A later file failure remains repairable;
     # it never destroys an existing identity, price, or job.
     registration = master_request(master, key, payload)
     try:
         for path, (content, mode) in plan.items():
             atomic_write(path, content, mode)
+            import os
+            if os.name=='posix' and os.geteuid()==0:
+                owner=Path(config_dir).stat()
+                os.chown(path,owner.st_uid,owner.st_gid)
     except OSError:
         raise RuntimeError("Master registered; client files incomplete. Private per-file backups exist. Rerun the same repair; no history was moved") from None
     if not registration.get("readiness", {}).get("ready"):
         raise RuntimeError("Client files written; Master readiness failed. Registration is retained; inspect Master readiness and rerun repair")
+    from . import utils
+    if not utils.is_sql_only():
+        utils.register_client({**metadata,'printer_name':name,'moonraker_url':moonraker})
+        utils.save_state('master_url',master)
     return {"applied": True, "changes": changes, "registration": registration,
             "macro_action": "Inspect active hooks with macro-plan; reload Klipper only while idle if configuration changed"}

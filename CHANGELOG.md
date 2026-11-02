@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.2 - 2026-11-01
+
+- Gate installer releases on actual terminal menus, disposable OpenSSH deployment, native systemd installation/upgrade/uninstall/reinstall, Docker authority detection and real Chromium workflows in SQL, CSV and dual modes. Retain screenshots, traces and redacted transcripts.
+- Make discovery read-only; preserve selected update identities; repair cancel navigation, unchanged-file previews, custom script paths and private script ownership. Reject managed symlinks escaping the selected config directory.
+- Verify source service health before success, persist the intended private credential and handle fresh sudo-created runtime ownership. Restart forced upgrades; make uninstall remove only its own service while retaining recoverable data and source.
+- Persist legacy client metadata without duplicating relocated identities; bind client credential reuse to the selected Master and keep SSH staging credentials in memory. Fresh legacy installs no longer register example printers.
+- Associate printer Settings labels with their controls and wrap narrow headers. Document the tested acceptance matrix and read-only production reference; MercuryTwo uses Moonraker port 7129.
+
 ## v0.7.1 - 2026-11-01
 
 - Allocate fractional cents across Recalculate Center preview rows so displayed components and totals agree; retain full SQL calculation precision and suppress negative zero adjustments.
