@@ -109,6 +109,13 @@ except RuntimeError as exc:print(str(exc))
                 defaults=page.locator('form').filter(has=page.locator('input[name=printer][value=One]')).filter(has=page.locator('[name=rate_per_hour]'))
                 assert defaults.locator('[name=rate_per_hour]').input_value()=='1.0'
                 assert defaults.locator('[name=grams_per_meter]').input_value()=='3.0'
+                rate=defaults.get_by_label('Rate per hour ($/hr)',exact=True)
+                assert rate.is_visible() and rate.is_enabled()
+                rate.focus();assert rate.evaluate('(e)=>document.activeElement===e')
+                endpoint=defaults.get_by_label('Moonraker URL',exact=True)
+                assert endpoint.is_visible() and endpoint.is_enabled()
+                endpoint.focus();assert endpoint.evaluate('(e)=>document.activeElement===e')
+                assert page.get_by_role('heading',level=5).all_text_contents()==['One','Two']
                 page.screenshot(path=str(artifacts/(label+'.png')),full_page=True)
             page.evaluate("document.body.style.zoom=1")
             page.goto(base+'/settings/printers')

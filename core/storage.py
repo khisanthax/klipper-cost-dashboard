@@ -167,8 +167,6 @@ def ensure_runtime_files(settings_file: str, csv_file: str) -> None:
     if not os.path.exists(settings_file):
         if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
             initial = {}
-            for pname in ['SV08', 'SV07', 'Ender5P']:
-                initial[pname] = dict(DEFAULT_PRICING)
             with open(settings_file, 'w') as f:
                 json.dump(initial, f, indent=2)
 
@@ -190,8 +188,6 @@ def ensure_settings_exists(settings_file, default_pricing):
         from core.config import SETTINGS_EXAMPLE_FILE
         if not _copy_if_missing(SETTINGS_EXAMPLE_FILE, settings_file):
             initial = {}
-            for pname in ["SV08", "SV07", "Ender5P"]:
-                initial[pname] = dict(default_pricing)
             with open(settings_file, "w") as f:
                 json.dump(initial, f, indent=2)
 
