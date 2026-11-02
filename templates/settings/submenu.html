@@ -1,4 +1,4 @@
-<div class="btn-group">
+<div class="btn-group flex-wrap" role="group" aria-label="Settings pages">
     <a href="{{ url_for('settings_printers_page') }}"
        class="btn btn-outline-primary {% if request.path.startswith('/settings/printers') %}active{% endif %}">
         Printers
