@@ -59,6 +59,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## New entry template
 
+### 2026-11-02 — Final dashboard acceptance passed; ready for review
+
+- **Status:** implementation and acceptance complete, ready for required review in [PR 59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59). Not merged/released/deployed.
+- **Verification:** final implementation/test/documentation commit `16e73ba14667f775ed4b2defd12119f27f1430e3` passed [Release Validation 41481970620](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41481970620) and Python Compile Check. Includes all 226 Linux tests, 66 layouts/desktop-mobile axe, expanded project/manual/planned/display CRUD, 2,015-job and 515-job fixtures, pricing/selection/archive browser regressions, SQL-only validation, installer SSH/systemd/Docker acceptance, image smoke and real v0.7.2 Docker upgrade preservation. Screenshots/traces/JSON are retained in that run's browser-regression artifact. This final handoff changes documentation only; head checks remain required.
+- **Deliverables:** [acceptance report and matrix](docs/dashboard-audit-v0.7.3.md), [user guide](docs/dashboard-usage.md), updated roadmap/changelog/recovery docs and reproducible regression harnesses. Read-only production evidence and remaining environment limits are recorded above and in the report.
+- **Production / next action:** production stays on verified v0.7.2 with existing data/backups/rollback artifacts intact. Obtain the required approving review; then merge, release and deploy through established validation, immutable digest pinning and backup procedures. No v0.7.3 deployment is claimed.
+
 ### 2026-11-02 — Dashboard candidate implementation complete; final acceptance
 
 - **Status:** implemented and prepared for normal code review in [PR 59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59); not merged, released or deployed.

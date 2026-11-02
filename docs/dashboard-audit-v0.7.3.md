@@ -76,7 +76,7 @@ python tools/browser_pricing_regression.py
 
 The established [Release Validation workflow](../.github/workflows/release-validation.yml) additionally runs History, archived-thumbnail and installer browser/terminal suites, disposable SSH/native systemd acceptance, compatibility modes, Docker build/HTTP smoke and `tools/dashboard_docker_upgrade.py`. Docker is executed on the Linux CI runner, not claimed as locally tested on Windows.
 
-[Release Validation 41479235682](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41479235682) passed all **226 Linux tests** and required integration/browser/image checks at `e9a8752510b57f097b719d2ee4236bf8ad58f685`. The final PR validation includes expanded manual/planned/display CRUD and the additional 500-job run. See PR checks and the logbook for its final result. Local expanded workflow also passes. CI artifacts retain screenshots, traces, page/axe/performance JSON and redacted server logs; failure screenshots/traces are captured automatically. Artifact retention follows GitHub policy; source harnesses make runs reproducible.
+[Release Validation 41481970620](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41481970620) passed all **226 Linux tests** and required integration/browser/image checks at `16e73ba14667f775ed4b2defd12119f27f1430e3`, including expanded manual/planned/display CRUD and the additional 500-job run. Python Compile Check also passed. Local expanded workflow passes. CI artifacts retain screenshots, traces, page/axe/performance JSON and redacted server logs; failure screenshots/traces are captured automatically. Artifact retention follows GitHub policy; source harnesses make runs reproducible.
 
 ## Release status and remaining work
 
