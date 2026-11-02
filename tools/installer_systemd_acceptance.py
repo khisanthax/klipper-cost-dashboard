@@ -58,6 +58,16 @@ def main():
             # The actual service user must execute its private client script.
             subprocess.run(['bash',str(cfg/'kcd_job_start.sh'),'--kcd-self-check'],check=True,capture_output=True)
             assert (cfg/'kcd_job_start.sh').stat().st_uid==os.getuid()
+            client_bytes=(cfg/'print_cost.cfg').read_bytes()
+            removed=terminal(['3','1','y','6','5'])
+            assert 'Master uninstall complete' in removed
+            assert not Path(unit).exists() and (source/'Dockerfile').exists()
+            assert (Path(tmp)/'data'/'secret.json').exists()
+            assert 'OK: Master install complete' in terminal(['1','1','n','127.0.0.1',str(port),base,service,'5'])
+            verify()
+            assert (cfg/'print_cost.cfg').read_bytes()==client_bytes
+            request=urllib.request.Request(base+'/api/installer/registration',headers={'X-API-Key':env['KCD_API_KEY']})
+            with urllib.request.urlopen(request) as response:assert json.load(response)['clients'][0]['printer_name']=='Combined'
             print('Source systemd acceptance passed: real interactive fresh install, saved automatic mode, repeat/status and forced upgrade; SQL readiness and intended API credential verified')
         finally:
             moon.shutdown();moon.server_close()

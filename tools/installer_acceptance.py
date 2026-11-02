@@ -14,12 +14,15 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def exercise(env,base,moons,tmp,*,browser=True):
-    artifacts=ROOT/'browser-artifacts'/'installer';artifacts.mkdir(parents=True,exist_ok=True)
+    artifacts=ROOT/'browser-artifacts'/'installer'/env['KCD_STORAGE_BACKEND'];artifacts.mkdir(parents=True,exist_ok=True)
+    def record(result):
+        with open(artifacts/'terminal.txt','a',encoding='utf-8') as stream:
+            stream.write((result.stdout+'\n'+result.stderr).replace(env['KCD_API_KEY'],'[redacted]'))
     def terminal(answers,expected=0):
         result=subprocess.run([sys.executable,'install.py'],input='\n'.join(answers)+'\n',cwd=ROOT,env=env,text=True,capture_output=True,timeout=30)
+        record(result)
         assert result.returncode==expected,(result.returncode,result.stdout[-1500:],result.stderr[-400:])
         assert env['KCD_API_KEY'] not in result.stdout+result.stderr,'Credential exposed'
-        with open(artifacts/'terminal.txt','a',encoding='utf-8') as stream:stream.write(result.stdout)
         return result.stdout
     seed="from core import db; c=db.connect_db(); db.upsert_job(c,dict(job_uid='installer-history',printer='One',filename='preserved.gcode',status='completed',duration_seconds=3600,filament_mm=1000,time_cost=40,material_cost=2,total_cost=42)); c.commit(); c.close()"
     subprocess.run([sys.executable,'-c',seed],cwd=ROOT,env=env,check=True,capture_output=True)
@@ -30,6 +33,7 @@ def exercise(env,base,moons,tmp,*,browser=True):
     terminal([],expected=1)  # EOF is bounded; no prompt loop.
     def cli(args,code=0):
         run=subprocess.run([sys.executable,'install.py',*args],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
+        record(run)
         assert run.returncode==code,(run.stdout,run.stderr)
         assert env['KCD_API_KEY'] not in run.stdout+run.stderr
         return run
@@ -59,6 +63,14 @@ def exercise(env,base,moons,tmp,*,browser=True):
     assert rejected.returncode==2 and 'authentication failed' in rejected.stderr
     other=common.copy();other[other.index('--moonraker')+1]=f'http://127.0.0.1:{moons[1].server_port}'
     assert 'different config directory' in cli(other,2).stderr
+    unreachable=common.copy();unreachable[unreachable.index('--master')+1]='http://127.0.0.1:1'
+    assert 'Master network/response failure' in cli(unreachable,2).stderr
+    unreachable=common.copy();unreachable[unreachable.index('--moonraker')+1]='http://127.0.0.1:1'
+    assert 'Moonraker discovery failed' in cli(unreachable,2).stderr
+    clone=other.copy();clone[clone.index('--config-dir')+1]=moons[1].config_root
+    before=(Path(moons[1].config_root)/'print_cost.cfg').read_bytes()
+    assert 'explicit relocation' in cli(clone+['--apply'],2).stderr
+    assert (Path(moons[1].config_root)/'print_cost.cfg').read_bytes()==before
     # Fail after two actual writes, then converge with the ordinary repair.
     (Path(directory)/'kcd_job_start.sh').unlink();script.unlink()
     code="""import os
@@ -130,6 +142,9 @@ except RuntimeError as exc:print(str(exc))
             assert 'Moonraker OK for One' in page.get_by_role('alert').inner_text()
             page.goto(base+'/printer-diagnostics');assert page.locator('body').inner_text().count('One')>=1
             assert not errors,errors
+        except Exception:
+            page.screenshot(path=str(artifacts/'failure.png'),full_page=True)
+            raise
         finally:
             context.tracing.stop(path=str(artifacts/'trace.zip'));browser.close()
     print('Installer acceptance passed ('+env['KCD_STORAGE_BACKEND']+'): real menu/cancel/EOF, inventory, idempotency, missing-file repair, wrong credential/port, macro preview/inactive protection and four browser layouts')

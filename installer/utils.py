@@ -1728,14 +1728,39 @@ def run_remote_macro_integration(printer_name: str, remote: str, printer_dir: st
 # ----------------------------------------------------------------------
 
 def uninstall_master() -> None:
-    """
-    Remove master-related installer state and optionally Docker/systemd artifacts.
-    """
+    """Remove only the selected source service, retaining data and source files."""
     println("\n=== Uninstall MASTER (dashboard) ===")
-    confirm = prompt_yes_no("This will clear saved master settings. Continue?", default=False)
+    if os.environ.get('KCD_MASTER_CONTAINER'):
+        println('Docker Master owns this directory. Manage its service through Docker Compose; installer uninstall made no changes.')
+        return
+    service = load_state('master_service_name', '')
+    if not service or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]*', service):
+        println('No valid saved source service. Inspect systemd and recover the service name before uninstalling.')
+        return
+    unit = Path('/etc/systemd/system')/(service+'.service')
+    if unit.is_symlink() or (unit.exists() and 'WorkingDirectory='+_repo_root() not in unit.read_text().splitlines()):
+        println('Service does not belong to this checkout; uninstall refused without changes.')
+        return
+    confirm = prompt_yes_no(f"Stop and remove source service {service}? Database, credentials, clients and repository files will be retained", default=False)
     if not confirm:
         println("Master uninstall cancelled.")
         return
+
+    if unit.exists():
+        try:
+            from core.file_io import atomic_write
+            backup = Path(DATA_DIR)/'backups'/(service+'.service.'+str(__import__('time').time_ns()))
+            atomic_write(backup,unit.read_text(),0o600,backup=False)
+            if _run_cmd('systemctl disable --now '+shlex.quote(service)) != 0:
+                println('Master uninstall incomplete: service stop/disable failed. Unit and saved settings retained.')
+                return
+            unit.unlink()
+            if _run_cmd('systemctl daemon-reload') != 0:
+                println('Master uninstall incomplete: unit removed but daemon-reload failed. Private unit backup and saved settings retained; rerun daemon-reload.')
+                return
+        except OSError:
+            println('Master uninstall incomplete: cannot back up/remove unit. Inspect permissions; saved settings and data retained.')
+            return
 
     for key in (
         "master_host",
@@ -1748,20 +1773,7 @@ def uninstall_master() -> None:
     ):
         save_state(key, "")
 
-    removed_files = []
-    for candidate in ("docker-compose.yml", "docker-compose.yaml", "Dockerfile", "/etc/systemd/system/print-cost-dashboard.service"):
-        if os.path.exists(candidate):
-            ans = prompt_yes_no(f"Delete {candidate}?", default=False)
-            if ans:
-                try:
-                    os.remove(candidate)
-                    removed_files.append(candidate)
-                except Exception as e:
-                    println(f"Failed to delete {candidate}: {e}")
-
-    println("Master uninstall complete.")
-    if removed_files:
-        println("Removed files: " + ", ".join(removed_files))
+    println("Master uninstall complete. Database, credentials, client integrations and repository retained; reinstall can reuse them.")
 
 
 def _retire_client(printer_name: str) -> None:
