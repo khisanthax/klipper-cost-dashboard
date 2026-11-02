@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+<script src="{{ url_for('static',filename='js/printer_status.js') }}"></script>
 <style>
     /* Custom styles to supplement Bootstrap */
     .printer-tag {
@@ -19,6 +20,22 @@
 </style>
 
 <script>
+    const historySelectionKey = 'kcd.historySelection';
+    const historySelectionScope = location.pathname + location.search;
+    function saveHistorySelection(rows) {
+        try { sessionStorage.setItem(historySelectionKey, JSON.stringify({scope: historySelectionScope, ids: rows.filter(cb=>cb.checked).map(cb=>cb.value)})); } catch (_) {}
+    }
+    function restoreHistorySelection() {
+        let saved = null;
+        try { saved = JSON.parse(sessionStorage.getItem(historySelectionKey)); } catch (_) {}
+        const ids = new Set(saved?.scope === historySelectionScope && Array.isArray(saved.ids) ? saved.ids : []);
+        document.querySelectorAll('#historyPostForm input[name="delete_rows"]').forEach(cb=>cb.checked=ids.has(cb.value));
+        updateHistorySelection();
+    }
+    function clearHistorySelection() {
+        document.querySelectorAll('#historyPostForm input[name="delete_rows"]').forEach(cb=>cb.checked=false);
+        updateHistorySelection();
+    }
     function toggleSelectAll(source) {
         const checkboxes = document.querySelectorAll('#historyPostForm input[name="delete_rows"]:not(:disabled)');
         checkboxes.forEach(cb => cb.checked = source.checked);
@@ -28,6 +45,7 @@
     function updateHistorySelection() {
         const rows = [...document.querySelectorAll('#historyPostForm input[name="delete_rows"]:not(:disabled)')];
         const count = rows.filter(cb => cb.checked).length;
+        saveHistorySelection(rows);
         const all = document.getElementById('historySelectAll');
         if (all) {
             all.checked = rows.length > 0 && count === rows.length;
@@ -39,8 +57,9 @@
     }
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('historyPostForm')?.addEventListener('change', updateHistorySelection);
-        window.addEventListener('pageshow', updateHistorySelection);
-        updateHistorySelection();
+        document.getElementById('historyPostForm')?.addEventListener('submit', ()=>{ try { sessionStorage.removeItem(historySelectionKey); } catch (_) {} });
+        window.addEventListener('pageshow', restoreHistorySelection);
+        restoreHistorySelection();
     });
 
     function ensureSelection() {
@@ -152,15 +171,9 @@
             drawBarChart("hoursPerPrinterChart", hoursData.labels, hoursData.values, "Hours per Printer", "Hours");
         }
 
-        // --- Auto-refresh while there are active print jobs ---
-        const hasActiveJobs = {{ 'true' if active_jobs else 'false' }};
-        const refreshIntervalSeconds = 10;  // tweak as you like (e.g. 10, 15, 30)
-
-        if (hasActiveJobs) {
-            setTimeout(function () {
-                window.location.reload();
-            }, refreshIntervalSeconds * 1000);
-        }
+        // Refresh telemetry only. Never replace a user's selection or form edits.
+        window.kcdRefreshPrinterStatus();
+        setInterval(()=>{ if(document.visibilityState==='visible') window.kcdRefreshPrinterStatus(); }, 10000);
     });
 </script>
 
@@ -238,7 +251,7 @@
     <div class="card-body">
         <div class="kcd-printer-grid">
             {% for printer_name, ps in printer_summaries.items() %}
-                <div class="card h-100 bg-light">
+                <div class="card h-100 bg-light" data-kcd-printer="{{ printer_name }}">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h6 class="card-title mb-0">
@@ -252,17 +265,18 @@
                                 <form method="post" class="mb-0">
                                     <input type="hidden" name="action" value="clear_live_job">
                                     <input type="hidden" name="printer_name" value="{{ printer_name }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Clear stuck job for this printer">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Clear stuck job for this printer" onclick="return confirm('Clear retained KCD tracking only? This does not cancel the printer or create a history record.')">
                                         Clear
                                     </button>
                                 </form>
                                 {% endif %}
                                 <span
-                                    class="badge {% if ps.status == 'printing' %}bg-success{% elif ps.status == 'paused' %}bg-warning text-dark{% elif ps.status == 'failed' or ps.status == 'canceled' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                    data-live-state class="badge bg-secondary">
                                     {{ ps.status|upper }}
                                 </span>
                             </div>
                         </div>
+                        <div class="small text-muted mb-2" data-live-message role="status">Stored tracking is unverified until Moonraker responds.</div>
                         <div class="card-text small mt-3">
                             {% if ps._thumb_cards_enabled %}
                             <div class="mb-3">
@@ -311,14 +325,15 @@
                         <th>File</th>
                         <th>Status</th>
                         <th>Elapsed</th>
-                        <th class="text-end">Cost So Far</th>
+                        <th>Filament used (g)</th>
+                        <th class="text-end">Live estimated cost</th>
                         <th class="text-end">Est. Final</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for job in active_jobs %}
-                    <tr class="{% if job.status == 'paused' %}table-warning{% else %}table-success{% endif %}">
+                    <tr data-kcd-live-job="{{ job.printer_name }}">
                         <td>
                             <span class="printer-tag"
                                   style="background-color: {{ printer_colors.get(job.printer_name, '#eee') }}">
@@ -336,14 +351,14 @@
                         <td>{{ job.filename }}</td>
                         <td>
                             <span
-                                class="badge {% if job.status == 'printing' %}bg-success{% elif job.status == 'paused' %}bg-warning text-dark{% elif job.status == 'failed' or job.status == 'canceled' %}bg-danger{% else %}bg-secondary{% endif %}">
+                                data-live-state class="badge bg-secondary">
                                 {{ job.status|upper }}
                             </span>
                             {% if job.status == 'paused' and job.pause_reason %}
                                 <div class="text-muted small">{{ job.pause_reason|replace('_', ' ') }}</div>
                             {% endif %}
                         </td>
-                        <td>
+                        <td data-live-elapsed>
                             {% set hours = (job.elapsed_seconds // 3600)|int %}
                             {% set mins = ((job.elapsed_seconds % 3600) // 60)|int %}
                             {% set secs = (job.elapsed_seconds % 60)|int %}
@@ -355,11 +370,12 @@
                                 <div class="text-muted small">Paused: {{ "%d:%02d:%02d"|format(ph, pm, ps) }}</div>
                             {% endif %}
                         </td>
-                        <td class="text-end">
-                            <span class="fw-semibold">${{ "%.2f"|format(job.current_time_cost) }}</span>
+                        <td data-live-filament>Verifying…</td>
+                        <td class="text-end" data-live-cost>
+                            <span class="text-muted">Unverified — waiting for telemetry</span>
                         </td>
                         <td class="text-end">
-                            {% if job.estimated_total_cost %}
+                            {% if job.get('estimated_total_cost') is not none %}
                             <span class="fw-semibold">${{ "%.2f"|format(job.estimated_total_cost) }}</span>
                             {% else %}
                             <span class="text-muted">N/A</span>
@@ -371,7 +387,7 @@
                                 <input type="hidden" name="printer_name" value="{{ job.printer_name }}">
                                 <button type="submit"
                                         class="btn btn-sm btn-outline-danger"
-                                        title="Clear this live job without logging it">
+                                        title="Clear this live job without logging it" onclick="return confirm('Clear retained KCD tracking only? This does not cancel the printer or create a history record.')">
                                     Clear
                                 </button>
                             </form>
@@ -515,6 +531,8 @@
                         Delete Selected
                     </button>
                     <output id="historySelectionCount" class="small text-muted align-self-center" aria-live="polite">0 selected on this page</output>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearHistorySelection()">Clear Selection</button>
+                    <span class="small text-muted">Selection survives refresh in this tab; changing filters or pages clears it.</span>
                 </div>
 
                 <form method="get" class="d-flex flex-wrap gap-2 align-items-center mb-0">
@@ -526,14 +544,14 @@
                     <input type="hidden" name="history_page" value="1">
                     <input type="hidden" name="history_per_page" value="{{ history_pager.per_page }}">
 
-                    <select name="printer" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+                    <select name="printer" aria-label="Filter history by printer" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
                         <option value="All" {% if selected_printer=='All' %}selected{% endif %}>All printers</option>
                         {% for p in printers %}
                         <option value="{{ p }}" {% if selected_printer==p %}selected{% endif %}>{{ p }}</option>
                         {% endfor %}
                     </select>
 
-                    <select name="range" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+                    <select name="range" aria-label="Filter history by date range" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
                         <option value="all" {% if (selected_range or 'all')=='all' %}selected{% endif %}>All time</option>
                         <option value="today" {% if selected_range=='today' %}selected{% endif %}>Today</option>
                         <option value="yesterday" {% if selected_range=='yesterday' %}selected{% endif %}>Yesterday</option>
@@ -541,7 +559,7 @@
                         <option value="month" {% if selected_range=='month' %}selected{% endif %}>This month</option>
                     </select>
 
-                    <select name="paused_min" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+                    <select name="paused_min" aria-label="Filter history by paused time" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
                         <option value="" {% if not paused_min %}selected{% endif %}>Any paused time</option>
                         <option value="5" {% if paused_min=='5' %}selected{% endif %}>Paused ≥ 5 min</option>
                         <option value="10" {% if paused_min=='10' %}selected{% endif %}>Paused ≥ 10 min</option>
@@ -644,8 +662,8 @@
                                  <span class="fw-semibold">{{ "%.2f"|format(val|float) }}</span>
                                  {% endif %}
                                  {% elif h == 'filament_meters' %}
-                                 <span class="fw-semibold">{{ "%.2f"|format(row.get(h, 0)|float) }}</span>
-                                 <div class="small text-muted" title="{{ row.get('_weight_source','Missing conversion information') }}">{{ '%.2f'|format(row._weight_grams) if row.get('_weight_grams') is not none else 'Unknown' }} g · {{ row.get('_weight_factor','?') }} g/m</div>
+                                 <div class="fw-semibold" title="{{ row.get('_weight_source','Missing conversion information') }}">{{ '%.2f'|format(row._weight_grams) ~ ' g' if row.get('_weight_grams') is not none else 'Weight unknown' }}</div>
+                                 <div class="small text-muted">{{ "%.2f"|format(row.get(h, 0)|float) }} m · {{ row.get('_weight_factor') if row.get('_weight_factor') is not none else '?' }} g/m</div>
                                  {% elif h == 'filament_rate' %}
                                  <span>{{ row.get(h, '') }} {{ row.get('_price_unit','Unknown unit') }}</span>
                                  {% elif h in ['job_uid', 'filament_profile_id', 'import_id'] %}

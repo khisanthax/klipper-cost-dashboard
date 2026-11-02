@@ -1274,6 +1274,33 @@ def job_end():
 # WEB PAGES
 # ============================================================================
 
+@app.get('/api/printer-status')
+def printer_status():
+    """Read telemetry without rewriting history or clearing retained live state."""
+    from core import monitoring
+    from core.filament import conversion,material_cost,price_spec
+    endpoints={name:thumbs.resolve_moonraker_base_url(name) or '' for name in get_canonical_printer_names()}
+    observations=monitoring.statuses(endpoints)
+    for name,item in observations.items():
+        stored=live.get_job(name)
+        item['tracking_warning']=None
+        if stored and (not item['connected'] or item['state'] not in ('printing','paused') or item.get('filename')!=stored.get('filename')):
+            item['tracking_warning']='Stored job differs from current Moonraker state. Review tracking; no job was automatically cleared or finalized.'
+        if item['connected'] and item['state'] in ('printing','paused'):
+            try:
+                cfg=pricing._get_effective_filament_pricing(name)
+                measure=conversion({'filament_mm':item['filament_mm'],'grams_per_meter':cfg['grams_per_meter']})
+                seconds=item['total_seconds'] if pricing._include_paused_time_for_printer(name) else item['print_seconds']
+                item['grams']=float(measure['grams'])
+                item['time_cost']=pricing.compute_live_time_cost(name,seconds)
+                item['material_cost']=float(material_cost(measure,price_spec(cfg['filament_mode'],cfg['filament_rate'])))
+                item['total_cost']=item['time_cost']+item['material_cost']
+                item['conversion_source']=str(cfg['grams_per_meter'])+' g/m; current printer pricing'
+            except (ValueError,RuntimeError,TypeError):
+                item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
+    return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     """Main dashboard page."""
@@ -1430,7 +1457,7 @@ def index():
     )
     history_rows_page = history_result.rows_page
     history_pager = history_result.pager
-    error = history_result.error
+    error = history_result.error or error
 
     history_pager = _pager_links(
         endpoint="index",
@@ -1501,9 +1528,9 @@ def index():
                 try:
                     with db_module.connect_db() as conn:
                         latest=conn.execute("SELECT job_uid FROM jobs j JOIN printers p ON p.id=j.printer_id WHERE p.name=? AND j.filename=? ORDER BY j.ended_at DESC LIMIT 1",(pname,card_filename)).fetchone()
-                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card",job_uid=latest[0] if latest else None) if card_filename else None
+                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card",job_uid=latest[0]) if latest else None
                 except Exception:
-                    ps["_thumb_card"] = get_job_thumbnail_url(pname,card_filename,size_hint="card") if card_filename else None
+                    ps["_thumb_card"] = None
         else:
             ps["_thumb_card"] = None
 
@@ -1518,7 +1545,7 @@ def index():
         job["_thumb_cards_enabled"] = bool(thumbs_enabled and thumbs_on_cards)
         if thumbs_enabled and thumbs_on_cards:
             fname = str(job.get("filename") or "").strip()
-            job["_thumb_small"] = url_for("archived_thumbnail",digest=job["thumbnail_asset"]) if job.get("thumbnail_asset") else (get_job_thumbnail_url(pname, fname, size_hint="small") if fname else None)
+            job["_thumb_small"] = url_for("archived_thumbnail",digest=job["thumbnail_asset"]) if job.get("thumbnail_asset") else None
         else:
             job["_thumb_small"] = None
 

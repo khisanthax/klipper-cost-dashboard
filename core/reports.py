@@ -142,28 +142,44 @@ def compute_top_printers(rows, limit=5):
 def compute_summary(rows):
     """
     Compute summary statistics for a list of print rows.
-    Always returns a dict with totals and empty per_day/per_printer maps.
+    Return totals and chart groups using local calendar dates.
     """
     total_prints = len(rows)
     total_hours = 0.0
     total_meters = 0.0
     total_cost = 0.0
+    per_day = {}
+    per_printer = {}
 
     for r in rows:
         try:
             total_hours += float(r.get("duration_hours") or 0.0)
             total_meters += float(r.get("filament_meters") or 0.0)
-            total_cost += float(r.get("total_cost") or 0.0)
+            cost = float(r.get("total_cost") or 0.0)
+            hours = float(r.get("duration_hours") or 0.0)
+            total_cost += cost
+            printer = str(r.get('printer') or 'Unknown')
+            group = per_printer.setdefault(printer, {'hours': 0.0, 'cost': 0.0, 'count': 0})
+            group['hours'] += hours; group['cost'] += cost; group['count'] += 1
+            timestamp = r.get('timestamp_raw')
+            day = ts_to_local_dt(float(timestamp)).strftime('%Y-%m-%d') if timestamp is not None else str(r.get('timestamp') or '')[:10]
+            if day:
+                group = per_day.setdefault(day, {'hours': 0.0, 'cost': 0.0, 'count': 0})
+                group['hours'] += hours; group['cost'] += cost; group['count'] += 1
         except (TypeError, ValueError):
             continue
 
+    days=sorted(per_day)
+    try:days_span=(datetime.fromisoformat(days[-1])-datetime.fromisoformat(days[0])).days+1 if days else 0
+    except ValueError:days_span=0
     return {
         "total_prints": total_prints,
         "total_hours": total_hours,
         "total_meters": total_meters,
         "total_cost": total_cost,
-        "per_day": {},
-        "per_printer": {},
+        "per_day": per_day,
+        "per_printer": per_printer,
+        "days_span": days_span,
     }
 
 

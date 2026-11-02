@@ -178,16 +178,16 @@
                 </div>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Frequency</label>
+                <label class="form-label">Frequency
                 <select class="form-select" name="auto_backup_frequency" {% if sql_only %}disabled{% endif %}>
                     <option value="daily" {% if backup_settings and backup_settings.auto_backup_frequency == 'daily' %}selected{% endif %}>Daily</option>
                     <option value="weekly" {% if backup_settings and backup_settings.auto_backup_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
-                </select>
+                </select></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Keep</label>
+                <label class="form-label">Keep
                 <input type="number" class="form-control" name="auto_backup_keep" min="1" max="100"
-                    value="{{ backup_settings.auto_backup_keep if backup_settings else 7 }}" {% if sql_only %}disabled{% endif %}>
+                    value="{{ backup_settings.auto_backup_keep if backup_settings else 7 }}" {% if sql_only %}disabled{% endif %}></label>
                 <div class="text-muted small">Max 100</div>
             </div>
             <div class="col-md-3 d-grid">

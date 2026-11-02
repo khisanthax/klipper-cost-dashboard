@@ -35,25 +35,25 @@
             </div>
             {% endif %}
             <div class="col-md-3">
-                <label class="form-label">Project</label>
+                <label class="form-label">Project
                 <select name="project" class="form-select">
                     <option value="" {% if not project_id %}selected{% endif %}>All projects</option>
                     {% for p in project_options or [] %}
                     <option value="{{ p.id }}" {% if project_id == p.id %}selected{% endif %}>{{ p.name }}</option>
                     {% endfor %}
-                </select>
+                </select></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Printer</label>
+                <label class="form-label">Printer
                 <select name="printer" class="form-select">
                     <option value="All" {% if (selected_printer or 'All') == 'All' %}selected{% endif %}>All</option>
                     {% for p in printers %}
                     <option value="{{ p }}" {% if selected_printer == p %}selected{% endif %}>{{ p }}</option>
                     {% endfor %}
-                </select>
+                </select></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Status</label>
+                <label class="form-label">Status
                 <select name="status" class="form-select">
                     {% set s = (status or 'All') %}
                     <option value="All" {% if s == 'All' or s == 'all' %}selected{% endif %}>All</option>
@@ -62,15 +62,15 @@
                     <option value="FAILED" {% if s|lower == 'failed' %}selected{% endif %}>FAILED</option>
                     <option value="PRINTING" {% if s|lower == 'printing' %}selected{% endif %}>PRINTING</option>
                     <option value="PAUSED" {% if s|lower == 'paused' %}selected{% endif %}>PAUSED</option>
-                </select>
+                </select></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Filename contains</label>
-                <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="e.g. cube_petg">
+                <label class="form-label">Filename contains
+                <input type="text" name="q" value="{{ q or '' }}" class="form-control" placeholder="e.g. cube_petg"></label>
             </div>
 
             <div class="col-md-3">
-                <label class="form-label">Quick range</label>
+                <label class="form-label">Quick range
                 <select name="quick_range" class="form-select">
                     <option value="" {% if not quick_range %}selected{% endif %}>All time</option>
                     <option value="today" {% if quick_range == 'today' %}selected{% endif %}>Today</option>
@@ -80,25 +80,25 @@
                     <option value="last30" {% if quick_range == 'last30' %}selected{% endif %}>Last 30 days</option>
                     <option value="this_month" {% if quick_range == 'this_month' %}selected{% endif %}>This month</option>
                     <option value="last_month" {% if quick_range == 'last_month' %}selected{% endif %}>Last month</option>
-                </select>
+                </select></label>
             </div>
 
             <div class="col-md-3">
-                <label class="form-label">Start date</label>
-                <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control">
+                <label class="form-label">Start date
+                <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control"></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">End date</label>
-                <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control">
+                <label class="form-label">End date
+                <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control"></label>
             </div>
 
             <div class="col-md-3">
-                <label class="form-label">Rows per page</label>
+                <label class="form-label">Rows per page
                 <select name="per_page" class="form-select" onchange="this.form.page.value='1'; this.form.submit();">
                     {% for n in [10, 25, 50, 100] %}
                     <option value="{{ n }}" {% if pager.per_page == n %}selected{% endif %}>{{ n }}</option>
                     {% endfor %}
-                </select>
+                </select></label>
                 <input type="hidden" name="page" value="{{ pager.page }}">
             </div>
 
@@ -141,22 +141,22 @@
                                 <div class="small text-muted">Otherwise uses each job's recorded weight/factor, or its filament profile. Spool price is divided by net filament weight. Explicit price overrides the selected filament profile's rate.</div>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label mb-1">Hourly rate override</label>
+                                <label class="form-label mb-1">Hourly rate override
                                 <input type="text"
                                        name="rate_per_hour_override" form="kcd-recalc-form"
                                        value="{{ rate_per_hour_override or '' }}"
                                        class="form-control form-control-sm"
-                                       placeholder="$/hr (optional)">
+                                       placeholder="$/hr (optional)"></label>
                                 <div class="text-muted small">If set, overrides the selected rate profile.</div>
                             </div>
 
                             <div class="col-md-4">
-                                <label class="form-label mb-1">Legacy explicit $/meter override</label>
+                                <label class="form-label mb-1">Legacy explicit $/meter override
                                 <input type="text"
                                        name="filament_rate_per_meter_override" form="kcd-recalc-form"
                                        value="{{ filament_rate_per_meter_override or '' }}"
                                        class="form-control form-control-sm"
-                                       placeholder="$/meter (optional)">
+                                       placeholder="$/meter (optional)"></label>
                                 <div class="text-muted small">If set, uses per-meter pricing (no profile).</div>
                             </div>
 
@@ -166,7 +166,7 @@
                                            id="apply_rate_profile" {% if apply_rate_profile %}checked{% endif %}>
                                     <label class="form-check-label" for="apply_rate_profile">Apply hourly rate profile</label>
                                 </div>
-                                <select name="rate_profile_id" form="kcd-recalc-form" class="form-select form-select-sm mt-1">
+                                <select name="rate_profile_id" aria-label="Hourly rate profile to apply" form="kcd-recalc-form" class="form-select form-select-sm mt-1">
                                     <option value="">Select rate profile…</option>
                                     {% for rid, rp in rate_profiles.items() %}
                                     <option value="{{ rid }}" {% if rate_profile_id == rid %}selected{% endif %}>
@@ -182,7 +182,7 @@
                                            id="apply_filament_profile" {% if apply_filament_profile %}checked{% endif %}>
                                     <label class="form-check-label" for="apply_filament_profile">Apply filament profile</label>
                                 </div>
-                                <select name="filament_profile_id" form="kcd-recalc-form" class="form-select form-select-sm mt-1">
+                                <select name="filament_profile_id" aria-label="Filament profile to apply" form="kcd-recalc-form" class="form-select form-select-sm mt-1">
                                     <option value="">Select filament profile…</option>
                                     {% for fid, fp in filament_profiles.items() %}
                                     <option value="{{ fid }}" {% if filament_profile_id == fid %}selected{% endif %}>
@@ -239,6 +239,7 @@
                     <div class="d-none" id="kcd-confirm-wrap">
                         <input type="text"
                                name="confirm"
+                               aria-label="Type RECALC to confirm a large selection"
                                class="form-control form-control-sm"
                                placeholder="Type RECALC to confirm">
                     </div>

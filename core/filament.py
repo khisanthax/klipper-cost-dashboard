@@ -123,7 +123,12 @@ def quantize(value):
 
 def describe_job(row,profile=None):
     """Presentation metadata only; never recalculate a saved historical cost."""
-    measure=conversion(row,profile)
+    try:
+        measure=conversion(row,profile)
+    except NumericValidationError as exc:
+        # A malformed historical measurement must not hide its saved price or
+        # prevent the rest of a history/report page from rendering.
+        measure={'grams':None,'grams_per_meter':None,'conversion_source':'Invalid recorded measurement: '+str(exc)}
     row['_weight_grams']=float(measure['grams']) if measure['grams'] is not None else None
     row['_weight_factor']=measure['grams_per_meter']
     row['_weight_source']=measure['conversion_source']

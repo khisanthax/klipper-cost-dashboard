@@ -76,16 +76,16 @@
         <form method="post" class="row g-3">
             <input type="hidden" name="action" value="create_project">
             <div class="col-md-4">
-                <label class="form-label">Project name</label>
-                <input type="text" class="form-control" name="name" required>
+                <label class="form-label">Project name
+                <input type="text" class="form-control" name="name" required></label>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Notes (optional)</label>
-                <input type="text" class="form-control" name="notes">
+                <label class="form-label">Notes (optional)
+                <input type="text" class="form-control" name="notes"></label>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Hourly rate (override)</label>
-                <input type="text" class="form-control" name="hourly_rate_override" placeholder="optional">
+                <label class="form-label">Hourly rate (override)
+                <input type="text" class="form-control" name="hourly_rate_override" placeholder="optional"></label>
                 <div class="text-muted small">$/hr</div>
             </div>
             <div class="col-12 border rounded p-2">
@@ -184,18 +184,18 @@
                                             <input type="hidden" name="action" value="update_project">
                                             <input type="hidden" name="project_id" value="{{ p.id }}">
                                             <div class="col-md-4">
-                                                <label class="form-label">Name</label>
-                                                <input type="text" class="form-control" name="name" value="{{ p.name }}" required>
+                                                <label class="form-label">Name
+                                                <input type="text" class="form-control" name="name" value="{{ p.name }}" required></label>
                                             </div>
                                             <div class="col-md-4">
-                                                <label class="form-label">Notes</label>
-                                                <input type="text" class="form-control" name="notes" value="{{ p.notes }}">
+                                                <label class="form-label">Notes
+                                                <input type="text" class="form-control" name="notes" value="{{ p.notes }}"></label>
                                             </div>
                                             <div class="col-md-2">
-                                                <label class="form-label">Hourly rate (override)</label>
+                                                <label class="form-label">Hourly rate (override)
                                                 <input type="text" class="form-control" name="hourly_rate_override"
                                                        value="{{ p.hourly_rate_override if p.hourly_rate_override is not none else '' }}"
-                                                       placeholder="optional">
+                                                       placeholder="optional"></label>
                                                 <div class="text-muted small">$/hr</div>
                                             </div>
                                             <div class="col-12 border rounded p-2">
@@ -428,21 +428,21 @@
                                                         <input type="hidden" name="action" value="upload_plan_gcode">
                                                         <input type="hidden" name="project_id" value="{{ p.id }}">
                                                         <div class="flex-grow-1" style="min-width: 260px;">
-                                                            <label class="form-label">Upload .gcode (metadata-only)</label>
-                                                            <input type="file" class="form-control" name="gcode_file" accept=".gcode" required>
+                                                            <label class="form-label">Upload .gcode (metadata-only)
+                                                            <input type="file" class="form-control" name="gcode_file" accept=".gcode" required></label>
                                                         </div>
                                                         <div class="d-flex flex-wrap gap-2">
                                                             <div style="min-width: 160px;">
-                                                                <label class="form-label text-muted small mb-0">Hours (if missing)</label>
-                                                                <input type="text" class="form-control form-control-sm" name="manual_time_hours" placeholder="e.g. 1.5">
+                                                                <label class="form-label text-muted small mb-0">Hours (if missing)
+                                                                <input type="text" class="form-control form-control-sm" name="manual_time_hours" placeholder="e.g. 1.5"></label>
                                                             </div>
                                                             <div style="min-width: 160px;">
-                                                                <label class="form-label text-muted small mb-0">Filament g (if missing)</label>
-                                                                <input type="text" class="form-control form-control-sm" name="manual_filament_g" placeholder="optional">
+                                                                <label class="form-label text-muted small mb-0">Filament g (if missing)
+                                                                <input type="text" class="form-control form-control-sm" name="manual_filament_g" placeholder="optional"></label>
                                                             </div>
                                                             <div style="min-width: 170px;">
-                                                                <label class="form-label text-muted small mb-0">Cost $ (optional)</label>
-                                                                <input type="text" class="form-control form-control-sm" name="manual_cost" placeholder="optional">
+                                                                <label class="form-label text-muted small mb-0">Cost $ (optional)
+                                                                <input type="text" class="form-control form-control-sm" name="manual_cost" placeholder="optional"></label>
                                                                 <div class="text-muted small">Leave blank to use project defaults; enter a value to override.</div>
                                                             </div>
                                                         </div>
@@ -636,13 +636,13 @@
 
             <div class="row g-2 align-items-end mb-3">
                 <div class="col-md-6">
-                    <label class="form-label">Assign selected to</label>
+                    <label class="form-label">Assign selected to
                     <select class="form-select" name="project_id">
                         <option value="" selected disabled>Select a project…</option>
                         {% for p in projects %}
                         <option value="{{ p.id }}">{{ p.name }}</option>
                         {% endfor %}
-                    </select>
+                    </select></label>
                 </div>
                 <div class="col-md-3 d-flex">
                     <button type="submit" name="action" value="assign_jobs" class="btn btn-primary w-100">Assign Selected</button>
@@ -657,10 +657,10 @@
 
             <div class="row g-2 align-items-end mb-3">
                 <div class="col-md-4">
-                    <label class="form-label">Filter by printer</label>
-                    <select class="form-select" id="kcdUnassignedPrinterFilter">
+                    <label class="form-label">Filter by printer
+                    <select class="form-select" id="kcdUnassignedPrinterFilter" aria-label="Filter unassigned jobs by printer">
                         <option value="" selected>All printers</option>
-                    </select>
+                    </select></label>
                 </div>
             </div>
 
@@ -688,7 +688,7 @@
                          {% for j in unassigned_jobs_page %}
                          <tr data-printer="{{ j.printer|e }}">
                                <td data-col="__select__">
-                                  <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}">
+                                  <input class="form-check-input" type="checkbox" name="job_uid" value="{{ j.job_uid }}" aria-label="Select {{ j.filename }} ({{ j.job_uid }})">
                                </td>
                               <td data-col="thumbnail" class="{% if 'thumbnail' not in _unassigned_cols %}kcd-col-hidden{% endif %}">
                                   {% if j._thumbs_enabled %}
@@ -957,27 +957,27 @@
 
                     <div class="row g-3">
                         <div class="col-12">
-                            <label class="form-label">Description</label>
-                            <input type="text" class="form-control" name="title" id="kcdManualTitle" required>
+                            <label class="form-label">Description
+                            <input type="text" class="form-control" name="title" id="kcdManualTitle" required></label>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Hours</label>
-                            <input type="text" class="form-control" name="hours" id="kcdManualHours" required>
+                            <label class="form-label">Hours
+                            <input type="text" class="form-control" name="hours" id="kcdManualHours" required></label>
                             <div class="text-muted small">Must be &gt; 0</div>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Filament (g)</label>
-                            <input type="text" class="form-control" name="filament_g" id="kcdManualFilamentG" placeholder="optional">
+                            <label class="form-label">Filament (g)
+                            <input type="text" class="form-control" name="filament_g" id="kcdManualFilamentG" placeholder="optional"></label>
                             <div class="text-muted small">Optional; must be ≥ 0</div>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Cost override ($)</label>
-                            <input type="text" class="form-control" name="cost_override" id="kcdManualCostOverride" placeholder="optional">
+                            <label class="form-label">Cost override ($)
+                            <input type="text" class="form-control" name="cost_override" id="kcdManualCostOverride" placeholder="optional"></label>
                             <div class="text-muted small">Optional; must be ≥ 0</div>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Notes</label>
-                            <textarea class="form-control" name="notes" id="kcdManualNotes" rows="2" placeholder="optional"></textarea>
+                            <label class="form-label">Notes
+                            <textarea class="form-control" name="notes" id="kcdManualNotes" rows="2" placeholder="optional"></textarea></label>
                         </div>
                     </div>
                 </div>
@@ -1068,30 +1068,30 @@
 
                     <div class="row g-3">
                         <div class="col-12">
-                            <label class="form-label">Filename</label>
-                            <input type="text" class="form-control" name="filename" id="kcdPlanFilename" required>
+                            <label class="form-label">Filename
+                            <input type="text" class="form-control" name="filename" id="kcdPlanFilename" required></label>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Estimated time (hours)</label>
-                            <input type="text" class="form-control" name="time_hours" id="kcdPlanTimeHours" required>
+                            <label class="form-label">Estimated time (hours)
+                            <input type="text" class="form-control" name="time_hours" id="kcdPlanTimeHours" required></label>
                             <div class="text-muted small">Must be &gt; 0</div>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Filament (g)</label>
-                            <input type="text" class="form-control" name="filament_g" id="kcdPlanFilamentG" placeholder="optional">
+                            <label class="form-label">Filament (g)
+                            <input type="text" class="form-control" name="filament_g" id="kcdPlanFilamentG" placeholder="optional"></label>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Estimated cost ($)</label>
-                            <input type="text" class="form-control" name="est_cost" id="kcdPlanCost" placeholder="optional">
+                            <label class="form-label">Estimated cost ($)
+                            <input type="text" class="form-control" name="est_cost" id="kcdPlanCost" placeholder="optional"></label>
                             <div class="text-muted small">Leave blank to use project defaults; enter a value to override.</div>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Source</label>
-                            <input type="text" class="form-control" name="source" id="kcdPlanSource" placeholder="optional">
+                            <label class="form-label">Source
+                            <input type="text" class="form-control" name="source" id="kcdPlanSource" placeholder="optional"></label>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Notes</label>
-                            <textarea class="form-control" name="notes" id="kcdPlanNotes" rows="2" placeholder="optional"></textarea>
+                            <label class="form-label">Notes
+                            <textarea class="form-control" name="notes" id="kcdPlanNotes" rows="2" placeholder="optional"></textarea></label>
                         </div>
                     </div>
                 </div>

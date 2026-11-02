@@ -97,22 +97,22 @@
     <div class="card-body">
         <form method="get" class="row g-3 align-items-end">
             <div class="col-md-3">
-                <label class="form-label">Start Date</label>
-                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm">
+                <label class="form-label">Start Date
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm"></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">End Date</label>
-                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm">
+                <label class="form-label">End Date
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm"></label>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Quick Range</label>
+                <label class="form-label">Quick Range
                 <select name="quick_range" class="form-select form-select-sm">
                     <option value="">(none)</option>
                     <option value="last7" {% if quick_range=='last7' %}selected{% endif %}>Last 7 days</option>
                     <option value="last30" {% if quick_range=='last30' %}selected{% endif %}>Last 30 days</option>
                     <option value="this_month" {% if quick_range=='this_month' %}selected{% endif %}>This month</option>
                     <option value="last_month" {% if quick_range=='last_month' %}selected{% endif %}>Last month</option>
-                </select>
+                </select></label>
             </div>
             <div class="col-md-3 d-grid">
                 <button type="submit" class="btn btn-primary btn-sm">Apply</button>
