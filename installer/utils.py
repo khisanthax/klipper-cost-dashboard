@@ -264,7 +264,7 @@ def _render_systemd_service(
 ) -> str:
     storage_backend = str(storage_backend or "").strip().lower()
     reports_backend = str(reports_backend or "").strip().lower()
-    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", service_name) or not 0 < int(port) < 65536:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", service_name) or not 0 < int(port) < 65536:
         raise ValueError("Invalid service name or port")
     if (storage_backend, reports_backend) not in {("csv", "csv"), ("dual", "auto"), ("sql", "sql")}:
         raise ValueError(
@@ -1443,9 +1443,13 @@ def master_setup(master_and_client: bool = False) -> None:
 
     try:
         port = int(port_str)
-    except ValueError:
-        port = DEFAULT_PORT
-        println(f"Invalid port, using {DEFAULT_PORT}.")
+        if not 0 < port < 65536 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.@-]*', service_name):
+            raise ValueError('Port must be 1–65535 and service name must contain only letters, numbers, dot, underscore, @ or hyphen, starting with a letter or number')
+        from core.registration import validate_registration
+        validate_registration('Master',url)
+    except ValueError as exc:
+        println(f"Invalid Master configuration: {exc}. Saved configuration retained; no service changes made.")
+        return
 
     save_state("master_host", host)
     save_state("master_port", port)

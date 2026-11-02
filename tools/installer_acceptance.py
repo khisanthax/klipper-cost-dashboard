@@ -31,6 +31,8 @@ def exercise(env,base,moons,tmp,*,browser=True):
     # Real cancellation at the configuration selection prompt.
     assert 'Goodbye' in terminal(['2','1','b','3','5'])
     terminal([],expected=1)  # EOF is bounded; no prompt loop.
+    for port,service in [('bad','fixture'),('70000','fixture'),('6060','../escape')]:
+        assert 'Invalid Master configuration' in terminal(['1','1','n','127.0.0.1',port,base,service,'5'])
     def cli(args,code=0):
         run=subprocess.run([sys.executable,'install.py',*args],cwd=ROOT,env=env,capture_output=True,text=True,timeout=30)
         record(run)
