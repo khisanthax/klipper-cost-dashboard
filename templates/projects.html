@@ -240,7 +240,7 @@
                                             <input type="hidden" name="action" value="delete_project">
                                             <input type="hidden" name="project_id" value="{{ p.id }}">
                                             <button type="submit" class="btn btn-outline-danger"
-                                                    onclick="return confirm('Delete project {{ p.name }}? Jobs will be unassigned and history will remain.')">
+                                                    onclick='return confirm({{ ("Delete project " ~ p.name ~ "? Jobs will be unassigned and history will remain.")|tojson }})'>
                                                 Delete Project
                                             </button>
                                         </form>

@@ -37,7 +37,7 @@
                         <td class="text-nowrap">
                             <div class="d-flex gap-2">
                                 <button form="profile-update-{{ pid }}" type="submit" class="btn btn-sm btn-primary">Save</button>
-                                <form method="post" onsubmit="return confirm('Delete profile {{ profile.name }}?')" class="d-inline">
+                                <form method="post" onsubmit='return confirm({{ ("Delete profile " ~ profile.name ~ "?")|tojson }})' class="d-inline">
                                     <input type="hidden" name="action" value="delete_filament_profile">
                                     <input type="hidden" name="profile_id" value="{{ pid }}">
                                     <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
@@ -120,7 +120,7 @@
                         <td class="text-nowrap">
                             <div class="d-flex gap-2">
                                 <button form="rate-update-{{ rid }}" type="submit" class="btn btn-sm btn-primary">Save</button>
-                                <form method="post" onsubmit="return confirm('Delete rate profile {{ rprofile.name }}?')" class="d-inline">
+                                <form method="post" onsubmit='return confirm({{ ("Delete rate profile " ~ rprofile.name ~ "?")|tojson }})' class="d-inline">
                                     <input type="hidden" name="action" value="delete_rate_profile">
                                     <input type="hidden" name="rate_profile_id" value="{{ rid }}">
                                     <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>

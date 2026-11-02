@@ -123,3 +123,33 @@ class DashboardUXTests(unittest.TestCase):
         result=summarize_weights([dict(filament_meters=1,grams_per_meter=3),dict(filament_meters=2)],{})
         self.assertEqual(float(result['known_grams']),3)
         self.assertEqual(result['unknown_weights'],1)
+
+    def test_assigned_profiles_cannot_be_deleted_or_break_readiness(self):
+        from core import db,profiles,rates
+        from core.registration import register_printer
+        from core.readiness import check_sql_only_readiness
+        import app
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql','KCD_SQL_ONLY_FAIL_FAST':'0'}),patch.object(db,'_db_path',lambda:str(Path(tmp)/'kcd.db')):
+            register_printer('Fixture','http://127.0.0.1:1')
+            profiles.upsert_profile(dict(id='material',name='Material',filament_mode='per_kg',filament_rate=15,grams_per_meter=3))
+            rates.upsert_rate_profile(dict(id='hourly',name='Hourly',rate_per_hour=0))
+            self.assertTrue(profiles.set_printer_mapping('Fixture','material'))
+            self.assertTrue(rates.set_printer_rate_profile_sql('Fixture','hourly'))
+            for action,key,value in [('delete_filament_profile','profile_id','material'),('delete_rate_profile','rate_profile_id','hourly')]:
+                response=app.app.test_client().post('/settings/profiles',data={'action':action,key:value},follow_redirects=True)
+                self.assertEqual(response.status_code,200)
+                self.assertIn(b'Select replacement or base pricing',response.data)
+                self.assertTrue(check_sql_only_readiness()['ready'])
+            with db.connect_db() as conn:self.assertEqual(conn.execute("SELECT COUNT(*) FROM system_events WHERE category='deleted'").fetchone()[0],0)
+            profiles.set_printer_mapping('Fixture',None);rates.set_printer_rate_profile_sql('Fixture',None)
+            self.assertTrue(profiles.delete_profile('material'));self.assertTrue(rates.delete_rate_profile('hourly'))
+            self.assertTrue(check_sql_only_readiness()['ready'])
+
+    def test_numeric_profile_uid_does_not_delete_an_unrelated_row_id(self):
+        from core import db,rates
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'KCD_STORAGE_BACKEND':'sql'}),patch.object(db,'_db_path',lambda:str(Path(tmp)/'kcd.db')):
+            rates.upsert_rate_profile(dict(id='first',name='First',rate_per_hour=1))
+            rates.upsert_rate_profile(dict(id='1',name='Numeric stable UID',rate_per_hour=0))
+            self.assertTrue(rates.delete_rate_profile('1'))
+            self.assertIsNotNone(rates.get_rate_profile('first'))
+            self.assertIsNone(rates.get_rate_profile('1'))

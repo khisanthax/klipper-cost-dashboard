@@ -71,6 +71,9 @@ def main():
             with sync_playwright() as pw:
                 browser=pw.chromium.launch();context=browser.new_context();context.tracing.start(screenshots=True,snapshots=True,sources=True)
                 page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                cdp=context.new_cdp_session(page);cdp.send('Performance.enable')
+                failed_requests=[]
+                page.on('requestfailed',lambda request:failed_requests.append({'url':request.url,'failure':request.failure}))
                 results=[]
                 routes=['/','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
                 if '--workflows-only' in sys.argv:routes=[]
@@ -104,6 +107,9 @@ def main():
                         page.set_viewport_size({'width':1440,'height':1000});page.goto(base+'/')
                         from dashboard_workflows import exercise
                         exercise(page,context,base,project,tmp,artifacts)
+                        assert not errors,errors
+                    metrics={item['name']:item['value'] for item in cdp.send('Performance.getMetrics')['metrics']}
+                    (artifacts/'browser-performance.json').write_text(json.dumps({'metrics':metrics,'failed_requests':failed_requests,'browser_errors':errors},indent=2))
                 except Exception:
                     page.screenshot(path=str(artifacts/'failure.png'),full_page=True);raise
                 finally:context.tracing.stop(path=str(artifacts/'trace.zip'));browser.close()

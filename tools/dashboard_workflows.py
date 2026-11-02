@@ -62,11 +62,11 @@ def exercise(page,context,base,project,data,artifacts):
     assert not query('SELECT * FROM project_job_pricing')
     # Create with a project profile; manual/planned costs are distinct actual/estimated views.
     page.goto(base+'/projects');create=form('create_project')
-    create.locator('[name=name]').fill('Browser workflow')
+    create.locator('[name=name]').fill("Maker's browser workflow")
     create.locator('[name=hourly_rate_override]').fill('0')
     create.locator('[name=project_filament_profile_id]').select_option('petg-15')
     click(create.get_by_role('button',name='Create',exact=True))
-    created=query('SELECT * FROM projects WHERE name=?','Browser workflow')[0];pid=created['project_uid']
+    created=query('SELECT * FROM projects WHERE name=?',"Maker's browser workflow")[0];pid=created['project_uid']
     assert created['hourly_rate_override']==0 and created['filament_cost_per_kg_override']==15
     assert json.loads(created['filament_price_json'])['profile_id']=='petg-15'
     panel=open_project(pid);edit=form('update_project',panel);edit.locator('[name=notes]').fill('Verified through actual forms');click(edit.get_by_role('button',name='Save',exact=True))
@@ -108,10 +108,13 @@ def exercise(page,context,base,project,data,artifacts):
     cleared=query('SELECT * FROM projects WHERE project_uid=?',pid)[0]
     assert cleared['hourly_rate_override'] is None and cleared['filament_cost_per_kg_override'] is None
     # Delete project after reviewing the confirmation; jobs are never deleted.
-    panel=open_project(pid);page.once('dialog',lambda dialog:dialog.accept());click(form('delete_project',panel).get_by_role('button',name='Delete Project',exact=True))
+    panel=open_project(pid);confirmations=[]
+    page.once('dialog',lambda dialog:(confirmations.append(dialog.message),dialog.accept()));click(form('delete_project',panel).get_by_role('button',name='Delete Project',exact=True))
+    assert confirmations and "Maker's browser workflow" in confirmations[0]
     assert not query('SELECT * FROM projects WHERE project_uid=?',pid)
     assert query('SELECT * FROM jobs ORDER BY job_uid')==originals
     # Spool inputs drive actual completed-job calculations for several materials.
+    created_profiles={}
     for material,price,spool,density,diameter in [('PETG',15,1000,1.25,1.75),('PLA',9,500,1.24,1.75),('ABS',13.5,250,1.04,2.85)]:
         page.goto(base+'/settings/profiles');add=form('add_filament_profile')
         name='Browser '+material+' spool'
@@ -121,6 +124,7 @@ def exercise(page,context,base,project,data,artifacts):
         add.locator('[name=conversion_basis]').select_option('geometry');add.locator('[name=density_g_cm3]').fill(str(density));add.locator('[name=diameter_mm]').fill(str(diameter))
         click(add.get_by_role('button',name='Add',exact=True))
         saved=query('SELECT * FROM filament_profiles WHERE name=?',name)[0];fid=saved['profile_uid']
+        created_profiles[material]=fid
         factor=math.pi*diameter**2/4*density
         assert abs(saved['grams_per_meter']-factor)<1e-10
         page.goto(base+'/settings/printers')
@@ -135,6 +139,34 @@ def exercise(page,context,base,project,data,artifacts):
         assert job['time_cost']==0 and abs(job['material_cost']-expected)<1e-8 and abs(job['total_cost']-expected)<1e-8,job
         assert job['filament_mode']=='per_kg' and abs(job['filament_rate']-price*1000/spool)<1e-10
         print(material+' independent spool expectation: '+str(expected))
+    # Active profile deletion must not break readiness or switch future prices.
+    saved_jobs=query('SELECT * FROM jobs ORDER BY job_uid')
+    page.goto(base+'/settings/profiles')
+    deletion=form('delete_filament_profile').filter(has=page.locator('input[name=profile_id][value="'+created_profiles['ABS']+'"]'))
+    page.once('dialog',lambda dialog:dialog.accept());click(deletion.get_by_role('button',name='Delete',exact=True))
+    assert 'Select replacement or base pricing' in page.locator('body').inner_text()
+    deletion=form('delete_rate_profile').filter(has=page.locator('input[name=rate_profile_id][value=free]'))
+    page.once('dialog',lambda dialog:dialog.accept());click(deletion.get_by_role('button',name='Delete',exact=True))
+    assert 'Select replacement or base pricing' in page.locator('body').inner_text()
+    assert context.request.get(base+'/health').json()['ready']
+    # Hourly profile CRUD preserves zero; inactive filament deletion retains jobs.
+    add=form('add_rate_profile');add.locator('[name=rate_profile_name]').fill("Maker's zero hours");add.locator('[name=rate_profile_rate]').fill('0')
+    click(add.get_by_role('button',name='Add',exact=True))
+    hourly=query('SELECT * FROM hourly_rate_profiles WHERE name=?',"Maker's zero hours")[0];rid=hourly['profile_uid'];assert hourly['rate_per_hour']==0
+    page.locator('input[form="rate-update-'+rid+'"][name=rate_profile_rate]').fill('2.5')
+    click(page.locator('button[form="rate-update-'+rid+'"]'))
+    assert query('SELECT rate_per_hour FROM hourly_rate_profiles WHERE profile_uid=?',rid)[0]['rate_per_hour']==2.5
+    deletion=form('delete_rate_profile').filter(has=page.locator('input[name=rate_profile_id][value="'+rid+'"]'))
+    confirmations=[];page.once('dialog',lambda dialog:(confirmations.append(dialog.message),dialog.accept()));click(deletion.get_by_role('button',name='Delete',exact=True))
+    assert confirmations and "Maker's zero hours" in confirmations[0]
+    assert not query('SELECT * FROM hourly_rate_profiles WHERE profile_uid=?',rid)
+    petg=created_profiles['PETG'];page.locator('input[form="profile-update-'+petg+'"][name=profile_name]').fill("Maker's PETG spool")
+    click(page.locator('button[form="profile-update-'+petg+'"]'))
+    assert query('SELECT name FROM filament_profiles WHERE profile_uid=?',petg)[0]['name']=="Maker's PETG spool"
+    deletion=form('delete_filament_profile').filter(has=page.locator('input[name=profile_id][value="'+petg+'"]'))
+    page.once('dialog',lambda dialog:dialog.accept());click(deletion.get_by_role('button',name='Delete',exact=True))
+    assert not query('SELECT * FROM filament_profiles WHERE profile_uid=?',petg)
+    assert query('SELECT * FROM jobs ORDER BY job_uid')==saved_jobs
     # SQL-only backup/display/pause controls are actual UI actions.
     page.goto(base+'/settings/pause');page.locator('#pause_include_default').check();click(page.get_by_role('button',name='Save pause settings',exact=True))
     assert json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['pause_include_paused_time_default']

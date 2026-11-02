@@ -148,6 +148,8 @@ def delete_profile(profile_id):
     mappings = data.get("mappings", {})
 
     if profile_id in profiles:
+        assigned=[name for name,value in mappings.items() if str(value)==str(profile_id)]
+        if assigned:raise ValueError('Profile is assigned to '+', '.join(sorted(assigned))+'. Select replacement or base pricing before deleting it')
         del profiles[profile_id]
 
         # Remove mappings pointing to this profile
@@ -183,14 +185,16 @@ def set_printer_mapping(printer_name, profile_id):
     """
     if _is_sql_only():
         normalized_profile_id = str(profile_id).strip() if profile_id is not None else None
-        mappings = _load_filament_mappings_sql()
-        if normalized_profile_id in {None, "", "none"}:
-            mappings.pop(printer_name, None)
-        else:
-            if not get_profile(normalized_profile_id):
-                return False
-            mappings[printer_name] = normalized_profile_id
-        _save_filament_mappings_sql(mappings)
+        from core.printer_lifecycle import _load_setting,_save_setting
+        with closing(db_module.connect_db()) as conn:
+            db_module.apply_migrations(conn);conn.execute('BEGIN IMMEDIATE')
+            mappings=_load_setting(conn,'filament_mappings')
+            if normalized_profile_id in {None, "", "none"}:mappings.pop(printer_name,None)
+            else:
+                if not conn.execute("SELECT 1 FROM filament_profiles WHERE COALESCE(NULLIF(profile_uid,''),CAST(id AS TEXT))=?",(normalized_profile_id,)).fetchone():return False
+                mappings[printer_name]=normalized_profile_id
+            _save_setting(conn,'filament_mappings',mappings)
+            conn.commit()
         return True
 
     data = load_profiles_data(PROFILES_FILE)
@@ -397,22 +401,21 @@ def _delete_sql_profile(profile_id: str) -> bool:
         return False
     with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
+        conn.execute('BEGIN IMMEDIATE')
         row = conn.execute(
-            "SELECT id FROM filament_profiles WHERE profile_uid = ? OR CAST(id AS TEXT) = ?",
-            (profile_id, profile_id),
+            "SELECT id,profile_uid FROM filament_profiles WHERE COALESCE(NULLIF(profile_uid,''),CAST(id AS TEXT)) = ?",
+            (profile_id,),
         ).fetchone()
         if not row:
             return False
+        from core.printer_lifecycle import _load_setting
+        aliases={str(row['profile_uid'] or row['id'])}
+        assigned=[name for name,value in _load_setting(conn,'filament_mappings').items() if str(value) in aliases]
+        if assigned:raise ValueError('Profile is assigned to '+', '.join(sorted(assigned))+'. Select replacement or base pricing before deleting it')
         conn.execute(
             "DELETE FROM filament_profiles WHERE id = ?",
             (row["id"] if isinstance(row, sqlite3.Row) else row[0],),
         )
         conn.commit()
 
-    mappings = _load_filament_mappings_sql()
-    if mappings:
-        to_remove = [k for k, v in mappings.items() if v == profile_id]
-        for k in to_remove:
-            mappings.pop(k, None)
-        _save_filament_mappings_sql(mappings)
     return True

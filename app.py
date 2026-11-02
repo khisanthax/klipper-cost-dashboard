@@ -3645,7 +3645,11 @@ def _settings_view(tab: str):
                     profile_obj = profiles.get_profile(profile_id)
                 except Exception:
                     profile_obj = None
-                profiles.delete_profile(profile_id)
+                try:
+                    deleted=profiles.delete_profile(profile_id)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+                if not deleted:return redirect(url_for(_settings_endpoint_for_action(action),error='Filament profile not found; nothing was deleted'))
                 profile_name = ""
                 try:
                     profile_name = str((profile_obj or {}).get("name") or "").strip()
@@ -3741,7 +3745,11 @@ def _settings_view(tab: str):
                     rate_obj = rates.get_rate_profile(profile_id)
                 except Exception:
                     rate_obj = None
-                rates.delete_rate_profile(profile_id)
+                try:
+                    deleted=rates.delete_rate_profile(profile_id)
+                except ValueError as exc:
+                    return redirect(url_for(_settings_endpoint_for_action(action),error=str(exc)))
+                if not deleted:return redirect(url_for(_settings_endpoint_for_action(action),error='Hourly profile not found; nothing was deleted'))
                 rate_name = ""
                 try:
                     rate_name = str((rate_obj or {}).get("name") or "").strip()
@@ -3761,6 +3769,10 @@ def _settings_view(tab: str):
             if printer:
                 if _is_sql_only() and not _sql_only_printer_exists(printer):
                     return redirect(url_for(_settings_endpoint_for_action(action), error=f"Printer not found: {printer}"))
+                if _is_sql_only():
+                    if not rates.set_printer_rate_profile_sql(printer,profile_id):
+                        return redirect(url_for(_settings_endpoint_for_action(action),error='Rate profile not found; assignment was not changed'))
+                    return redirect(url_for(_settings_endpoint_for_action(action)))
                 settings = load_settings(SETTINGS_FILE)
                 if printer not in settings:
                     settings[printer] = {}
