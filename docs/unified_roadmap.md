@@ -174,16 +174,16 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.7.2 was independently verified on 2026-11-02. Phase 6 shipped in v0.4.0; SQL-only remains the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes. Recalculate is deliberately pricing-only. Read root `LOGBOOK.md` for the authoritative engineering handoff and exact deployment evidence.
+Production v0.7.3 was independently verified on 2026-11-03, pinned to immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. Phase 6 shipped in v0.4.0; SQL-only remains the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes. Recalculate is deliberately pricing-only. Read root `LOGBOOK.md` for the authoritative engineering handoff and exact deployment evidence.
 
 ## Current Active Work
 
-v0.7.3 — Dashboard UX and Functional Reliability, in PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. Code is under validation/review; this milestone is not deployed. See [dashboard audit](dashboard-audit-v0.7.3.md).
+v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
 ## Next Planned Work
 
-1. Complete required review and merge v0.7.3 only with green Release Validation.
-2. Publish/tag through the established multi-architecture workflow, back up SQL and objects, verify safe printer activity, deploy a pinned immutable image and record actual post-deployment evidence in LOGBOOK.md. Retain v0.7.2 and earlier recovery artifacts.
+1. Continue production monitoring and intentionally review SV07's retained cancelled-job discrepancy; do not automatically finalize uncertain tracking.
+2. Review/merge the deployment handoff documentation. Retain v0.7.2 and earlier recovery artifacts and follow the established validation, backup and immutable-digest process for future releases.
 3. Choose further work deliberately. Full Recompute and Modes remain deferred; physical hardware/assistive-technology and long-running performance certification are separate validation limits.
 
 ## Deferred Feature Track

@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.7.3 - Unreleased
+## v0.7.3 - 2026-11-03
 
 - Add bounded current Moonraker observations, loaded client identity checks and stale-event warnings without modifying retained jobs; update live estimates without reloading forms.
 - Protect assigned pricing profiles from deletion, preserve explicit zero overrides, expose project profile snapshots and unknown weights, and remove repeated project catalog reads.
