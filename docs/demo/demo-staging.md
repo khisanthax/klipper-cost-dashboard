@@ -22,6 +22,17 @@ The server sweeps expired workspaces every minute, with registry leases protecti
 
 Run `python tools/browser_demo_regression.py` after installing the Playwright requirements and Chromium. The test starts a loopback server, exercises desktop and mobile sessions, confirms project isolation and reset, and checks that printer, installer and export endpoints are denied. It stores screenshots and a trace in `browser-artifacts/demo/`.
 
+## Isolated image acceptance
+
+Use the same sandbox as Release Validation on Linux from a non-root operator account with Docker access.
+
+```bash
+docker build --tag kcd-demo-staging .
+python tools/demo_container_smoke.py kcd-demo-staging
+```
+
+The test creates a private temporary volume and generates a synthetic seed from the image. It launches as the operator UID with a read-only image, dropped capabilities, bounded temporary storage and Docker's `none` network. It mounts only the temporary demo directory and does not publish a port. The HTTP probe runs on loopback inside the container and verifies a fresh workspace, simulated telemetry, blocked installer registration, absent normal data and denied outbound connectivity. The test removes its container and temporary directory afterward.
+
 ## Public staging gate
 
 - Build the exact reviewed commit and pin its image digest. Use an isolated workload with read-only application files and a dedicated writable demo volume. Generate the seed from that image and use a new seed name when changing its content.
