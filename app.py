@@ -1629,6 +1629,53 @@ def index():
     )
 
 
+@app.context_processor
+def inventory_navigation():
+    return {"inventory_available": _is_sql_only()}
+
+
+@app.route("/inventory", methods=["GET", "POST"])
+def inventory_page():
+    from core import inventory
+
+    if not _is_sql_only():
+        return "Filament inventory requires SQL-only storage.", 404
+    error = None
+    if request.method == "POST":
+        form = request.form
+        action = form.get("action")
+        spool = form.get("spool_uid")
+        operation = form.get("operation_uid")
+        try:
+            if action == "create":
+                inventory.create_spool(operation, **{
+                    field: form.get(field) for field in (
+                        "manufacturer", "material", "color", "net_grams", "remaining_grams",
+                        "low_stock_grams", "purchase_price", "purchased_on", "grams_per_meter",
+                    )
+                })
+            elif action == "assign":
+                inventory.assign_spool(spool, form.get("printer_id"))
+            elif action == "consume":
+                inventory.record_consumption(
+                    spool, operation, form.get("job_uid"), form.get("grams"),
+                    verified=form.get("verified") == "1",
+                )
+            elif action == "adjust":
+                inventory.adjust_stock(spool, operation, form.get("grams"), form.get("reason"))
+            else:
+                raise ValueError("Unknown inventory operation.")
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            return redirect(url_for("inventory_page", saved="1"), code=303)
+    spools, printers, events, jobs = inventory.inventory_view()
+    return render_template(
+        "inventory.html", spools=spools, printers=printers, events=events, jobs=jobs,
+        error=error, new_operation=lambda: uuid.uuid4().hex,
+    ), 400 if error else 200
+
+
 @app.route("/reports")
 def reports_page():
     """Reports page with monthly breakdown and top printers."""

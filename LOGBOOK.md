@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-04 — Milestone G physical spool inventory
+
+- **Status.** SQL-only implementation candidate on `codex/filament-inventory`. Production remains at the separately verified baseline below. This branch does not change pricing history, jobs or printer clients.
+- **Scope.** Added spool metadata and purchase information, printer assignment, low-stock display, an opening balance, measured corrections and explicitly verified per-job consumption. The integer-milligram journal and balance update commit in one SQLite transaction. An operation key prevents replay of a changed form and a spool/job key prevents duplicate deductions. A terminal job can consume from multiple spools. A historical job deletion preserves the recorded stock event and its captured job identity.
+- **Verification.** Four targeted SQLite tests passed locally, including concurrent retries for a canceled job, rollback of invalid amounts and no inventory access in compatibility mode. The coordinated backup test passed with a spool balance and measured deduction in its isolated restored database, including integrity and foreign-key checks. Existing Release Validation now exercises the Inventory browser flow and responsive layout.
+- **Migration and next action.** Migration `0010_filament_inventory` adds tables without rewriting existing history. Review the draft and verify the browser and release checks. No automatic or estimated deduction is implemented. See [Filament inventory](docs/filament-inventory.md).
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.

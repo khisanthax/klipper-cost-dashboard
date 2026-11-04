@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% macro operation(action, spool=none) %}
+<input type="hidden" name="action" value="{{ action }}">
+<input type="hidden" name="operation_uid" value="{{ new_operation() }}">
+{% if spool %}<input type="hidden" name="spool_uid" value="{{ spool.spool_uid }}">{% endif %}
+{% endmacro %}
+{% block content %}
+<h1>Filament inventory</h1>
+<p>Track physical spools and measured consumption. Print estimates do not deduct stock.</p>
+{% if error %}<p class="alert alert-danger" role="alert">{{ error }}</p>{% endif %}
+{% if request.args.get('saved') == '1' %}<p class="alert alert-success" role="status">Inventory saved.</p>{% endif %}
+<section class="card card-body mb-4" aria-labelledby="add-spool">
+    <h2 class="h4" id="add-spool">Add a spool</h2>
+    <form method="post" class="row g-3">
+        {{ operation('create') }}
+        <label class="col-sm-6 col-lg-4">Material <input class="form-control" name="material" maxlength="160" required></label>
+        <label class="col-sm-6 col-lg-4">Manufacturer <input class="form-control" name="manufacturer" maxlength="160"></label>
+        <label class="col-sm-6 col-lg-4">Color <input class="form-control" name="color" maxlength="160"></label>
+        <label class="col-sm-6 col-lg-4">Net weight (g) <input class="form-control" name="net_grams" type="number" min=".001" step=".001" required></label>
+        <label class="col-sm-6 col-lg-4">Opening balance (g) <input class="form-control" name="remaining_grams" type="number" min="0" step=".001" required></label>
+        <label class="col-sm-6 col-lg-4">Low-stock threshold (g) <input class="form-control" name="low_stock_grams" type="number" min="0" step=".001" value="0" required></label>
+        <label class="col-sm-6 col-lg-4">Purchase price ($, optional) <input class="form-control" name="purchase_price" type="number" min="0" step=".01"></label>
+        <label class="col-sm-6 col-lg-4">Purchase date (optional) <input class="form-control" name="purchased_on" type="date"></label>
+        <label class="col-sm-6 col-lg-4">Verified conversion (g/m, optional) <input class="form-control" name="grams_per_meter" type="number" min=".000001" step="any"></label>
+        <div class="col-12"><button class="btn btn-primary" type="submit">Add spool</button></div>
+    </form>
+</section>
+<section aria-labelledby="spools-heading">
+    <h2 class="h4" id="spools-heading">Spools</h2>
+    {% if not spools %}<p>No physical spools recorded.</p>{% endif %}
+    {% for spool in spools %}
+    <article class="card card-body mb-3">
+        <h3 class="h5">{{ spool.material }}{% if spool.color %} · {{ spool.color }}{% endif %}</h3>
+        <p>
+            <strong>{{ '%.3f'|format(spool.remaining_mg / 1000) }} g remaining</strong>
+            of {{ '%g'|format(spool.net_mg / 1000) }} g
+            {% if spool.remaining_mg <= spool.low_stock_mg %}<span class="badge text-bg-warning">Low stock</span>{% endif %}
+            <br>{{ spool.manufacturer or 'Manufacturer unknown' }} · {{ spool.printer_name or 'No assigned printer' }}
+            {% if spool.purchase_cents is not none %} · {{ '$%.2f'|format(spool.purchase_cents / 100) }}{% endif %}
+            {% if spool.purchased_on %} · {{ spool.purchased_on }}{% endif %}
+            {% if spool.grams_per_meter %} · {{ spool.grams_per_meter }} g/m{% endif %}
+        </p>
+        <details class="mb-2">
+            <summary>Assign printer</summary>
+            <form method="post" class="d-flex flex-wrap gap-2 align-items-end my-2">
+                {{ operation('assign', spool) }}
+                <label>Printer <select class="form-select" name="printer_id">
+                    <option value="">Unassigned</option>
+                    {% for printer in printers %}
+                    <option value="{{ printer.id }}"{% if printer.id == spool.printer_id %} selected{% endif %}>{{ printer.name }}</option>
+                    {% endfor %}
+                </select></label>
+                <button class="btn btn-outline-primary" type="submit">Save assignment</button>
+            </form>
+        </details>
+        <details class="mb-2">
+            <summary>Record verified job use</summary>
+            <form method="post" class="row g-2 my-2">
+                {{ operation('consume', spool) }}
+                <label class="col-md-6">History job UID <input class="form-control" list="inventory-jobs" name="job_uid" required maxlength="160"></label>
+                <label class="col-md-6">Measured consumption (g) <input class="form-control" name="grams" type="number" min=".001" step=".001" required></label>
+                <label class="col-12"><input class="form-check-input" type="checkbox" name="verified" value="1" required> I verified the amount used from this physical spool.</label>
+                <div class="col-12"><button class="btn btn-primary" type="submit">Deduct measured amount</button></div>
+            </form>
+        </details>
+        <details>
+            <summary>Adjust stock</summary>
+            <form method="post" class="row g-2 my-2">
+                {{ operation('adjust', spool) }}
+                <label class="col-md-6">Signed adjustment (g) <input class="form-control" name="grams" type="number" step=".001" required></label>
+                <label class="col-md-6">Reason <input class="form-control" name="reason" maxlength="160" required></label>
+                <div class="col-12"><button class="btn btn-outline-primary" type="submit">Record adjustment</button></div>
+            </form>
+        </details>
+    </article>
+    {% endfor %}
+</section>
+<datalist id="inventory-jobs">
+{% for job in jobs %}
+    <option value="{{ job.job_uid }}">{{ job.printer_name }} · {{ job.filename }} · {{ job.status }}</option>
+{% endfor %}
+</datalist>
+<section aria-labelledby="events-heading">
+    <h2 class="h4" id="events-heading">Recent stock history</h2>
+    {% if not events %}<p>No stock changes recorded.</p>{% else %}
+    <div class="table-responsive" tabindex="0" role="region" aria-label="Stock changes">
+        <table class="table table-striped">
+            <thead><tr><th scope="col">Recorded (UTC)</th><th scope="col">Spool</th><th scope="col">Change (g)</th><th scope="col">Reason</th><th scope="col">Job</th></tr></thead>
+            <tbody>
+                {% for event in events %}
+                <tr>
+                    <td>{{ event.recorded_at }}</td><td>{{ event.material }} {{ event.color }} <small>{{ event.spool_uid[:8] }}</small></td>
+                    <td>{{ '%+.3f'|format(event.delta_mg / 1000) }}</td><td>{{ event.reason }}</td>
+                    <td>{{ event.job_filename or '—' }}{% if event.job_uid %}<br><small>{{ event.job_uid }}</small>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

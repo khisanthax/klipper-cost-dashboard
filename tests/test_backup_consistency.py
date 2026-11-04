@@ -7,6 +7,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from uuid import uuid4
 from pathlib import Path
 from contextlib import closing
 from unittest.mock import patch
@@ -61,6 +62,14 @@ class BackupConsistencyTests(unittest.TestCase):
 
     def test_archive_restores_consistent_sqlite_state_without_wal_files(self):
         self._seed_sql_state()
+        from core import inventory
+
+        with patch.dict(os.environ, {"KCD_STORAGE_BACKEND": "sql"}):
+            spool, _ = inventory.create_spool(
+                uuid4(), manufacturer="Fixture", material="PLA", color="Blue",
+                net_grams=1000, remaining_grams=900, low_stock_grams=100,
+            )
+            inventory.record_consumption(spool, uuid4(), "backup-job", "12.345", verified=True)
         with open(os.path.join(self.data_dir, "secret.json"), "w", encoding="utf-8") as handle:
             json.dump({"api_key": "sensitive"}, handle)
         with open(os.path.join(self.backups_dir, "old.tar.gz"), "wb") as handle:
@@ -83,8 +92,12 @@ class BackupConsistencyTests(unittest.TestCase):
         with closing(sqlite3.connect(restored_db)) as conn:
             schema = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
             job = conn.execute("SELECT job_uid, total_cost FROM jobs WHERE job_uid = ?", ("backup-job",)).fetchone()
-        self.assertEqual(schema, "0008_pricing_provenance")
+            balance = conn.execute("SELECT remaining_mg FROM filament_spools WHERE spool_uid=?", (spool,)).fetchone()[0]
+            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        self.assertEqual(schema, Path(self.db_module._list_migration_files()[-1]).stem)
         self.assertEqual(job, ("backup-job", 4.25))
+        self.assertEqual(balance, 887_655)
 
     def test_archive_permission_hardening_is_applied(self):
         with patch.object(self.backup.os, "chmod", wraps=os.chmod) as chmod:
