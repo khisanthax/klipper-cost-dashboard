@@ -24,8 +24,8 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 - Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.
 - Switching preserves the existing SQL schema, printer identities, stored prices, history, projects, and assignments. Existing direct links continue working. SQL-only stores the choice in `user_settings`. CSV and dual store it in the backed-up data directory. The [operator guide](docs/application-modes.md) documents how to switch.
-- The two targeted Python tests passed with disposable data, including switches between all three modes across two clients, invalid input, compatibility persistence, SQL history and assignment equality, and filesystem isolation. The standalone SQL-only validation passed. The dashboard browser suite now exercises the selector at phone, tablet, and desktop sizes.
-- The implementation awaits review, release, and deployment. Milestone E remains the dependency for order and profitability controls in Business mode.
+- The two targeted Python tests passed with disposable data, including switches between all three modes across two clients, invalid input, compatibility persistence, SQL history and assignment equality, and filesystem isolation. The standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including phone keyboard, tablet, and desktop switches with equal SQL history after each.
+- [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) contains implementation commit `295698f`. Required CI, review, release, and deployment remain separate gates. Milestone E supplies order and profitability controls in Business mode.
 
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
