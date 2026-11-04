@@ -169,5 +169,53 @@ def main():
             moon.server_close()
 
 
+def exercise_ssh(env, master, moon, directory):
+    """Use the established strict-host-key SSH container to repair an existing client."""
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    root = Path(directory)
+    targets = root / "web-ssh-targets.json"
+    targets.write_text(json.dumps({"master": master, "targets": {"remote": {
+        "name": "One", "config_dir": moon.config_root, "ssh_alias": "kcd-fixture",
+        "moonraker": f"http://127.0.0.1:{moon.server_port}",
+    }}}), encoding="utf-8")
+    script = Path(moon.config_root) / "kcd_job_cancel.sh"
+    original = script.read_bytes()
+    edited = original + b"\n# Disposable remote drift\n"
+    script.write_bytes(edited)
+    port = available_port()
+    url = f"http://127.0.0.1:{port}"
+    password = "separate-ssh-browser-fixture-password"
+    process = subprocess.Popen(
+        [sys.executable, "-m", "installer.web_admin", "--targets", str(targets), "--port", str(port)],
+        cwd=ROOT, env={**env, "PATH": os.environ["PATH"], "KCD_WEB_ADMIN_PASSWORD": password},
+    )
+    try:
+        await_http(url, process, expected=401)
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            context = browser.new_context(http_credentials={"username": "admin", "password": password})
+            context.tracing.start(screenshots=True, snapshots=True)
+            page = context.new_page()
+            page.set_default_timeout(90000)
+            try:
+                page.goto(url)
+                page.get_by_role("button", name="Preview installation or repair").click()
+                page.get_by_role("heading", name="Review One").wait_for()
+                page.get_by_text("Update kcd_job_cancel.sh", exact=True).wait_for()
+                assert script.read_bytes() == edited
+                assert env["KCD_API_KEY"] not in page.content()
+                page.get_by_role("button", name="Apply reviewed installation").click()
+                page.get_by_role("heading", name="Installation verified for One").wait_for()
+                assert script.read_bytes() == original
+                page.screenshot(path=str(ARTIFACTS / "ssh-repair.png"))
+            finally:
+                context.tracing.stop(path=str(ARTIFACTS / "ssh-trace.zip"))
+                browser.close()
+    finally:
+        process.terminate()
+        process.wait(timeout=15)
+    print("Web admin SSH passed: strict host key, reviewed preview, remote repair and private credential")
+
+
 if __name__ == "__main__":
     main()
