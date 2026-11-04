@@ -1,5 +1,9 @@
 # Dashboard workflow guide (v0.7.3 candidate)
 
+## Project JSON download
+
+On SQL-only installations, open a project and choose **Download project JSON**. The versioned document separates recorded job prices, manual work, planned items and applied project-price snapshots. Unknown stored values remain JSON null. The download uses the dashboard's normal access boundary and contains project data, so store it appropriately. This export is separate from a coordinated backup and does not change the project or its history.
+
 This describes the candidate in PR 59, not a claim that production has upgraded.
 Consult root `LOGBOOK.md` for verified release/deployment state.
 

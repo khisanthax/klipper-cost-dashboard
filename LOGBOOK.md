@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-04 — Project export candidate
+
+- **Status.** Implemented the Milestone I project JSON export slice on `codex/project-json-export`. The candidate awaits review and validation before release.
+- **Implementation.** A versioned SQL snapshot exports one project's recorded job costs, manual entries, hypothetical plans and applied pricing snapshots separately. Unknown amounts stay null. The response is an attachment with no-store caching. CSV and dual installations retain their current workflow.
+- **Verification.** The focused SQL fixture passed. It verifies project isolation, unchanged history, null costs and separate projections and snapshots. The disposable dashboard browser workflow exercises the real HTTP download and missing-project response in CI.
+- **Next.** Integrate order and inventory exports after those features are reviewed. Notifications and printable financial reports are separate follow-up work.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.
