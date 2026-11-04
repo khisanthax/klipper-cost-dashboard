@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-04 — Slicer estimate candidate
+
+- **Status.** Implemented the independent Milestone H what-if slice on `codex/slicer-estimates` for review and release validation. Production remains at the verified v0.7.3 baseline.
+- **Changes.** Reused planned-item pricing for a browser and JSON estimate interface. Bounded G-code head and tail sampling, limited uploads to 16 MiB and ignored executable lines. Explicit grams or verified grams-per-meter conversion determines material weight. Missing material remains unknown. Saved profiles and explicit prices provide separate what-if scenarios without writing actual history.
+- **Verification.** Four focused Python tests passed for metadata, length conversion, profile pricing, zero hourly rate, missing values and invalid input. Added Chromium coverage to the existing isolated dashboard workflow for keyboard submission, mobile layout, cost output and the JSON unknown case. The existing G-code planned-item workflow remains available under Projects.
+- **Next.** Finish candidate checks and review. Direct promotion of the reviewed what-if result to a planned item remains follow-up work. No estimate initiates physical printing.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.

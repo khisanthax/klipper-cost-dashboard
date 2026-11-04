@@ -5,12 +5,13 @@ Constraints:
 - Metadata-only parsing (no motion simulation).
 - Reads only a limited portion of the file (head/tail) to avoid large memory use.
 - If estimated time cannot be extracted, returns found=False with a clear error.
-- Filament is returned only if it is explicitly in grams; mm/cm³/etc are ignored.
+- Filament is returned in explicitly declared grams or millimeters.
 """
 
 from __future__ import annotations
 
 import os
+import math
 import re
 from dataclasses import dataclass
 from typing import Optional, Union
@@ -33,6 +34,9 @@ _FILAMENT_G_PATTERNS = [
     # Generic: ; Filament (g): 12.34
     re.compile(r"filament\s*\(\s*g\s*\)\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
 ]
+_FILAMENT_MM_PATTERN = re.compile(
+    r"filament\s+used\s*\[\s*mm\s*\]\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE,
+)
 
 _SLICER_PATTERNS = [
     re.compile(r"generated\s+with\s+(.+)$", re.IGNORECASE),
@@ -77,25 +81,23 @@ def _parse_hms(text: str) -> Optional[int]:
     return None
 
 
-def _iter_head_tail_lines(path: str, max_head_lines: int, max_tail_lines: int):
-    # Head
-    with open(path, "rb") as f:
-        for _ in range(max_head_lines):
-            line = f.readline()
-            if not line:
-                break
-            yield line
-
-    # Tail (read last ~N bytes then split; approximate but bounded)
-    file_size = os.path.getsize(path)
-    if file_size <= 0:
-        return
-    chunk_size = min(file_size, 1024 * 1024)  # 1MB tail cap
-    with open(path, "rb") as f:
-        f.seek(max(0, file_size - chunk_size))
-        tail = f.read()
-    for line in tail.splitlines()[-max_tail_lines:]:
-        yield line + b"\n"
+def _iter_head_tail_lines(stream, max_head_lines: int, max_tail_lines: int):
+    sample_bytes = 1024 * 1024
+    stream.seek(0, os.SEEK_END)
+    size = stream.tell()
+    stream.seek(0)
+    head = stream.read(min(size, sample_bytes)).splitlines()
+    if size > sample_bytes:
+        head = head[:-1]  # Ignore metadata cut in the middle by the sample boundary.
+    yield from head[:max_head_lines]
+    if size > sample_bytes or len(head) > max_head_lines:
+        start = max(0, size - sample_bytes)
+        stream.seek(start)
+        tail = stream.read(sample_bytes).splitlines()
+        if start:
+            tail = tail[1:]
+        if max_tail_lines:
+            yield from tail[-max_tail_lines:]
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ class GCodeMetadata:
     filament_g: Optional[float] = None
     slicer: Optional[str] = None
     error: Optional[str] = None
+    filament_mm: Optional[float] = None
 
 
 def extract_gcode_metadata(path: str, *, max_head_lines: int = 3000, max_tail_lines: int = 3000) -> GCodeMetadata:
@@ -113,17 +116,25 @@ def extract_gcode_metadata(path: str, *, max_head_lines: int = 3000, max_tail_li
     """
     if not path or not os.path.exists(path):
         return GCodeMetadata(found=False, error="File not found.")
+    with open(path, "rb") as stream:
+        return extract_gcode_metadata_stream(stream, max_head_lines=max_head_lines, max_tail_lines=max_tail_lines)
 
+
+def extract_gcode_metadata_stream(stream, *, max_head_lines=3000, max_tail_lines=3000):
+    """Read metadata from a seekable binary stream using bounded samples."""
     time_s: Optional[int] = None
     filament_g: Optional[float] = None
     slicer: Optional[str] = None
+    filament_mm: Optional[float] = None
 
-    for raw in _iter_head_tail_lines(path, max_head_lines=max_head_lines, max_tail_lines=max_tail_lines):
+    for raw in _iter_head_tail_lines(stream, max_head_lines, max_tail_lines):
+        if len(raw) > 4096:
+            continue
         try:
             line = raw.decode("utf-8", errors="ignore").strip()
         except Exception:
             continue
-        if not line:
+        if not line.startswith((";", "#")):
             continue
 
         # Slicer (best-effort)
@@ -146,7 +157,10 @@ def extract_gcode_metadata(path: str, *, max_head_lines: int = 3000, max_tail_li
                     except Exception:
                         time_s = None
                 else:
-                    parsed = _parse_hms(m.group(1))
+                    try:
+                        parsed = _parse_hms(m.group(1))
+                    except ValueError:
+                        parsed = None
                     if parsed is not None:
                         time_s = parsed
                 if time_s is not None:
@@ -157,18 +171,27 @@ def extract_gcode_metadata(path: str, *, max_head_lines: int = 3000, max_tail_li
             for fp in _FILAMENT_G_PATTERNS:
                 m = fp.search(line)
                 if m:
-                    try:
-                        filament_g = float(m.group(1))
-                    except Exception:
-                        filament_g = None
+                    grams = float(m.group(1))
+                    if math.isfinite(grams):
+                        filament_g = grams
                     break
+
+        if filament_mm is None:
+            match = _FILAMENT_MM_PATTERN.search(line)
+            if match:
+                length = float(match.group(1))
+                if math.isfinite(length):
+                    filament_mm = length
 
         if time_s is not None and filament_g is not None and slicer is not None:
             # Good enough; stop early.
             break
 
     if time_s is None:
-        return GCodeMetadata(found=False, error="No slicer metadata found (missing estimated time).")
+        return GCodeMetadata(
+            found=False, filament_g=filament_g, slicer=slicer, filament_mm=filament_mm,
+            error="No slicer metadata found (missing estimated time).",
+        )
 
-    return GCodeMetadata(found=True, time_s=time_s, filament_g=filament_g, slicer=slicer)
+    return GCodeMetadata(found=True, time_s=time_s, filament_g=filament_g, slicer=slicer, filament_mm=filament_mm)
 

@@ -1629,6 +1629,32 @@ def index():
     )
 
 
+@app.route("/estimates", methods=["GET", "POST"])
+@app.post("/api/estimates")
+def estimate_page():
+    from core.estimates import estimate_print
+
+    api = request.path == "/api/estimates"
+    request.max_content_length = 16 * 1024 * 1024
+    result, error, values = None, None, {}
+    if request.method == "POST":
+        try:
+            values = request.get_json(silent=True) if request.is_json else request.form
+            if not isinstance(values, dict) and not hasattr(values, "get"):
+                raise ValueError("Expected an estimate input object.")
+            result = estimate_print(values, request.files.get("gcode"))
+        except ValueError as exc:
+            error = str(exc)
+            if not hasattr(values, "get"):
+                values = {}
+    if api:
+        return (jsonify(error=error), 400) if error else jsonify(result)
+    from core.profiles import get_all_profiles
+    return render_template(
+        "estimates.html", result=result, error=error, values=values, profiles=get_all_profiles(),
+    ), 400 if error else 200
+
+
 @app.route("/reports")
 def reports_page():
     """Reports page with monthly breakdown and top printers."""
