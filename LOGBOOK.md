@@ -24,8 +24,8 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 - Implemented the first historical analytics slice on `codex/report-outcomes`. Monthly Breakdown now counts completed, canceled, failed, and unknown outcomes, displays a rate over known outcomes, and identifies missing durations and unpriced jobs. Saved zero costs remain known values.
 - SQL and compatibility Reports use the same installation timezone and decimal aggregation. The report cache refreshes on job edits. This work reads existing data and requires no migration. See [Monthly print outcomes](docs/report-outcomes.md) for the calculations.
-- The two disposable Python tests passed. They cover monthly timezone boundaries, SQL/CSV parity for recorded statuses, signed and zero costs, missing values, and cache refresh after a status edit. Standalone SQL-only validation passed. The dashboard Playwright workflow now checks the table and completion rate in the mobile layout.
-- Review, release, and deployment remain separate gates. Printer utilization, comparisons, report presets, and analytics over business records remain future Milestone F slices.
+- The two disposable Python tests passed. They cover monthly timezone boundaries, SQL/CSV parity for recorded statuses, signed and zero costs, missing values, and cache refresh after a status edit. Standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including the monthly outcomes table and completion rate in the mobile layout.
+- [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) contains implementation commit `887451f`. Required CI, review, release, and deployment remain separate gates. Printer utilization, comparisons, report presets, and analytics over business records remain future Milestone F slices.
 
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
