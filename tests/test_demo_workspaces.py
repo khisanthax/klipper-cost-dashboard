@@ -22,7 +22,7 @@ from core.demo.manager import (
     DemoWorkspaceManager, SeedValidationError, UnsafeWorkspacePath,
     WorkspaceExpired, WorkspaceNotFound, WorkspaceSession,
 )
-from core.demo.registry import InvalidStateTransition
+from core.demo.registry import InvalidStateTransition, WorkspaceCapacityReached
 from core.demo.security import DemoPolicyClass, csrf_token
 from core.runtime import RuntimeConfigurationError, runtime_mode
 from core.workspace_context import WorkspaceContext, WorkspaceContextError
@@ -102,6 +102,17 @@ class DemoWorkspaceTests(unittest.TestCase):
     def scalar(context, sql, params=()):
         with closing(db_module.connect_db(context)) as conn:
             return conn.execute(sql, params).fetchone()[0]
+
+    def test_workspace_capacity_blocks_before_cloning_and_releases_after_cleanup(self):
+        manager = DemoWorkspaceManager(replace(self.config, max_workspaces=1), clock=self.clock)
+        first = manager.create_workspace()
+        with mock.patch.object(manager, "_clone_seed", side_effect=AssertionError("cloned at capacity")):
+            with self.assertRaises(WorkspaceCapacityReached):
+                manager.create_workspace()
+        self.clock.advance(hours=25)
+        self.assertEqual(manager.cleanup_expired_workspaces(), [first.record.workspace_id])
+        next_session = manager.create_workspace()
+        self.assertNotEqual(next_session.record.workspace_id, first.record.workspace_id)
 
     def test_registry_schema_state_touch_and_expiration(self):
         session = self.manager.create_workspace()

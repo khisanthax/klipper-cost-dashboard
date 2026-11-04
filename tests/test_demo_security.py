@@ -184,7 +184,17 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
         return client.post("/mutate", data=payload, **kwargs)
 
     def test_route_policy_is_complete_and_default_deny(self):
-        self.assertEqual(len(APPLICATION_ROUTE_POLICIES), 33)
+        for endpoint, method in (
+            ("installer_registration", "GET"),
+            ("installer_registration", "POST"),
+            ("job_thumbnail", "GET"),
+            ("archived_thumbnail", "GET"),
+            ("project_pricing_page", "POST"),
+        ):
+            self.assertEqual(
+                APPLICATION_ROUTE_POLICIES[(endpoint, method)].classification,
+                DemoPolicyClass.BLOCKED_DEMO,
+            )
         missing = self.app.extensions["kcd_demo_policy"].missing_routes(self.app)
         self.assertEqual(missing, [("unknown", "GET", "/unknown")])
         client = self.client()
