@@ -22,9 +22,9 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ### 2026-11-04 — Slicer estimate candidate
 
-- **Status.** Implemented the independent Milestone H what-if slice on `codex/slicer-estimates` for review and release validation. Production remains at the verified v0.7.3 baseline.
+- **Status.** Implemented the independent Milestone H what-if slice in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68). Production remains at the verified v0.7.3 baseline.
 - **Changes.** Reused planned-item pricing for a browser and JSON estimate interface. Bounded G-code head and tail sampling, limited uploads to 16 MiB and ignored executable lines. Explicit grams or verified grams-per-meter conversion determines material weight. Missing material remains unknown. Saved profiles and explicit prices provide separate what-if scenarios without writing actual history.
-- **Verification.** Four focused Python tests passed for metadata, length conversion, profile pricing, zero hourly rate, missing values and invalid input. Added Chromium coverage to the existing isolated dashboard workflow for keyboard submission, mobile layout, cost output and the JSON unknown case. The existing G-code planned-item workflow remains available under Projects.
+- **Verification.** Four focused Python tests passed for metadata, length conversion, profile pricing, zero hourly rate, missing values and invalid input. The local isolated Chromium workflow passed keyboard submission, mobile estimate layout, cost output and JSON unknown handling. Initial Linux CI found overflow in the Projects heading with the new link. The link moved to a separate line and CI is rerunning. The existing G-code planned-item workflow remains available under Projects.
 - **Next.** Finish candidate checks and review. Direct promotion of the reviewed what-if result to a planned item remains follow-up work. No estimate initiates physical printing.
 
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
