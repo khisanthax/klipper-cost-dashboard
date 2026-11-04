@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-04 — Milestone D application modes
+
+- Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.
+- Switching preserves the existing SQL schema, printer identities, stored prices, history, projects, and assignments. Existing direct links continue working. SQL-only stores the choice in `user_settings`. CSV and dual store it in the backed-up data directory. The [operator guide](docs/application-modes.md) documents how to switch.
+- The two targeted Python tests passed with disposable data, including switches between all three modes across two clients, invalid input, compatibility persistence, SQL history and assignment equality, and filesystem isolation. The standalone SQL-only validation passed. The dashboard browser suite now exercises the selector at phone, tablet, and desktop sizes.
+- The implementation awaits review, release, and deployment. Milestone E remains the dependency for order and profitability controls in Business mode.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.

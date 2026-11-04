@@ -184,7 +184,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 1. Continue production monitoring and intentionally review SV07's retained cancelled-job discrepancy; do not automatically finalize uncertain tracking.
 2. Review/merge the deployment handoff documentation. Retain v0.7.2 and earlier recovery artifacts and follow the established validation, backup and immutable-digest process for future releases.
-3. Choose further work deliberately. Full Recompute and Modes remain deferred; physical hardware/assistive-technology and long-running performance certification are separate validation limits.
+3. Choose further work deliberately. Full Recompute remains deferred. Physical hardware, assistive-technology, and long-running performance certification are separate validation limits.
 
 ## Deferred Feature Track
 
@@ -203,19 +203,12 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
   - Adjustment is signed and reconciles persisted or explicit totals without inventing a labor/material split.
   - actual tracked/manual totals remain separate from active planned-item projections.
 
-### Modes
+### Application modes
 
-- status: deferred, planned-only
-- why it is deferred:
-  - The audit found no repo evidence that modes were implemented.
-  - The current engineering priority is storage/source-of-truth hardening, not UI product segmentation.
-  - Starting mode work before Phase 6 is stabilized would add another layer of gating on top of a still-transitional architecture.
-- frozen constraints summary:
-  - single global mode per KCD instance
-  - reversible switching with no data deletion
-  - personal mode hides Projects
-  - business mode reveals optional profit-aware/business framing
-  - backend/schema/storage remain identical across modes
+- Milestone D implements a global, reversible Personal, Advanced, or Business preference on the application-modes branch.
+- Advanced is the default and preserves the existing controls. Personal simplifies navigation and the dashboard. Business includes Advanced pending the order and profitability work in milestone E.
+- The preference uses the existing SQL schema and keeps history, project assignments, and prices unchanged. Compatibility installations also support the selector.
+- See [Application modes](application-modes.md) for the operator workflow. See the logbook for validation and release status.
 
 ## Current Risks / Contradictions
 
