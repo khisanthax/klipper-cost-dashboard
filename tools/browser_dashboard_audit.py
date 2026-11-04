@@ -17,9 +17,11 @@ ROOT=Path(__file__).resolve().parents[1]
 SEED='''
 import json,os,time
 from core import db,projects,profiles,rates,live
+from core.application_mode import set_application_mode
 from core.registration import register_printer
 moons=json.loads(os.environ['KCD_AUDIT_MOONS'])
 for name,url in moons.items():register_printer(name,url)
+set_application_mode('business')
 profiles.upsert_profile(dict(id='petg-15',name='PETG 15/kg',material='PETG',filament_mode='per_kg',filament_rate=15,cost_per_kg=15,grams_per_meter=3))
 rates.upsert_rate_profile(dict(id='free',name='Free printing time',rate_per_hour=0))
 project=projects.create_project('RaRa acceptance',hourly_rate_override=0,filament_cost_per_kg_override=15)
@@ -125,6 +127,15 @@ def main():
                         page.get_by_role('button',name='Save order').click()
                         page.get_by_text('Completed at',exact=False).wait_for()
                         page.screenshot(path=str(artifacts/'business-order.png'),full_page=True)
+                        for mode in ('advanced','personal','business'):
+                            page.goto(base+'/settings/other')
+                            page.get_by_label('Mode',exact=True).select_option(mode)
+                            page.get_by_role('button',name='Save Application Mode').click()
+                            response=page.goto(base+'/orders?project='+project)
+                            assert response.status==(200 if mode=='business' else 403)
+                            assert page.get_by_role('navigation',name='Primary navigation').get_by_role('link',name='Orders',exact=True).count()==(1 if mode=='business' else 0)
+                        page.get_by_text('Completed at',exact=False).wait_for()
+                        assert page.get_by_label('Customer (optional)').input_value()=='Fixture customer'
                         page.goto(base+'/')
                         from dashboard_workflows import exercise
                         exercise(page,context,base,project,tmp,artifacts)

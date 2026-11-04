@@ -21,6 +21,7 @@ import flask
 from importlib.metadata import version
 from flask import Flask, abort, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
+from core.application_mode import get_application_mode, set_application_mode
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
     DEFAULT_PRICING, SETTINGS_FILE, DISPLAY_FILE, DATA_DIR, TIMEZONE_OBJ
@@ -3133,7 +3134,6 @@ def projects_page():
         unassigned_pager=unassigned_pager,
         projects_by_id={p["id"]: p for p in project_rows},
         filament_profiles=project_filament_profiles,
-        orders_enabled=_is_sql_only(),
     )
 
 
@@ -3144,6 +3144,8 @@ def orders_page():
 
     if not _is_sql_only():
         abort(404)
+    if get_application_mode() != "business":
+        return render_template("orders.html", unavailable=True), 403
     catalog = projects.load_projects()
     values = request.form if request.method == "POST" else request.args
     project_uid = values.get("project", "")
@@ -3181,7 +3183,7 @@ def settings_page():
 
 
 def _settings_endpoint_for_action(action: str) -> str:
-    other_actions = {"update_columns", "backup_now", "update_backup_settings"}
+    other_actions = {"update_columns", "backup_now", "update_backup_settings", "update_application_mode"}
     pause_actions = {"update_pause_settings"}
     profiles_actions = {
         "add_filament_profile",
@@ -3207,6 +3209,13 @@ def _settings_view(tab: str):
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+
+        if action == "update_application_mode":
+            try:
+                set_application_mode(request.form.get("mode", ""))
+            except ValueError as exc:
+                return redirect(url_for("settings_other_page", error=str(exc)))
+            return redirect(url_for("settings_other_page", msg="Application mode updated for this installation."))
 
         if action == "backup_now":
             try:
@@ -4039,6 +4048,16 @@ def download_csv():
     if not os.path.exists(CSV_FILE):
         return "No data available", 404
     return send_file(CSV_FILE, as_attachment=True, download_name="print_costs.csv")
+
+
+@app.context_processor
+def application_mode_context():
+    mode = get_application_mode()
+    return {
+        "application_mode": mode,
+        "show_advanced": mode != "personal",
+        "show_orders": mode == "business" and _is_sql_only(),
+    }
 
 
 # ============================================================================

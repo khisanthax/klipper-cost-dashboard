@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 {% macro money(value) %}{{ '$%.2f'|format(value) if value is not none else 'Unknown' }}{% endmacro %}
+{% if unavailable %}
+<h1 class="h3">Business orders</h1>
+<p>Open Orders in Business mode. Saved orders will be available when you switch back.</p>
+<a href="{{ url_for('settings_other_page') }}" class="btn btn-outline-primary">Application mode settings</a>
+{% else %}
 <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
     <h1 class="h3 mb-0">Business orders</h1>
     <a class="btn btn-outline-secondary" href="{{ url_for('projects_page') }}">Manage project jobs and plans</a>
@@ -130,5 +135,6 @@
     </div>
     {% else %}<p>Assign tracked jobs in Projects.</p>{% endif %}
 </section>
+{% endif %}
 {% endif %}
 {% endblock %}

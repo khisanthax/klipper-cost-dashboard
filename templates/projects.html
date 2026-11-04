@@ -54,7 +54,7 @@
         <a class="btn btn-outline-secondary" href="/">Back to Dashboard</a>
     </div>
 </div>
-{% if orders_enabled %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
+{% if show_orders %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
 
 {% if error %}
 <div class="alert alert-danger" role="alert">

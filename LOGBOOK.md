@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-04 — Milestone D application modes
+
+- Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.
+- Switching preserves the existing SQL schema, printer identities, stored prices, history, projects, and assignments. Existing direct links continue working. SQL-only stores the choice in `user_settings`. CSV and dual store it in the backed-up data directory. The [operator guide](docs/application-modes.md) documents how to switch.
+- The two targeted Python tests passed with disposable data, including switches between all three modes across two clients, invalid input, compatibility persistence, SQL history and assignment equality, and filesystem isolation. The standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including phone keyboard, tablet, and desktop switches with equal SQL history after each.
+- [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) contains implementation commit `295698f`. Required CI, review, release, and deployment remain separate gates. Milestone E supplies order and profitability controls in Business mode.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.
@@ -75,6 +82,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification:** three targeted SQL and Flask tests passed for unknown versus zero, cent reconciliation, manual and planned costs, saved-price preservation, stale revisions and completion. SQL-only filesystem validation passed. A disposable browser saved an order, verified profit and completed the order. Responsive and archive restore checks are included in candidate validation.
 - **Production:** candidate only. The last read-only verification confirmed production v0.7.3. No order schema or UI has been released or deployed.
 - **Next step:** validate the candidate and complete Business mode navigation integration before release. See [order workflow and recovery notes](docs/business-orders.md).
+
+### 2026-11-04 — Milestones D and E integration
+
+- **Status.** Orders are integrated with the application modes candidate. The stacked [draft PR 66](https://github.com/khisanthax/klipper-cost-dashboard/pull/66) targets `codex/application-modes` and requires review and combined validation.
+- **Changes.** Business mode exposes Orders in SQL-only mode. Advanced and Personal hide both links, return a mode prompt on direct navigation, and block writes to the Orders route. Returning to Business restores the saved order, completion status and financial inputs.
+- **Verification.** The targeted regression switches through Advanced, Personal and Business, checks navigation and direct requests, and compares the complete order record across switches. The disposable browser workflow exercises the same mode changes. Required CI will verify the stacked head.
+- **Production.** No new release or deployment. The last verified production image was v0.7.3.
 
 ## New entry template
 

@@ -9,6 +9,7 @@ from unittest.mock import patch
 class BusinessOrderTests(unittest.TestCase):
     def setUp(self):
         from core import db, orders, projects
+        from core.application_mode import set_application_mode
         from core.registration import register_printer
         import app
 
@@ -21,6 +22,7 @@ class BusinessOrderTests(unittest.TestCase):
         database.start()
         self.addCleanup(database.stop)
         register_printer("Fixture", "http://127.0.0.1:1")
+        set_application_mode("business")
         self.project = projects.create_project("Order fixture")
         self.db, self.orders, self.projects = db, orders, projects
         self.client = app.app.test_client()
@@ -84,3 +86,26 @@ class BusinessOrderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "project has an order"):
             self.projects.delete_project(self.project.id)
         self.assertEqual(self.orders.get_order(self.project.id)["status"], "complete")
+
+    def test_modes_gate_orders_links_and_writes_without_changing_order_records(self):
+        from core.application_mode import set_application_mode
+
+        self.orders.save_order(self.project.id, dict(status="active", priority="normal", customer="Private customer"))
+        saved = self.orders.get_order(self.project.id)
+        path = f"/orders?project={self.project.id}"
+        for mode in ("advanced", "personal"):
+            set_application_mode(mode)
+            dashboard = self.client.get("/")
+            projects = self.client.get("/projects")
+            self.assertNotIn(b'href="/orders"', dashboard.data)
+            self.assertNotIn(b'href="/orders"', projects.data)
+            blocked = self.client.get(path)
+            self.assertEqual(blocked.status_code, 403)
+            self.assertIn(b"Saved orders will be available", blocked.data)
+            self.assertNotIn(b"Private customer", blocked.data)
+            self.assertEqual(self.client.post("/orders", data=dict(project=self.project.id, action="delete")).status_code, 403)
+            self.assertEqual(self.orders.get_order(self.project.id), saved)
+        set_application_mode("business")
+        self.assertIn(b'href="/orders"', self.client.get("/").data)
+        self.assertIn(b"Private customer", self.client.get(path).data)
+        self.assertEqual(self.orders.get_order(self.project.id), saved)

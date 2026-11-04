@@ -1,7 +1,6 @@
 # Project-backed business orders
 
-Open **Business orders** from Projects on a SQL-only KCD installation. Choose an
-existing project and save an order with a Draft, Active or Complete status.
+On a SQL-only installation, select **Business** in **Settings → Other → Application Mode**. Open **Orders** from the main navigation or **Business orders** from Projects. Choose an existing project and save an order with a Draft, Active or Complete status.
 Customer name, description, notes, due date and priority are optional business
 context. Completing an order records its completion time. Reopening it clears
 that time so a later completion can be recorded.
@@ -33,6 +32,6 @@ Migration `0009_business_orders` creates the project-linked order table. Back up
 the existing database and archive objects before deploying and verify restoration
 using the prior image or an isolated copy.
 
-This review candidate provides the SQL-only order workflow. Business-only
-navigation and mode integration require the separate application modes milestone
-before combined release.
+Advanced and Personal hide the Orders links and block order edits. Switching
+back to Business restores the saved orders. Application mode is a presentation
+preference, and access to the KCD service should be configured separately.
