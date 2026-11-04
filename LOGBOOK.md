@@ -70,6 +70,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## New entry template
 
+### 2026-11-04 — Milestone C, individual printer pages
+
+- **Status:** implemented on `codex/printer-detail` from `7892765`. Candidate only. Review, merge, release and deployment are pending.
+- **Changes:** dashboard printer cards open the selected registry identity. The dedicated page uses the shared read-only Moonraker observations for live progress, elapsed time, remaining-time estimates and live cost components. The history reader scopes to the printer and inclusive date range, preserves saved prices, and displays unavailable measurements separately. Date comparison, recorded workload, outcome charts and paginated job history use the same filtered rows.
+- **Verification:** focused SQL, identity and measurement tests passed on Windows. The daylight-saving test requires host IANA timezone data and is skipped when it is unavailable. `python tools/validate_sql_only.py` passed. Playwright coverage exercises keyboard navigation from the dashboard, live progress, comparison, responsive layouts and accessibility. Full-suite and release checks are tracked on the candidate PR.
+- **Production:** read-only SSH confirmed the existing v0.7.3 immutable image index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. The two Mercury instances are verified independently using distinct fixture endpoints and the loaded printer identity checks. The new page has no production deployment verification yet.
+- **Next step:** review the candidate and required release checks. Verify real Mercury 1 and Mercury 2 pages independently after a permitted safe deployment.
+
 ### 2026-11-02 — Final dashboard acceptance passed; ready for review
 
 - **Status:** implementation and acceptance complete, ready for required review in [PR 59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59). Not merged/released/deployed.

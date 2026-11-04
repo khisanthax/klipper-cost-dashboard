@@ -19,7 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import flask
 from importlib.metadata import version
-from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
+from flask import Flask, abort, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
@@ -1310,6 +1310,54 @@ def printer_status():
             except (ValueError,RuntimeError,TypeError):
                 item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
     return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}
+
+
+@app.get("/printers/<path:printer_name>")
+def printer_detail(printer_name):
+    from core import printer_reports
+
+    if printer_name not in get_canonical_printer_names():
+        abort(404)
+    now = datetime.now(TIMEZONE_OBJ)
+    start_value = request.args.get("start", "")
+    end_value = request.args.get("end", "")
+    compare = request.args.get("compare") == "1"
+    view = dict(printer_name=printer_name, start_value=start_value, end_value=end_value, compare=compare)
+    try:
+        period, previous = printer_reports.report_periods(start_value, end_value, now)
+    except ValueError as exc:
+        return render_template("printer_detail.html", error=str(exc), **view), 400
+    start, end = period
+    filters = dict(printer=printer_name, end_exclusive=True, recorded_costs_only=True)
+    history = history_repo.list_history_rows(
+        history_repo.HistoryQuery(start_dt=start, end_dt=end, **filters),
+        page=request.args.get("page", 1), per_page=25,
+    )
+    view.update(
+        start_value=start.date().isoformat(),
+        end_value=(end.date() - timedelta(days=1)).isoformat(),
+        summary=printer_reports.summarize(history.rows_all, period, now),
+        rows=[printer_reports.display_job(row) for row in history.rows_page],
+        error=history.error,
+        backend=history.backend,
+    )
+    view["pager"] = _pager_links(
+        "printer_detail",
+        dict(printer_name=printer_name, start=view["start_value"], end=view["end_value"], compare="1" if compare else "0"),
+        "page", "per_page", history.pager,
+    )
+    if compare:
+        prior = history_repo.list_history_rows(
+            history_repo.HistoryQuery(start_dt=previous[0], end_dt=previous[1], **filters),
+            page=1, per_page=1,
+        )
+        view.update(
+            prior=printer_reports.summarize(prior.rows_all, previous, now),
+            prior_start=previous[0].date(),
+            prior_end=previous[1].date() - timedelta(days=1),
+            comparison_error=prior.error,
+        )
+    return render_template("printer_detail.html", **view)
 
 
 @app.route("/", methods=["GET", "POST"])

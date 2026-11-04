@@ -1,6 +1,5 @@
-# Dashboard workflow guide (v0.7.3 candidate)
+# Dashboard workflow guide
 
-This describes the candidate in PR 59, not a claim that production has upgraded.
 Consult root `LOGBOOK.md` for verified release/deployment state.
 
 ## Prices, consumption and weight
@@ -96,6 +95,26 @@ material plus smoothly accumulating machine time; final logged billing retains
 the established minimum-hour rule. Missing pricing is reported unavailable,
 not free. Telemetry polling does not automatically refresh historical totals:
 reload the dashboard when you need newly completed history or changed defaults.
+
+## Individual printer pages
+
+Open a printer card from the dashboard to see that printer's current job,
+history, and operating trends. The printer's loaded KCD identity must match
+before the page shows live measurements. Elapsed print time comes from Moonraker.
+Remaining time extrapolates active print time from the reported progress and
+is unavailable when Moonraker does not supply enough information.
+
+History defaults to the last 30 local calendar dates. Choose inclusive start
+and end dates for a range of up to 366 days. Enable **Compare previous period**
+to see totals for the immediately preceding range with the same number of dates.
+Workload uses recorded hours of jobs in the selected range divided by elapsed
+calendar hours. Missing records and jobs crossing a date boundary affect this
+estimate. Use the outcome chart to see the counts for completed, failed,
+canceled, and other jobs.
+
+The page displays saved prices and the known subtotal for each cost component.
+Missing prices appear as **Unpriced**. Weight uses the saved job measurement or
+its saved conversion data, with unknown measurements counted separately.
 
 ## Accessibility and administration
 

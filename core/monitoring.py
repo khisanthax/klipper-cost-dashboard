@@ -15,7 +15,7 @@ TTL=5
 def probe(url):
     if not url:return dict(connected=False,state='unconfigured',observed_at=time.time(),error='Moonraker URL is missing; configure this printer in Settings')
     try:
-        with urllib.request.urlopen(url.rstrip('/')+'/printer/objects/query?print_stats&gcode_macro%20_KCD_VARS',timeout=1.2) as response:
+        with urllib.request.urlopen(url.rstrip('/')+'/printer/objects/query?print_stats&gcode_macro%20_KCD_VARS&display_status',timeout=1.2) as response:
             status=json.loads(response.read(65536))['result']['status']
         stats=status['print_stats']
         state=stats['state']
@@ -25,9 +25,18 @@ def probe(url):
             value=float(stats.get(key) or 0)
             if not math.isfinite(value) or value<0:raise ValueError('Invalid printer measurement')
             return value
+        progress = None
+        if state in ('printing', 'paused'):
+            try:
+                value = float((status.get('display_status') or {}).get('progress'))
+                if 0 <= value <= 1:
+                    progress = value
+            except (AttributeError, TypeError, ValueError):
+                pass
         return dict(connected=True,state=state,filename=str(stats.get('filename') or ''),
                     print_seconds=metric('print_duration'),total_seconds=metric('total_duration'),
                     filament_mm=metric('filament_used'),observed_at=time.time(),error=None,
+                    progress=progress,
                     reported_identity=status.get('gcode_macro _KCD_VARS',{}).get('printer_name'))
     except urllib.error.HTTPError as exc:
         error='Moonraker authentication required' if exc.code in (401,403) else 'Moonraker HTTP error '+str(exc.code)
