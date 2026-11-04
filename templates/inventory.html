@@ -44,12 +44,15 @@
             <summary>Assign printer</summary>
             <form method="post" class="d-flex flex-wrap gap-2 align-items-end my-2">
                 {{ operation('assign', spool) }}
-                <label>Printer <select class="form-select" name="printer_id">
+                <div>
+                <label for="spool-printer-{{ spool.spool_uid }}">Printer</label>
+                <select id="spool-printer-{{ spool.spool_uid }}" class="form-select" name="printer_id">
                     <option value="">Unassigned</option>
                     {% for printer in printers %}
                     <option value="{{ printer.id }}"{% if printer.id == spool.printer_id %} selected{% endif %}>{{ printer.name }}</option>
                     {% endfor %}
-                </select></label>
+                </select>
+                </div>
                 <button class="btn btn-outline-primary" type="submit">Save assignment</button>
             </form>
         </details>
