@@ -133,8 +133,8 @@ else:
 
 # Ensure data directory exists
 if is_demo_runtime():
-    # Demo startup must not create or read the normal installation data directory.
-    API_KEY = str(os.getenv("KCD_API_KEY", "") or "").strip()
+    # Demo startup does not load printer-client credentials.
+    API_KEY = ""
 else:
     os.makedirs(DATA_DIR, exist_ok=True)
     API_KEY = ensure_api_key()

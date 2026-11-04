@@ -486,6 +486,7 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             "from contextlib import closing\n"
             "from unittest import mock\n"
             "import app as target\n"
+            "assert not target.API_KEY\n"
             "from core import db as db_module\n"
             "from core.demo.security import csrf_token\n"
             "client=target.app.test_client()\n"
@@ -507,6 +508,7 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             "print(json.dumps({'created':created.status_code,'reads':reads,'ui':ui,'blocked':danger.status_code,'blocked_calls':blocked.call_count,'printer':printer.status_code,'printer_calls':write_job.call_count,'download':download.status_code,'safe':safe.status_code,'count':count,'missing':target.app.extensions['kcd_demo_policy'].missing_routes(target.app)}))\n"
         )
         environment = os.environ.copy()
+        environment["KCD_API_KEY"] = "fixture-must-not-be-loaded"
         environment["PYTHONPATH"] = os.pathsep.join(filter(None, (
             str(Path(__file__).resolve().parents[1]), environment.get("PYTHONPATH", ""),
         )))
