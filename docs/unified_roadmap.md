@@ -174,17 +174,31 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.7.3 was independently verified on 2026-11-03, pinned to immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. Phase 6 shipped in v0.4.0; SQL-only remains the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes. Recalculate is deliberately pricing-only. Read root `LOGBOOK.md` for the authoritative engineering handoff and exact deployment evidence.
+Production v0.7.3 was independently reverified on 2026-11-04, pinned to immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. All five SQL readiness checks passed with 1,041 jobs and four registered printers. Phase 6 shipped in v0.4.0. SQL-only remains canonical, with CSV and dual retained for compatibility. Recalculate is pricing-only. See [LOGBOOK](../LOGBOOK.md) for deployment and recovery evidence.
 
 ## Current Active Work
 
 v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
-## Next Planned Work
+The v0.7.3 deployment handoff merged in PR 60. The two matched SV07 history rows and on-printer script repairs were applied to production. The general lifecycle fix and Unpriced presentation await review in PR 61. A released v0.7.4 has not been verified.
 
-1. Continue production monitoring and intentionally review SV07's retained cancelled-job discrepancy; do not automatically finalize uncertain tracking.
-2. Review/merge the deployment handoff documentation. Retain v0.7.2 and earlier recovery artifacts and follow the established validation, backup and immutable-digest process for future releases.
-3. Choose further work deliberately. Full Recompute and Modes remain deferred; physical hardware/assistive-technology and long-running performance certification are separate validation limits.
+## Approved development sequence
+
+The November 1 proposal's v0.5.1 baseline is historical. Preserve the released CLI installer and its acceptance tests, SQL registration, archived thumbnails, pause-aware accounting, explicit spool units, saved cost snapshots, project components and planned-item projections. Implement the remaining work in separately reviewed slices. Release only after each applicable gate passes.
+
+| Priority | Milestone | Verified starting point and remaining work |
+| --- | --- | --- |
+| A | Web installer and administration | Released CLI engine covers discovery, local and SSH repair, registration and lifecycle recovery. The first browser candidate shares that engine for configured targets with independent authentication and a bound preview. Master bootstrap, discovery, macro controls, backup and safe retirement remain work. |
+| B | Public interactive demo | Recover the workspace foundation at `58d1368`, originally built on v0.5.0. Revalidate route policy, isolation and SQL behavior on current code, finish simulated activity and cleanup, then prepare private staging. Public hostname and hosting are separate decisions. |
+| C | Individual printer pages | Reuse v0.7.3 telemetry, durable printer identity and SQL history. Add printer-specific statistics, costs, date comparisons and navigation. |
+| D | Personal, Advanced and Business modes | Add one reversible instance-wide presentation setting. Default existing installs to Advanced and preserve all stored data. |
+| E | Business orders and profitability | Extend shipped project components, assignment and planning with customer/order workflow and explicit sales and expense records. Preserve recorded job prices. |
+| F | Analytics and reporting | Extend existing Reports and printer summaries with consistent aggregations, outcomes and presets. Publish actual and estimated values separately. |
+| G | Filament inventory | Reuse verified conversion and filament profiles. Add physical spool accounting and deduplicated consumption records. |
+| H | Slicer estimates | Extend existing planned-item workflow with bounded metadata import and what-if pricing. Keep estimates outside actual job history. |
+| I | Notifications and exports | Extend existing CSV export and System Events with configured delivery, deduplication and selected business/inventory exports. |
+
+Continue development on independent branches while required reviews, image validation and safe deployment windows are pending. Retain previous rollback images and coordinated archives.
 
 ## Deferred Feature Track
 
@@ -205,11 +219,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ### Modes
 
-- status: deferred, planned-only
-- why it is deferred:
-  - The audit found no repo evidence that modes were implemented.
-  - The current engineering priority is storage/source-of-truth hardening, not UI product segmentation.
-  - Starting mode work before Phase 6 is stabilized would add another layer of gating on top of a still-transitional architecture.
+- status: approved for milestone D after the installer, demo and printer detail work
 - frozen constraints summary:
   - single global mode per KCD instance
   - reversible switching with no data deletion

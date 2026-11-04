@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KCD Installer Administration</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { margin: auto; max-width: 52rem; padding: 1rem; overflow-wrap: anywhere; }
+  section { border: 1px solid GrayText; border-radius: .45rem; padding: 1rem; margin-block: 1rem; }
+  button, select, a { font: inherit; }
+  button, select { padding: .55rem; max-width: 100%; }
+  label { display: block; margin-block-end: .35rem; font-weight: 600; }
+  :focus-visible { outline: 3px solid Highlight; outline-offset: 3px; }
+  .feedback { border-inline-start: .3rem solid Highlight; padding-inline-start: 1rem; }
+</style>
+<main>
+  <h1>KCD Installer Administration</h1>
+  <p>Review and repair clients on the local host or approved SSH targets.</p>
+  <nav aria-label="Administration">
+    <a href="/">Installer</a> · <a href="/clients">Verify Master and registered clients</a>
+  </nav>
+  {% if error %}<p class="feedback" role="alert">{{ error }}</p>{% endif %}
+  {% if clients is defined %}
+  <section aria-labelledby="registered">
+    <h2 id="registered">Registered clients</h2>
+    <p>Master storage backend: {{ backend }}</p>
+    {% if backend == 'sql' %}<p>SQL readiness: {{ 'Ready' if ready else 'Not ready' }}</p>{% endif %}
+    <ul>
+      {% for client in clients %}
+      <li>{{ client.name }}{% if client.retired %} (retired){% endif %}</li>
+      {% else %}<li>No registered printers.</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section aria-labelledby="select">
+    <h2 id="select">Select a configured printer</h2>
+    <form action="/preview" method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="target">Printer and host</label>
+      <select id="target" name="target" required>
+        {% for id, target in targets.items() %}
+        <option value="{{ id }}">{{ target.name }} · {{ target.ssh_alias or 'local' }} · {{ target.moonraker }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Preview installation or repair</button>
+    </form>
+  </section>
+  {% if result %}
+  <section aria-labelledby="review">
+    <h2 id="review">{% if ticket %}Review {{ selected.name }}{% else %}Installation verified for {{ selected.name }}{% endif %}</h2>
+    <p>Configuration directory: {{ selected.config_dir }}</p>
+    {% if selected.relocate %}<p>This target permits relocation of the existing identity.</p>{% endif %}
+    {% if selected.reactivate %}<p>This target permits reactivation of a retired identity.</p>{% endif %}
+    {% if ticket %}
+    <ul>
+      {% for change in result.changes %}<li>{{ change }}</li>
+      {% else %}<li>No client file changes are required. Apply will verify registration.</li>{% endfor %}
+    </ul>
+    <p>Apply requires verified inactive printer state. This preview expires in five minutes.</p>
+    <form action="/apply" method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="ticket" value="{{ ticket }}">
+      <button type="submit">Apply reviewed installation</button>
+    </form>
+    {% else %}
+    <p class="feedback" role="status">The installer confirmed registration and client files.</p>
+    <p>Review the active Klipper event hooks and reload the configuration during an idle window if required.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</main>
+</html>

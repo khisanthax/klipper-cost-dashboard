@@ -14,13 +14,15 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 
-def active_config_files(config_dir, max_files=256):
+def active_config_files(config_dir, max_files=256, *, restrict_to_root=False):
     root = Path(config_dir).resolve()
     files, errors, visiting = [], [], set()
     def visit(path, depth=0):
         # Klipper resolves includes relative to the include path, including
         # symlink names, rather than the symlink target's parent directory.
         path = Path(os.path.abspath(path))
+        if restrict_to_root and not path.resolve().is_relative_to(root):
+            raise ValueError("An active Klipper configuration escapes the selected directory")
         if depth > 24 or len(files) >= max_files:
             raise ValueError("Klipper include graph exceeds safe discovery limits")
         if path in visiting:
@@ -37,6 +39,8 @@ def active_config_files(config_dir, max_files=256):
             match = re.match(r"^\s*\[include\s+(.+?)\]\s*(?:[#;].*)?$", line, re.I)
             if match:
                 pattern = str(path.parent / match[1])
+                if restrict_to_root and not Path(pattern).resolve().is_relative_to(root):
+                    raise ValueError("An active Klipper include escapes the selected directory")
                 matches = sorted(glob.glob(pattern))
                 if not matches and not glob.has_magic(pattern):
                     errors.append(f"Missing include: {pattern}")
@@ -153,9 +157,10 @@ def local_lan_addresses():
                        if not ipaddress.ip_address(a[4][0]).is_loopback})
 
 
-def probe_endpoint(url, timeout=2):
+def probe_endpoint(url, timeout=2, *, opener=None):
     def get(path):
-        with urllib.request.urlopen(url.rstrip("/")+path, timeout=timeout) as response:
+        request = opener.open if opener is not None else urllib.request.urlopen
+        with request(url.rstrip("/")+path, timeout=timeout) as response:
             return json.load(response)["result"]
     try:
         info = get("/server/info")
