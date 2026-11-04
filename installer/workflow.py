@@ -53,6 +53,10 @@ def client_plan(config_dir, name, master, key):
         config = re.sub(r'^(\s*variable_printer_name:)\s*.*$', lambda m: m[1]+' "'+name+'"', config, flags=re.M)
         config = re.sub(r"""^(command:\s*)(?:bash\s+)?((?:'[^']*/|"[^"]*/|/[^\r\n]*?/|[A-Za-z]:[^\r\n]*?/))(kcd_job_\w+\.sh|send_print_cost\.sh)['"]?""",
                         lambda m: m[1]+"bash "+__import__('shlex').quote(str(directory)+"/"+m[3]), config, flags=re.M)
+        config = re.sub(
+            r'^(command:.*(?:kcd_job_(?:start|cancel|pause|resume)|send_print_cost)\.sh[\'"]?)[ \t]+"\{params\}"[ \t]*$',
+            r'\1', config, flags=re.M,
+        )
         # Upgrade older managed integrations by appending only absent helper
         # definitions. Existing start/end logic and custom settings are retained.
         rendered = utils._render_print_cost_cfg(str(directory), name)
