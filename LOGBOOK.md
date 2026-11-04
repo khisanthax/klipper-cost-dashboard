@@ -68,6 +68,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Tests / evidence:** 13 targeted new regressions currently pass. Whole-workflow tests verify profile CRUD, blocked active-profile deletion, unchanged historical jobs and readiness after rejection. Final rerun including quoted confirmations and new browser memory/request metrics is in progress. Known mass subtotals explicitly count unknown weights; printer Today totals are independent of History filters. The full-suite count will be recorded after the current changes finish CI.
 - **Production / next action:** production remains v0.7.2; read-only Settings/Diagnostics Playwright checks passed for all four identities. Finish final validations and documentation, then mark PR 59 ready for required review. Retain all current production data, credentials, client files and rollback evidence.
 
+### 2026-11-04 — Milestone E, project-backed order workflow
+
+- **Status:** implemented for independent review from `7892765`. Business mode integration, required CI, merge, release and deployment are pending.
+- **Changes:** SQL migration `0009_business_orders` links one Draft, Active or Complete order to each project. The workflow stores optional commercial amounts in USD cents and keeps quote, selling price, estimates, actual expenses and recorded revenue distinct. The view uses saved tracked prices and project-only snapshots with manual work, preserves signed adjustments, and excludes active plans from actual costs. Unknown amounts prevent unsupported profit calculations. Revision and delete guards protect concurrent edits and attached orders.
+- **Verification:** three targeted SQL and Flask tests passed for unknown versus zero, cent reconciliation, manual and planned costs, saved-price preservation, stale revisions and completion. SQL-only filesystem validation passed. A disposable browser saved an order, verified profit and completed the order. Responsive and archive restore checks are included in candidate validation.
+- **Production:** candidate only. The last read-only verification confirmed production v0.7.3. No order schema or UI has been released or deployed.
+- **Next step:** validate the candidate and complete Business mode navigation integration before release. See [order workflow and recovery notes](docs/business-orders.md).
+
 ## New entry template
 
 ### 2026-11-02 — Final dashboard acceptance passed; ready for review

@@ -78,7 +78,7 @@ def main():
                 failed_requests=[]
                 page.on('requestfailed',lambda request:failed_requests.append({'url':request.url,'failure':request.failure}))
                 results=[]
-                routes=['/','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
+                routes=['/','/reports','/projects','/projects/'+project+'/pricing','/orders?project='+project,'/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
                 if '--workflows-only' in sys.argv:routes=[]
                 try:
                     sizes=[(1920,1080,1,'large'),(1440,1000,1,'desktop'),(900,900,1,'narrow'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')]
@@ -99,7 +99,7 @@ def main():
                                 audit=page.evaluate("async()=>{const r=await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa','best-practice']}});return {violations:r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),incomplete:r.incomplete.length}}")
                                 result['accessibility']=audit
                             results.append(result)
-                            page.screenshot(path=str(artifacts/(route.replace('/','_').strip('_')+'-'+label+'.png')),full_page=True)
+                            page.screenshot(path=str(artifacts/(route.split('?',1)[0].replace('/','_').strip('_')+'-'+label+'.png')),full_page=True)
                             assert response.status==200,result
                     (artifacts/'page-audit.json').write_text(json.dumps({'pages':results,'browser_errors':errors},indent=2))
                     assert not errors,errors
@@ -108,6 +108,24 @@ def main():
                         assert not any(r['overflow'] or r['unlabelled'] for r in results),'Resolve layout/label findings in page-audit.json'
                         assert not any(r.get('accessibility',{}).get('violations') for r in results),'Resolve automated accessibility findings in page-audit.json'
                         page.set_viewport_size({'width':1440,'height':1000});page.goto(base+'/')
+                        page.get_by_role('link',name='Projects',exact=True).click()
+                        page.get_by_role('link',name='Business orders',exact=True).click()
+                        page.get_by_label('Project',exact=True).select_option(project)
+                        page.get_by_role('button',name='Open order').click()
+                        page.get_by_label('Customer (optional)').fill('Fixture customer')
+                        page.get_by_label('Status',exact=True).select_option('active')
+                        page.get_by_label('Quoted price ($)').fill('80')
+                        page.get_by_label('Selling price ($)').fill('70')
+                        page.get_by_label('Recorded revenue ($)').fill('60')
+                        page.get_by_label('Additional expenses ($)').fill('2')
+                        page.get_by_role('button',name='Save order').click()
+                        profit=page.get_by_role('row').filter(has=page.get_by_role('rowheader',name='Profit',exact=True))
+                        profit.get_by_role('cell',name='$17.17').wait_for()
+                        page.get_by_label('Status',exact=True).select_option('complete')
+                        page.get_by_role('button',name='Save order').click()
+                        page.get_by_text('Completed at',exact=False).wait_for()
+                        page.screenshot(path=str(artifacts/'business-order.png'),full_page=True)
+                        page.goto(base+'/')
                         from dashboard_workflows import exercise
                         exercise(page,context,base,project,tmp,artifacts)
                         assert not errors,errors

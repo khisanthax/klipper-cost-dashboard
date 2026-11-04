@@ -19,7 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import flask
 from importlib.metadata import version
-from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
+from flask import Flask, abort, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
@@ -3133,7 +3133,42 @@ def projects_page():
         unassigned_pager=unassigned_pager,
         projects_by_id={p["id"]: p for p in project_rows},
         filament_profiles=project_filament_profiles,
+        orders_enabled=_is_sql_only(),
     )
+
+
+@app.route("/orders", methods=["GET", "POST"])
+def orders_page():
+    """Manage project-backed order metadata without repricing tracked jobs."""
+    from core import orders
+
+    if not _is_sql_only():
+        abort(404)
+    catalog = projects.load_projects()
+    values = request.form if request.method == "POST" else request.args
+    project_uid = values.get("project", "")
+    project = catalog.get(project_uid)
+    if project_uid and project is None:
+        abort(404)
+    error = None
+    if request.method == "POST":
+        if project is None:
+            abort(400)
+        try:
+            orders.save_order(project_uid, values)
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            return redirect(url_for("orders_page", project=project_uid), code=303)
+    order = orders.get_order(project_uid) if project else None
+    form = values if error else order or {"status": "draft", "priority": "normal"}
+    financial = orders.financial_view(project, order) if order else None
+    return render_template(
+        "orders.html", orders=orders.list_orders(), projects=catalog.values(), project=project,
+        order=order, form=form, financial=financial, amounts=orders.AMOUNTS,
+        statuses=orders.STATUSES, priorities=orders.PRIORITIES, error=error,
+        revision=values.get("revision", "") if error else order["updated_at"] if order else "",
+    ), 400 if error else 200
 
 
 @app.route("/settings", methods=["GET", "POST"])
