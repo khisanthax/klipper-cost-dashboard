@@ -42,4 +42,6 @@ To move an existing identity, configure the new host and endpoint using the exis
 
 The shared engine checks for an inactive, reachable printer before registration and again before writing. If registration succeeds and a later step fails, retain that identity and review a new preview. The existing writer keeps private per-file backups. Follow [installer recovery](installation-recovery.md) when a client is partly configured. A configuration include that resolves outside the allowed root requires the CLI workflow.
 
-Initial Master bootstrap, unrestricted discovery, macro editing, retirement/uninstall, backups and service management still use the existing CLI or dashboard workflow. The browser service currently manages explicitly configured targets and installs or repairs their client files and registration. It checks inactivity at application time and does not issue firmware commands.
+To enable **Create backup**, start the service with `--backup-data /path/to/master/data` on the SQL Master host. Point this at the data directory for the configured Master. The button invokes the existing coordinated SQL and thumbnail archive tool. Archives stay in the local private backups folder. Use the CLI for a Master on a different host or a CSV/dual deployment.
+
+Initial Master bootstrap, unrestricted discovery, macro editing, retirement/uninstall and service management still use the existing CLI or dashboard workflow. The browser service checks inactivity at application time and does not issue firmware commands.

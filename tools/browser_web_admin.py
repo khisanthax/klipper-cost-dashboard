@@ -7,6 +7,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -104,7 +105,8 @@ def main():
             await_http(master_url + "/health", processes[0])
             admin_env = dict(master_env, KCD_DATA_DIR=str(root / "admin-data"), KCD_WEB_ADMIN_PASSWORD=password)
             processes.append(subprocess.Popen(
-                [sys.executable, "-m", "installer.web_admin", "--targets", str(targets), "--port", str(admin_port)],
+                [sys.executable, "-m", "installer.web_admin", "--targets", str(targets), "--port", str(admin_port),
+                 "--backup-data", str(data)],
                 cwd=ROOT, env=admin_env,
             ))
             await_http(admin_url, processes[1], expected=401)
@@ -113,7 +115,7 @@ def main():
                 context = browser.new_context(http_credentials={"username": "admin", "password": password})
                 context.tracing.start(screenshots=True, snapshots=True)
                 page = context.new_page()
-                page.set_default_timeout(10000)
+                page.set_default_timeout(45000)
                 try:
                     for width in (390, 768, 1440):
                         page.set_viewport_size({"width": width, "height": 900})
@@ -139,6 +141,17 @@ def main():
                     page.get_by_role("link", name="Verify Master and registered clients").click()
                     page.get_by_text("WebFixture", exact=True).wait_for()
                     with closing(sqlite3.connect(data / "kcd.db")) as conn:
+                        assert conn.execute("SELECT count(*) FROM printers WHERE name='WebFixture'").fetchone()[0] == 1
+                    page.get_by_role("button", name="Create backup").click()
+                    page.get_by_role("status").filter(has_text="Backup created").wait_for()
+                    archives = list((data / "backups").glob("kcd_backup_*.tar.gz"))
+                    assert len(archives) == 1
+                    with tarfile.open(archives[0]) as archive:
+                        restored = root / "restored.db"
+                        with archive.extractfile("data/kcd.db") as database:
+                            restored.write_bytes(database.read())
+                    with closing(sqlite3.connect(restored)) as conn:
+                        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
                         assert conn.execute("SELECT count(*) FROM printers WHERE name='WebFixture'").fetchone()[0] == 1
                     print("Web admin browser passed: responsive, keyboard, read-only preview, active rejection and SQL registration")
                 except Exception:

@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -76,9 +77,14 @@ def load_configuration(path):
     return master, targets
 
 
-def create_app(master, targets, password, master_key):
+def create_app(master, targets, password, master_key, *, backup_data=None):
     if len(password) < 24 or not master_key or password == master_key:
         raise ValueError("Configure a separate admin password of at least 24 characters and a Master API key")
+    if backup_data is not None:
+        backup_data = Path(backup_data).resolve(strict=True)
+        database = backup_data / "kcd.db"
+        if backup_data == backup_data.parent or database.is_symlink() or not database.is_file():
+            raise ValueError("Backup directory must contain the local Master's SQL database")
     app = Flask(__name__, template_folder="web_templates")
     app.config.update(
         SECRET_KEY=secrets.token_bytes(32), TRUSTED_HOSTS=["127.0.0.1", "localhost"],
@@ -121,7 +127,9 @@ def create_app(master, targets, password, master_key):
         return response
 
     def page(**context):
-        return render_template("admin.html", targets=targets, csrf=session["csrf"], **context)
+        return render_template(
+            "admin.html", targets=targets, csrf=session["csrf"], backup_data=backup_data, **context,
+        )
 
     def operation(identifier, *, revision=None):
         target = targets[identifier]
@@ -201,6 +209,27 @@ def create_app(master, targets, password, master_key):
             return page(error="The installer did not confirm application. Review registration and try a new preview."), 409
         return page(selected=targets[reviewed["target"]], result=result)
 
+    @app.post("/backup")
+    def backup():
+        if backup_data is None:
+            abort(404)
+        try:
+            with operation_lock:
+                if master_request(master, master_key).get("backend") != "sql":
+                    return page(error="The configured Master must use SQL for this backup action."), 409
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).resolve().parents[1] / "tools" / "kcd_backup.py")],
+                    env=dict(os.environ, KCD_STORAGE_BACKEND="sql", KCD_DATA_DIR=str(backup_data),
+                             KCD_API_KEY=master_key),
+                    capture_output=True, text=True, timeout=120, check=True,
+                )
+                name = Path(result.stdout.strip().removeprefix("Backup created: ")).name
+                if not re.fullmatch(r"kcd_backup_[0-9]{8}_[0-9]{6}\.tar\.gz", name):
+                    raise ValueError("Unexpected backup result")
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+            return page(error="Backup could not be verified. Check SQL readiness, local data access and disk space."), 409
+        return page(backup_name=name)
+
     return app
 
 
@@ -208,10 +237,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--targets", required=True, help="Path to the administrator's target allowlist JSON")
     parser.add_argument("--port", type=int, default=6061)
+    parser.add_argument("--backup-data", help="Enable backups for this local SQL Master data directory")
     args = parser.parse_args(argv)
     try:
         master, targets = load_configuration(args.targets)
-        app = create_app(master, targets, os.environ.get("KCD_WEB_ADMIN_PASSWORD", ""), os.environ.get("KCD_API_KEY", ""))
+        app = create_app(
+            master, targets, os.environ.get("KCD_WEB_ADMIN_PASSWORD", ""), os.environ.get("KCD_API_KEY", ""),
+            backup_data=args.backup_data,
+        )
     except (OSError, ValueError, TypeError, KeyError):
         parser.error("Invalid target configuration or missing credentials. See docs/web-admin.md.")
     from waitress import serve

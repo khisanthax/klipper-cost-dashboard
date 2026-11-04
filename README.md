@@ -39,6 +39,8 @@ target architecture and the strictest operating contract.
 
 For instance discovery, client repair, identity relocation, macro previews and
 credential rotation, see [installation and recovery](docs/installation-recovery.md).
+For a separately authenticated, loopback-only client installation service, see
+[browser installer administration](docs/web-admin.md).
 The [November production audit](docs/production-audit-2026-11.md) records findings,
 repairs and verification evidence.
 

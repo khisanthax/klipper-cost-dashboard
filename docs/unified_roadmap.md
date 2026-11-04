@@ -188,7 +188,7 @@ The November 1 proposal's v0.5.1 baseline is historical. Preserve the released C
 
 | Priority | Milestone | Verified starting point and remaining work |
 | --- | --- | --- |
-| A | Web installer and administration | Released CLI engine covers discovery, local and SSH repair, registration and lifecycle recovery. The first browser candidate shares that engine for configured targets with independent authentication and a bound preview. Master bootstrap, discovery, macro controls, backup and safe retirement remain work. |
+| A | Web installer and administration | Released CLI engine covers discovery, local and SSH repair, registration and lifecycle recovery. The first browser candidate shares that engine for configured targets with independent authentication, a bound preview and optional local SQL backups. Master bootstrap, open discovery, macro controls and safe retirement remain work. |
 | B | Public interactive demo | Recover the workspace foundation at `58d1368`, originally built on v0.5.0. Revalidate route policy, isolation and SQL behavior on current code, finish simulated activity and cleanup, then prepare private staging. Public hostname and hosting are separate decisions. |
 | C | Individual printer pages | Reuse v0.7.3 telemetry, durable printer identity and SQL history. Add printer-specific statistics, costs, date comparisons and navigation. |
 | D | Personal, Advanced and Business modes | Add one reversible instance-wide presentation setting. Default existing installs to Advanced and preserve all stored data. |

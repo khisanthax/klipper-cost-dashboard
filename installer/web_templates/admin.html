@@ -20,6 +20,7 @@
     <a href="/">Installer</a> · <a href="/clients">Verify Master and registered clients</a>
   </nav>
   {% if error %}<p class="feedback" role="alert">{{ error }}</p>{% endif %}
+  {% if backup_name %}<p class="feedback" role="status">Backup created: {{ backup_name }}</p>{% endif %}
   {% if clients is defined %}
   <section aria-labelledby="registered">
     <h2 id="registered">Registered clients</h2>
@@ -66,6 +67,16 @@
     <p class="feedback" role="status">The installer confirmed registration and client files.</p>
     <p>Review the active Klipper event hooks and reload the configuration during an idle window if required.</p>
     {% endif %}
+  </section>
+  {% endif %}
+  {% if backup_data %}
+  <section aria-labelledby="backup">
+    <h2 id="backup">Local SQL backup</h2>
+    <p>Create a private archive in the backups folder under {{ backup_data }}.</p>
+    <form action="/backup" method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">Create backup</button>
+    </form>
   </section>
   {% endif %}
 </main>
