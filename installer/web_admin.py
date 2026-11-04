@@ -18,7 +18,6 @@ from flask import Flask, abort, render_template, request, session
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from .remote_workflow import remote_operation
-from .workflow import master_request, repair_client
 
 
 PLAN_LIFETIME = 300
@@ -85,6 +84,8 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
         database = backup_data / "kcd.db"
         if backup_data == backup_data.parent or database.is_symlink() or not database.is_file():
             raise ValueError("Backup directory must contain the local Master's SQL database")
+    from . import workflow
+
     app = Flask(__name__, template_folder="web_templates")
     app.config.update(
         SECRET_KEY=secrets.token_bytes(32), TRUSTED_HOSTS=["127.0.0.1", "localhost"],
@@ -95,6 +96,7 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
     operation_lock = threading.Lock()
     plan_lock = threading.Lock()
     pending_plans = {}
+    last_backup = -float("inf")
 
     @app.before_request
     def authorize():
@@ -143,7 +145,7 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
             if target.ssh_alias:
                 payload.update(host=target.ssh_alias, installation_type="remote")
                 return remote_operation(target.ssh_alias, "repair", payload)
-            return repair_client(**payload)
+            return workflow.repair_client(**payload)
 
     @app.get("/")
     def index():
@@ -152,7 +154,7 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
     @app.get("/clients")
     def clients():
         try:
-            info = master_request(master, master_key)
+            info = workflow.master_request(master, master_key)
             registered = sorted(
                 ({"name": client["printer_name"], "retired": bool(client.get("hidden"))}
                  for client in info["clients"]), key=lambda client: client["name"].casefold(),
@@ -211,12 +213,16 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
 
     @app.post("/backup")
     def backup():
+        nonlocal last_backup
         if backup_data is None:
             abort(404)
         try:
             with operation_lock:
-                if master_request(master, master_key).get("backend") != "sql":
+                if time.monotonic() - last_backup < 2:
+                    return page(error="A backup was just requested. Wait before trying again."), 409
+                if workflow.master_request(master, master_key).get("backend") != "sql":
                     return page(error="The configured Master must use SQL for this backup action."), 409
+                last_backup = time.monotonic()
                 result = subprocess.run(
                     [sys.executable, str(Path(__file__).resolve().parents[1] / "tools" / "kcd_backup.py")],
                     env=dict(os.environ, KCD_STORAGE_BACKEND="sql", KCD_DATA_DIR=str(backup_data),

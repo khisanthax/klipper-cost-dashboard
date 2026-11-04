@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from installer import web_admin
+from installer import web_admin, workflow
 
 
 PASSWORD = "separate-fixture-admin-password"
@@ -34,7 +34,7 @@ class WebAdminTests(unittest.TestCase):
 
     def test_apply_requires_origin_csrf_and_signed_preview(self):
         csrf = self.token(self.client.get("/", headers=self.headers), "csrf")
-        with patch.object(web_admin, "repair_client") as engine:
+        with patch.object(workflow, "repair_client") as engine:
             self.assertEqual(self.client.post("/apply", headers=self.headers, data={"ticket": "fake"}).status_code, 403)
             self.assertEqual(self.client.post("/preview", headers={**self.headers, "Origin": "http://localhost:9999"},
                                               data={"csrf": csrf, "target": "sv07"}).status_code, 403)
@@ -44,7 +44,7 @@ class WebAdminTests(unittest.TestCase):
 
     def test_review_binds_target_and_engine_revision(self):
         csrf = self.token(self.client.get("/", headers=self.headers), "csrf")
-        with patch.object(web_admin, "repair_client", side_effect=[
+        with patch.object(workflow, "repair_client", side_effect=[
             {"applied": False, "changes": ["create print_cost.cfg"], "revision": "fixture-revision"},
             {"applied": True},
         ]) as engine:
