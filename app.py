@@ -74,17 +74,21 @@ from core.readiness import (
     SqlOnlyStartupReadinessError,
 )
 from core.numeric import finite_float, optional_finite_float, NumericValidationError
+from core.demo.flask_integration import install_workspace_runtime
+from core.runtime import RuntimeConfigurationError, is_demo_runtime
 
 app = Flask(__name__)
+install_workspace_runtime(app)
 app.logger.info("Flask version: %s", version("flask"))
 
 if str(os.getenv("KCD_STORAGE_BACKEND", "csv")).strip().lower() == "sql":
     app.logger.warning("SQL-only mode active (KCD_STORAGE_BACKEND=sql)")
-try:
-    enforce_sql_only_startup_readiness()
-except SqlOnlyStartupReadinessError as exc:
-    app.logger.error(str(exc))
-    raise
+if not is_demo_runtime():
+    try:
+        enforce_sql_only_startup_readiness()
+    except SqlOnlyStartupReadinessError as exc:
+        app.logger.error(str(exc))
+        raise
 
 _ALLOWED_PER_PAGE = (10, 25, 50, 100)
 RECALC_CONFIRM_THRESHOLD = 50
@@ -167,6 +171,8 @@ def get_job_thumbnail_url(
     *,
     job_uid: str | None = None,
 ) -> str | None:
+    if is_demo_runtime():
+        return None
     if job_uid:
         asset = archived_thumbs.get_job_asset(job_uid)
         if asset:
@@ -427,7 +433,7 @@ def _reject_cross_origin_mutations():
 @app.before_request
 def _kcd_auto_backup_hook():
     # Best-effort auto backup. This is intentionally lightweight: it only runs when due.
-    if request.method != "GET":
+    if is_demo_runtime() or request.method != "GET":
         return
     if request.path.startswith("/static"):
         return
@@ -1288,10 +1294,18 @@ def job_end():
 @app.get('/api/printer-status')
 def printer_status():
     """Read telemetry without rewriting history or clearing retained live state."""
-    from core import monitoring
     from core.filament import conversion,material_cost,price_spec
-    endpoints={name:thumbs.resolve_moonraker_base_url(name) or '' for name in get_canonical_printer_names()}
-    observations=monitoring.statuses(endpoints)
+    if is_demo_runtime():
+        from flask import g
+        from core.demo.simulation import simulated_printer_status
+
+        observations = simulated_printer_status(
+            get_canonical_printer_names(), g.demo_workspace_session.record.created_at.timestamp(),
+        )
+    else:
+        from core import monitoring
+        endpoints={name:thumbs.resolve_moonraker_base_url(name) or '' for name in get_canonical_printer_names()}
+        observations=monitoring.statuses(endpoints)
     for name,item in observations.items():
         stored=live.get_job(name)
         item['tracking_warning']=None
@@ -4009,6 +4023,17 @@ def download_csv():
 # ============================================================================
 # APPLICATION STARTUP
 # ============================================================================
+
+if is_demo_runtime():
+    _missing_demo_policies = app.extensions["kcd_demo_policy"].missing_routes(app)
+    if _missing_demo_policies:
+        raise RuntimeConfigurationError(
+            "Demo route policy is incomplete: "
+            + ", ".join(
+                f"{method} {rule} ({endpoint})"
+                for endpoint, method, rule in _missing_demo_policies
+            )
+        )
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

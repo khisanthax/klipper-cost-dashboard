@@ -13,6 +13,8 @@ TTL=5
 
 
 def probe(url):
+    from core.demo.network import require_outbound_network
+    require_outbound_network()
     if not url:return dict(connected=False,state='unconfigured',observed_at=time.time(),error='Moonraker URL is missing; configure this printer in Settings')
     try:
         with urllib.request.urlopen(url.rstrip('/')+'/printer/objects/query?print_stats&gcode_macro%20_KCD_VARS',timeout=1.2) as response:

@@ -122,6 +122,7 @@
     <nav class="navbar navbar-dark bg-primary" aria-label="Primary navigation">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('index') }}">Klipper Cost Dashboard</a>
+            {% if not kcd_demo_mode or kcd_demo_has_session %}
             <div class="d-flex flex-wrap gap-2 ms-auto">
                 <a class="btn btn-sm btn-outline-light {% if request.path == '/' %}active{% endif %}"
                     href="{{ url_for('index') }}">Dashboard</a>
@@ -134,11 +135,21 @@
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/settings') %}active{% endif %}"
                     href="{{ url_for('settings_printers_page') }}">Settings</a>
             </div>
+            {% endif %}
         </div>
     </nav>
 
     <!-- Main Content Area -->
     <main class="container my-4" id="main-content">
+        {% if kcd_demo_mode and kcd_demo_has_session %}
+        <aside class="alert alert-info d-flex flex-wrap gap-3 align-items-center justify-content-between" aria-label="Demo workspace">
+            <div><strong>Demo workspace</strong><br>Synthetic data and simulated printers</div>
+            <form action="{{ url_for('demo_foundation_reset') }}" method="post"
+                  onsubmit="return confirm('Restore the sample data and discard your demo changes?')">
+                <button class="btn btn-outline-primary" type="submit">Reset demo</button>
+            </form>
+        </aside>
+        {% endif %}
         {% block content %}
         {% endblock %}
     </main>

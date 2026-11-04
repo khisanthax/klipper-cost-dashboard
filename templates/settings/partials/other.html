@@ -149,6 +149,7 @@
 </div>
 
 <!-- Backups & Export -->
+{% if not kcd_demo_mode %}
 <div class="card mb-4">
     <div class="card-header">
         <h2 class="h5 mb-0">Backups &amp; Export</h2>
@@ -196,3 +197,6 @@
         </form>
     </div>
 </div>
+{% else %}
+<div class="alert alert-secondary mb-4">Backups, restores, and file exports are unavailable in the temporary demo.</div>
+{% endif %}

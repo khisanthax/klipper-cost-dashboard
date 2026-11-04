@@ -11,6 +11,7 @@ from functools import wraps
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
 from core.sql_only import is_sql_only
+from core.runtime import is_demo_runtime
 
 # Compatibility state file; SQL-only persists the same state in user_settings.
 LIVE_JOBS_FILE = os.path.join(DATA_DIR, "live_jobs.json")
@@ -41,6 +42,9 @@ def _is_sql_only() -> bool:
 def _load_state():
     """Load live job state from disk."""
     global _jobs
+    if is_demo_runtime():
+        _jobs = {}
+        return
     if _is_sql_only():
         from core.storage import _load_user_settings_sql
         _jobs = (_load_user_settings_sql("live_jobs") or {}).get("jobs", {})
@@ -75,6 +79,8 @@ def start_job(printer_name, filename, start_time=None, estimated_duration=None,
     Returns:
         dict: The created job state
     """
+    if is_demo_runtime():
+        raise RuntimeError("Live printer state is disabled in demo mode.")
     if start_time is None:
         start_time = time.time()
     

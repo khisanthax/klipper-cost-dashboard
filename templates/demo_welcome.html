@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card mx-auto shadow-sm" style="max-width: 44rem">
+    <div class="card-body p-4 p-md-5">
+        <p class="text-primary fw-semibold mb-2">Interactive demo</p>
+        <h1 class="h2">Explore Klipper Cost Dashboard</h1>
+        {% if request.args.get('expired') %}
+        <p class="alert alert-info" role="status">Your previous demo session expired. Start a new session below.</p>
+        {% endif %}
+        <p>See simulated printers, review print costs, and try projects and pricing profiles in your own temporary workspace.</p>
+        <p class="text-body-secondary">All data is synthetic. Changes expire automatically.</p>
+        <form action="{{ url_for('demo_foundation_create') }}" method="post">
+            <button class="btn btn-primary" type="submit">Start demo</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

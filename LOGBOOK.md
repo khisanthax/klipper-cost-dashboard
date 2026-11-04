@@ -20,6 +20,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-04 — Milestone B interactive demo recovery
+
+- **Status.** Implementation in the separate `codex/demo-recovery` branch for staged review. No public hosting or production deployment.
+- **Recovery.** Brought the 16-commit `feature/demo-workspaces-foundation` history at `58d1368` forward from its v0.5-era base to the v0.7.3 application. Preserved workspace-local SQL, opaque sessions, immutable Basic Demo seed, request leases, quotas and default-deny policy. Reviewed the newer application routes and blocked remote thumbnail, printer-client, installer and export surfaces. Normal runtime continues to select its configured SQL path.
+- **Visitor experience.** Browser start, workspace reset, expired-session landing, and simulated printer telemetry reuse the existing dashboard and scoped pricing. Added an atomic global workspace cap and a minute-by-minute expiration sweep to the demo server. A separate data root and network egress restrictions are required for public staging.
+- **Verification.** Local disposable Flask smoke returned 200 for welcome, start, reports, projects, profiles and the simulated status feed, with normal storage absent. Added a release-validation Playwright workflow for two visitor contexts, mobile, keyboard, isolation, reset and blocked endpoints. Historical foundation validation in `docs/demo/` is kept separately from current-branch results.
+- **Next action.** Complete current-branch CI, then exercise the deployment-level network boundary, TLS, capacity and cleanup against an approved isolated staging target. See [demo staging](docs/demo/demo-staging.md).
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.

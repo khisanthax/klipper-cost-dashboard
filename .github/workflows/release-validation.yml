@@ -45,6 +45,7 @@ jobs:
           python tools/browser_dashboard_audit.py --axe
           python tools/browser_dashboard_audit.py --baseline --history-jobs 500
           python tools/browser_thumbnail_regression.py
+          python tools/browser_demo_regression.py
           python tools/smoke_production.py --installer-acceptance --installer-ssh
           python tools/smoke_production.py --installer-acceptance --compat-backend csv
           python tools/smoke_production.py --installer-acceptance --compat-backend dual

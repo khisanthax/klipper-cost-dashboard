@@ -433,6 +433,7 @@
                                         <span class="text-muted small">Upload a .gcode file to extract slicer estimates</span>
                                     </div>
 
+                                    {% if not kcd_demo_mode %}
                                     <div class="card mb-3">
                                         <div class="card-body">
                                             <div class="row g-3 align-items-end">
@@ -506,6 +507,9 @@
                                             </div>
                                         </div>
                                     </div>
+                                    {% else %}
+                                    <div class="alert alert-secondary">File uploads are unavailable in the temporary demo.</div>
+                                    {% endif %}
 
                                     {% if not p.planned_items %}
                                     <div class="text-muted">No planned items for this project.</div>

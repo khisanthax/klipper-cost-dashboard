@@ -138,6 +138,8 @@ def _reference(job_uid,asset,status,source_url='',filename='',modified=None,prov
 
 
 def fetch_image(printer,filename,*,ended_at=None,historical=False):
+    from core.demo.network import require_outbound_network
+    require_outbound_network()
     from core import thumbnails as cache
     base=cache.resolve_moonraker_base_url(printer)
     if not base:return None,'missing_endpoint',None
