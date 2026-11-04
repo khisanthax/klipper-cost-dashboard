@@ -28,6 +28,7 @@ from core.storage import load_rows_raw, ts_to_local_dt
 
 logger = logging.getLogger(__name__)
 _AUTO_WARNED = False
+_REPORTS_CACHE_KEY = "reports:full:v2"
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ def get_reports_data_range(
 
 
 def _reports_from_csv(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Dict[str, Any]:
-    rows, error = load_rows_raw(CSV_FILE)
+    rows, error = load_rows_raw(CSV_FILE, normalize_status=False)
 
     if start_dt or end_dt:
         filtered = []
@@ -161,7 +162,7 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
         fingerprint = _reports_jobs_fingerprint(conn, where_sql, params)
         cached = reports_cache.get_cached_payload(
             conn,
-            key="reports:full",
+            key=_REPORTS_CACHE_KEY,
             range_key=range_key,
             fingerprint=fingerprint,
             ttl_seconds=cache_ttl,
@@ -189,7 +190,7 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
             try:
                 reports_cache.set_cached_payload(
                     conn,
-                    key="reports:full",
+                    key=_REPORTS_CACHE_KEY,
                     range_key=range_key,
                     fingerprint=fingerprint,
                     payload=payload,
@@ -233,11 +234,12 @@ def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime])
 
 
 def _range_key(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> str:
+    tz = ts_to_local_dt(0).tzinfo
     if not start_dt and not end_dt:
-        return "all"
+        return f"all:{tz}"
     start = start_dt.isoformat() if start_dt else ""
     end = end_dt.isoformat() if end_dt else ""
-    return f"{start}..{end}"
+    return f"{start}..{end}:{tz}"
 
 
 def _cache_ttl_seconds() -> int:
@@ -255,7 +257,8 @@ def _reports_jobs_fingerprint(conn, where_sql: str, params: list) -> str:
         SELECT
             COALESCE(MAX({ts_expr}), 0) AS max_ts,
             COUNT(*) AS row_count,
-            COALESCE(MAX(rowid), 0) AS max_rowid
+            COALESCE(MAX(rowid), 0) AS max_rowid,
+            COALESCE(MAX(j.updated_at), '') AS last_change
         FROM jobs j
         {where_sql}
         """,
@@ -263,7 +266,7 @@ def _reports_jobs_fingerprint(conn, where_sql: str, params: list) -> str:
     ).fetchone()
     if not row:
         return "0:0:0"
-    return f"{row['max_ts']}:{row['row_count']}:{row['max_rowid']}"
+    return f"{row['max_ts']}:{row['row_count']}:{row['max_rowid']}:{row['last_change']}"
 
 
 def _warn_if_sql_ahead_of_csv(conn) -> None:
@@ -329,27 +332,14 @@ def _sql_monthly_breakdown(conn, where_sql: str, params: list) -> list:
     rows = conn.execute(
         f"""
         SELECT
-            strftime('%Y-%m', COALESCE(j.ended_at, j.created_at), 'localtime') AS label,
-            COUNT(*) AS count,
-            COALESCE(SUM(j.duration_hours), 0) AS hours,
-            COALESCE(SUM(j.total_cost), 0) AS cost
+            CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER) AS timestamp_raw,
+            j.status, j.duration_hours, j.total_cost
         FROM jobs j
         {where_sql}
-        GROUP BY label
-        ORDER BY label DESC
         """,
         params,
-    ).fetchall()
-    return [
-        {
-            "label": row["label"],
-            "count": int(row["count"]),
-            "hours": float(row["hours"] or 0.0),
-            "cost": float(row["cost"] or 0.0),
-        }
-        for row in rows
-        if row["label"]
-    ]
+    )
+    return compute_monthly_breakdown(dict(row) for row in rows)
 
 
 def _sql_top_printers(conn, where_sql: str, params: list) -> list:

@@ -665,7 +665,7 @@ def ensure_csv_schema(csv_path: str, expected_headers: list[str]) -> bool:
         return False
 
 
-def load_rows_raw(csv_file):
+def load_rows_raw(csv_file, *, normalize_status=True):
     """Load all rows from CSV file with timestamp parsing."""
     require_file_reads_allowed("print_costs.csv", caller_hint="core.storage.load_rows_raw")
     rows = []
@@ -711,7 +711,7 @@ def load_rows_raw(csv_file):
                     r["runout_count"] = "0"
                 elif not str(r.get("runout_count") or "").strip():
                     r["runout_count"] = "0"
-                if "status" not in r:
+                if normalize_status and "status" not in r:
                     r["status"] = "completed"
                 if "failure_reason" not in r:
                     r["failure_reason"] = ""
@@ -737,7 +737,7 @@ def load_rows_raw(csv_file):
                 # History rows should represent finalized jobs only. If older rows
                 # incorrectly captured transient live states, normalize them for display.
                 try:
-                    if str(r.get("status") or "").strip().lower() in ("printing", "paused"):
+                    if normalize_status and str(r.get("status") or "").strip().lower() in ("printing", "paused"):
                         r["status"] = "completed"
                 except Exception:
                     pass
