@@ -2,7 +2,7 @@
 
 ## Project JSON download
 
-On SQL-only installations, open a project and choose **Download project JSON**. The versioned document separates recorded job prices, manual work, planned items and applied project-price snapshots. Unknown stored values remain JSON null. The download uses the dashboard's normal access boundary and contains project data, so store it appropriately. This export is separate from a coordinated backup and does not change the project or its history.
+On SQL-only installations, open a project and choose **Download project JSON**. The [versioned schema](project-export-schema.md) separates recorded job prices, recoverable original pricing, explicit overrides, manual work, planned items and applied project-price snapshots. Unknown stored values remain JSON null. The document uses one consistent SQL read snapshot and preserves stored numeric precision and original units. The download uses the dashboard's normal access boundary and contains project data, so store it appropriately. This export is separate from a coordinated backup and does not change the project or its history.
 
 This describes the candidate in PR 59, not a claim that production has upgraded.
 Consult root `LOGBOOK.md` for verified release/deployment state.

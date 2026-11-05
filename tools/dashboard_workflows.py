@@ -211,6 +211,17 @@ def exercise(page,context,base,project,data,artifacts):
     document = response.json()
     assert document["schema_version"] == 1 and document["project"]["uid"] == project
     assert {job["job_uid"] for job in document["recorded_jobs"]} == {f"mask-{i}" for i in range(15)}
+    panel = open_project(project)
+    with page.expect_download() as pending:
+        panel.get_by_role('link', name='Download project JSON', exact=True).click()
+    download = pending.value
+    assert download.suggested_filename.endswith('.json')
+    exported = artifacts / 'project-download.json'
+    download.save_as(str(exported))
+    downloaded = json.loads(exported.read_text(encoding='utf-8'))
+    assert downloaded['project']['uid'] == project
+    assert {job['job_uid'] for job in downloaded['recorded_jobs']} == {f'mask-{i}' for i in range(15)}
+    assert downloaded['units']['filament_mm'] == 'mm'
     assert query("SELECT * FROM jobs ORDER BY job_uid") == before_export
     assert context.request.get(base + "/projects/missing/export.json").status == 404
     print('Dashboard workflows passed: six live states, retained SQL state, History session policy, RaRa project overlay, project CRUD, assignment/removal, signed manual adjustment, planned upload, cleared overrides, pause save, backup and scoped project export')

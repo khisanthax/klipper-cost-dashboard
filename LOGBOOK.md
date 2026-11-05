@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Project export completion and snapshot validation
+
+- **Status.** Completed the existing [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) candidate on `codex/project-json-export`; not merged, released or deployed.
+- **Changes.** Export now includes recorded overrides, raw/outcome evidence and a separate whitelisted original-price snapshot for assigned jobs. Documented version 1, explicit units, nulls and SQLite numeric precision. Legacy empty project UIDs resolve consistently. No export mutation or unrelated project data is included.
+- **Verification.** Three focused tests passed: precision/zero/signed/null provenance, real WAL concurrent-writer snapshot consistency, and the Flask attachment/no-store/404 boundary. The actual Chromium workflow passed with 515 synthetic jobs and a real browser attachment download. Failure screenshot/trace from an incorrect test-unit assertion was retained before correction; the product download passed on rerun.
+- **Production / next.** Production is unchanged. Full Release Validation must pass at this head, followed by the required eligible non-author review and incremental integration. Main currently has no eligible collaborator other than the author; do not bypass its review rules.
+
 ### 2026-11-04 — Project export candidate
 
 - **Status.** Implemented the Milestone I project JSON export slice on `codex/project-json-export`. The candidate awaits review and validation before release.
