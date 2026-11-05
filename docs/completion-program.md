@@ -1,23 +1,24 @@
 # KCD completion and release execution plan
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 through v0.10.0 completed verified deployment; all requested source work is implemented. The final v0.11.0 cohort passed CI, merged and published; production deployment is deferred by an unresolved paused MercuryTwo print. Actual runtime remains v0.10.0.
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 through v0.11.0 completed verified deployment; every source PR is resolved. Optional services remain inactive and demo stays isolated by owner choice.
 The initial inventory was checked on 2026-11-05 at main `7892765`.
 This plan coordinates existing branches. The unified roadmap remains the product
 roadmap and root LOGBOOK records completed operations and evidence.
 
 ## Verified state
 
-Production is now verified v0.10.0 at immutable index
-`sha256:dad13e3622dc253b324cf24ff9ca23c8c1d19c6b145ca4fd18efad6883c16822`,
-revision `d5df3a81`, with 1,047 preserved jobs, four connected/identity-verified
-printers, SQL schema `0011_inventory_recovery`, 316 objects and 435 archived
-references. Inventory and Orders remain empty, Advanced remains unchanged.
-Both SV07 recovered rows show Canceled and Unpriced. Actual per-printer monthly
-counts/outcomes and saved cost subtotals matched SQL. See
-[deployment and rollback evidence](v0.10.0-deployment-2026-11-05.md).
-PR 58 is superseded/closed; 61/71, 68/69/62, 65/66 and 67/70 have merged normally
-and shipped in their recorded cohorts. Private administration 63 and isolated-demo 64 are normally merged and published at 23977013 in v0.11.0. All source PRs are resolved. A guarded replacement stopped before container recreation at an active/paused real print; [current status](v0.11.0-release-status-2026-11-05.md) distinguishes published v0.11.0 from running v0.10.0. Shipping optional code does not activate either service or public exposure.
+Production is verified v0.11.0 at immutable index
+`sha256:9f851f76cb2be97216f557721a09ec6e3c2d7fc3a684bd2dc4e7c0d2c5eedebf`, revision `23977013`, with 1,049 preserved jobs,
+four connected/identity-verified printers, schema `0011_inventory_recovery`,
+317 verified objects and 436 archived references. Advanced remains unchanged;
+Orders/inventory stay empty. Both SV07 recovered rows show Canceled/Unpriced.
+Optional browser administration/demo code is shipped but its separate services
+remain inactive, with normal runtime and no new published port/listener.
+See [actual deployment and complete acceptance matrix](v0.11.0-deployment-2026-11-05.md).
+All source PRs 61–70 are resolved, including superseded 58 via 71; each validated
+cohort completed normal merge, publication, backup/restore, deployment and live
+preservation checks. Demo remains isolated by explicit owner choice.
 Existing local test edits and production configuration are retained.
 
 The owner replaced the unavailable-human-review gate on November 5 with the
@@ -43,14 +44,14 @@ map to the inventoried PRs, including the preserved v0.7.2 documentation branch.
 | 1 | 61 · lifecycle recovery | Complete: merged normally with governance PR 71, published/deployed v0.7.4 at 237ccc88; fresh backup, isolated restore and live Canceled/Unpriced checks passed. |
 | 2 | 58 · older handoff | Complete: useful AGENTS and historical v0.7.2 evidence preserved in merged PR 71; stale PR 58 closed with linked handoff. |
 | 3 | 62 · printer pages | Complete in verified v0.8.0: all four actual printer pages, recorded values, comparisons and responsive layouts checked. |
-| 4 | 63 · browser installer | Source complete and merged normally at ce42e1d after strict validation. Shared-engine configured local/SSH discovery, inspection, registration/repair, credential verification and private backup previews are packaged for v0.11.0. Advanced host/macro/destructive operations remain deliberately CLI-only; optional authenticated listener stays off in production. |
+| 4 | 63 · browser installer | Complete in v0.11.0: real browser/local/strict-SSH fixture acceptance and actual existing-client CLI dry-runs passed. Optional separate administrator service remains inactive. |
 | 5 | 65 · modes | Complete in verified v0.9.0: Advanced default preserved; modes/route/data preservation tested in fixtures and production read-only acceptance. |
 | 6 | 66 · orders | Complete in verified v0.9.0: Business lifecycle/financial boundaries tested in fixtures; production Advanced GET boundary and empty additive schema verified without customer mutations. |
 | 7 | 67 · inventory | Complete in verified v0.10.0: exact milligram ledger/replay/corrections/concurrency/archive recovery tested in fixtures; additive empty 0010/0011 schema and preserved production history verified. |
 | 8 | 68 · estimates | Complete in verified v0.8.0: signed reviewed plans and atomic SQL fixes validated in fixtures; production stateless previews and unchanged history verified. |
 | 9 | 69 · export | Complete in verified v0.8.0: consistent private production export verified against SQL membership/costs/provenance without mutation. |
 | 10 | 70 · reports | Complete in verified v0.10.0: SQL/CSV/dual fixtures and real per-printer production counts/outcomes/saved costs verified without historical mutation. |
-| 11 | 64 · demo | Source, isolated staging, strict CI, normal merge and publication complete in v0.11.0; normal Master replacement awaits a safe inactive window. TLS/proxy/host/auth/egress, quotas, reset/expiry/interruption and cross-visitor boundaries are tested. Owner explicitly chose to keep it isolated; no public endpoint or pending approval blocker. |
+| 11 | 64 · demo | Complete optional code and isolated staging in v0.11.0: TLS/proxy/egress/workspace isolation/recovery passed. Owner chose to keep demo isolated; no public endpoint or production demo activation. |
 
 Orders migration 0009 and inventory migrations 0010/0011 are additive. Migration
 0011 preserves 0010 and adds correction/recovery records for existing installations. Verify upgrade
@@ -75,11 +76,11 @@ No financial recompute or production recalculation belongs to this program.
 
 ## Required release sequence
 
-Current release cohorts separate risk and migrations: v0.7.4 contains lifecycle
+The completed release cohorts separated risk and migrations: v0.7.4 contains lifecycle
 and governance at 237ccc88; v0.8.0 groups reviewed estimates/atomic project
 mutations (68), isolated project export (69) and printer pages (62). The confirmed
 project lost-write and canonical-identity repairs precede Business workflows.
-Next cohorts are Modes/Orders (65/66, v0.9.0), inventory/reporting (67/70,
+The subsequent completed cohorts were Modes/Orders (65/66, v0.9.0), inventory/reporting (67/70,
 v0.10.0), then optional private administration/demo tooling (63/64, v0.11.0).
 Secure each tag at its validated cohort commit before later main integrations.
 Each production replacement requires its own fresh verified backup and evidence.
@@ -100,11 +101,17 @@ preservation, permanent object hashes, all four printer identities and the featu
 through its normal browser flow. Attach sanitized deployment and rollback evidence
 to the release and commit the actual outcome to LOGBOOK.
 
-## Final packaging and deployment gate
+## Completion and operational boundaries
 
-All requested source implementations are merged and v0.11.0 published after exact-head CI. The safe-window guard retained the v0.10.0 runtime because MercuryTwo job 00017B is paused/in_progress. No printer command or uncertain finalization is authorized to bypass this condition. After its normal terminal event, refresh baseline/backup and repeat isolated candidate/rollback checks before the KCD-only replacement and live verification. No source item is awaiting an unavailable human reviewer.
-The owner explicitly chose to keep the demo isolated. Complete implementation and
-isolated staging without public exposure or production demo activation.
+The coordinated source backlog is complete: normal protected merges, releases
+v0.7.4 through v0.11.0, verified backups/rollback rehearsals and live preservation
+are recorded. There is no unavailable-human-review blocker. See the final
+[workstream acceptance matrix](v0.11.0-deployment-2026-11-05.md).
+Administration remains intentionally inactive pending private least-privilege
+operational configuration and an intended idle-window preview. The owner chose
+to keep demo isolated; no public deployment or production demo mode is included.
+Actual physical fresh-Pi/power-loss/native-toolbar/assistive validation remains
+distinct from automated fixtures and existing-client read-only dry-runs.
 
 The [November 5 production check](completion-program-production-2026-11-05.md)
 confirms all four loaded identities, both previously recovered SV07 rows, SQL
