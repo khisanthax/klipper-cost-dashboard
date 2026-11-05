@@ -8,6 +8,7 @@ try:
 except ImportError:  # pragma: no cover
     ZoneInfo = None
 from core.storage import ensure_api_key
+from core.runtime import is_demo_runtime
 
 # Directories and files
 DATA_DIR = os.environ.get("KCD_DATA_DIR", "data")
@@ -131,7 +132,9 @@ else:
     TIMEZONE_OBJ = timezone.utc
 
 # Ensure data directory exists
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# Initialize API key
-API_KEY = ensure_api_key()
+if is_demo_runtime():
+    # Demo startup does not load printer-client credentials.
+    API_KEY = ""
+else:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    API_KEY = ensure_api_key()

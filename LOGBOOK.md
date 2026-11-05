@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Final isolated-demo source packaging integration
+
+- Integrated main ce42e1d after normal merge of private administration PR 63. All requested source workstreams are implemented; this final PR 64 integration still requires exact-head CI and normal merge before v0.11.0 tagging. Both real administration/SSH and isolated TLS/demo/container suites remain in CI; no checks were dropped.
+- The owner explicitly chose isolated code/staging/release packaging only. No public endpoint, demo flag or administrative listener is activated on the production Master. There is no pending public-exposure approval blocker for this program. Current verified production remains v0.10.0 in its attached evidence; v0.11.0 deployment must be recorded only after live verification.
+
+
+### 2026-11-05 — Optional isolated demo prepared over final reporting cohort
 ### 2026-11-05 — Private administration final packaging over verified v0.10.0
 
 - Integrated actual v0.10.0 deployment handoff main 1a01766. Administration source is unchanged from full-green 2a6a707/Release Validation42087907369; this ancestry/LOG update must pass fresh strict checks before normal merge. No migration, historical pricing rewrite or listener activation is introduced. The separate authenticated allowlisted service remains optional and inactive on the production Master.
@@ -35,11 +42,18 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - Integrated main d5df3a8 after validated inventory and Reports merges, retaining read-only historical financial semantics, atomic migrations, thumbnail-delete recovery and all backup constraints. Optional services remain inactive on the production Master; the demo remains isolated by owner choice. No additional schema migration is introduced. Strict CI is required for this exact head before the later service-packaging cohort.
 
 
+### 2026-11-05 — Optional isolated demo prepared over inventory integration
 ### 2026-11-05 — Optional web administration prepared over inventory integration
 
 - Integrated main 4827fb3, preserving stock ledger/backup integrity and all financial/identity protections. Optional services are not activated on the production Master. The owner requested isolated demo code/staging/release packaging only; there is no pending public deployment approval. Strict CI and normal cohort integration remain required before release.
 
 
+### 2026-11-05 — Owner scope decision: retain isolated demo only
+
+- The owner explicitly selected **KEEP DEMO ISOLATED FOR NOW**. Complete code, staging regression and release packaging, with no public endpoint and no demo/admin service activation on the production Master. Public deployment is not a pending approval blocker for this program; any future exposure is a separate requested and approved operation.
+- Updated the staging runbook to distinguish this delivered scope from its retained future public-security checklist. Existing isolated TLS, workspace separation, network-none/non-root/read-only container and default-deny tests remain required. No public or production setting was changed.
+
+### 2026-11-05 — demo prepared over atomic Orders migration support
 ### 2026-11-05 — web administration prepared over atomic Orders migration support
 ### 2026-11-05 — v0.10.0 released and production verified
 
@@ -68,6 +82,7 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.
 
 
+### 2026-11-05 — demo prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — web administration prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — Reports prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — inventory prepared over atomic Orders migration support
@@ -98,6 +113,32 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - Integrated b154137 feature baseline (Orders through the updated modes stack), retaining canonical export, stable expanded-panel actions and printer-page telemetry/history. Additive feature browser routes and shared workflows remain tested together. No feature deployment or public exposure is claimed. Strict exact-head CI and cohort tag boundaries govern future normal merges.
 
 
+### 2026-11-05 — demo synchronized to current solo-maintainer main
+
+- Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
+- Local security validation passed 22 cases; its actual-application subprocess exceeded the old 15-second fixture budget while parallel tests competed for host resources. The same case passed alone in 10.0 seconds with all boundary assertions retained. Increased only that bounded test-process budget to 60 seconds; no application/network timeout or policy changed. SQL-only isolation passed. Full exact-head Linux CI remains the release gate.
+
+
+### 2026-11-05 — Demo transport and interrupted-cleanup acceptance
+
+- **Status.** Further implementation and validation in [PR #64](https://github.com/khisanthax/klipper-cost-dashboard/pull/64) for required review; no public hosting or production deployment.
+- **Changes.** Enforced explicit allowed hostnames and HTTPS, accepted forwarded headers only from configured proxy socket peers, bounded nested JSON and wide forms, and reclaimed interrupted lifecycle rows and recognized staging directories after absolute expiry. Waitress preserves headers for this application validation without rewriting the original peer address. Normal runtime is unchanged.
+- **Verification.** Local `test_demo_security.py` passed all 20 tests; `test_demo_workspaces.py` passed 20 tests with two Windows symlink skips. Real Chromium desktop/mobile workflows passed through a disposable loopback TLS proxy, including Secure/HttpOnly/SameSite cookies, HSTS, rejected unknown hosts and plain HTTP, spoofed-header stripping, workspace isolation, reset and denied printer/installer/export endpoints. Synthetic seed, private temporary storage, screenshots and trace were used. Code commit `fe0359f` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42036961141) and Python Compile Check, including the TLS browser test, Python suite, SQL-only checks, installer workflows, Docker network-none rehearsal and upgrade preservation. This follow-up changes the logbook only.
+- **Deployment preparation / remaining work.** The private TLS fixture complements the existing Linux network-none container rehearsal. Public host/network capacity and egress enforcement must still be verified on an approved hosting target. Review is required before merging; see [staging runbook](docs/demo/demo-staging.md).
+- **Milestone integration follow-up.** Added explicit default-deny rules for the future printer detail, Orders, Inventory, estimate/upload/plan API and project export surfaces. Application mode mutation remains excluded; existing demo Projects/profiles/pricing routes retain their prior policy. Security tests bind those handlers and verify denial before network/process side effects, while actual app and TLS browser checks exercise their paths. Code `5824757` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42040190175), 21 local security tests and the real TLS browser. Oversized JSON integers return 422 instead of a generic server error. Policy-backed `demo_endpoint_available(endpoint, method, action)` lets integrated features hide denied controls without changing authorization; its implementation `60a5f43` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42041177404).
+- **Abuse-limit correction.** Session creation previously consumed the looser invalid-session budget, allowing a single source to nearly fill global workspace capacity. It now uses the configured IP-scoped lifecycle budget (default five creations per ten minutes); reset keeps its own workspace-scoped lifecycle budget. Forwarded-address spoofing cannot bypass the creation budget. Both targeted lifecycle/window/peer regressions passed. Real TLS Playwright passed hidden denied controls, denied direct routes, mode-form absence, and retained sample Project pricing/Profiles access, alongside isolation and reset.
+- **Retained-tracking controls / final validation.** Both legacy Clear forms now use the same action predicate as their server policy. They remain available in normal mode and hidden in demo, where direct `clear_live_job` requests stay denied. Real TLS Playwright passed absence of both clear-tracking and mode action forms, denied direct actions, sample pricing/profiles access, reset and visitor isolation. Final implementation `116c2b7` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42042625537) and compile, including all Python, browser, SQL-only, installer, Docker sandbox and upgrade checks. The PR remains ready for required review. This follow-up records evidence only; no public or production deployment occurred.
+
+### 2026-11-04 — Milestone B interactive demo recovery
+
+- **Status.** Implementation in the separate `codex/demo-recovery` branch for staged review. No public hosting or production deployment.
+- **Recovery.** Brought the 16-commit `feature/demo-workspaces-foundation` history at `58d1368` forward from its v0.5-era base to the v0.7.3 application. Preserved workspace-local SQL, opaque sessions, immutable Basic Demo seed, request leases, quotas and default-deny policy. Reviewed the newer application routes and blocked remote thumbnail, printer-client, installer and export surfaces. Normal runtime continues to select its configured SQL path.
+- **Visitor experience.** Browser start, workspace reset, expired-session landing, and simulated printer telemetry reuse the existing dashboard and scoped pricing. Added an atomic global workspace cap and a minute-by-minute expiration sweep to the demo server. A separate data root and network egress restrictions are required for public staging.
+- **Verification.** Local disposable Flask smoke returned 200 for welcome, start, reports, projects, profiles and the simulated status feed, with normal storage absent. Local Playwright passed two visitor contexts, mobile, keyboard, project isolation, reset and blocked endpoints, with screenshots and a trace in the isolated worktree. Initial Linux CI ran 282 tests and found a stale route-count assertion, now replaced with explicit restrictions on the added endpoints. Historical foundation validation in `docs/demo/` is kept separately from current-branch results.
+- **Git.** Draft [PR #64](https://github.com/khisanthax/klipper-cost-dashboard/pull/64). Recovered merge commit `18e2381`.
+- **Validation completed.** The corrected implementation at `fdf4e55` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41872012533) and Python Compile Check. Release Validation ran the complete Python, Playwright, SQL-only, installer, image smoke and upgrade-preservation checks. This validation used disposable synthetic state.
+- **Deployment preparation.** Added the same reproducible isolated image launch to the staging runbook and Release Validation. It uses a synthetic seed and private scratch mount, read-only image, non-root UID, no network or published port, and no production resources. The local Docker Desktop engine was unavailable. Linux [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41874133115) passed the isolated image rehearsal at `ec65a0d`, along with Python, browser, installer, SQL-only, image and upgrade checks. That implementation also drops any inherited printer-client API key from demo startup.
+- **Next action.** Review the candidate, then exercise the deployment-level network boundary, TLS, capacity and cleanup against an approved isolated staging target. See [demo staging](docs/demo/demo-staging.md).
 ### 2026-11-05 — web administration synchronized to current solo-maintainer main
 ### 2026-11-05 — Reports synchronized to current solo-maintainer main
 

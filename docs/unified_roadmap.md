@@ -200,7 +200,7 @@ code cohorts through strict CI and normal solo-maintainer PR merges.
 | B · Interactive demo | PR 64 implements synthetic per-visitor workspaces, simulated activity, reset/expiry/quotas, isolated TLS/browser/container acceptance and default-deny boundaries. The owner explicitly requested isolated code/staging/release packaging only; no public endpoint or pending public-approval blocker belongs to this program. |
 | C · Printer pages | Released in v0.8.0 with known/unknown telemetry, scoped history, outcomes and comparisons. |
 | D/E · Modes and Orders | Released in v0.9.0 with reversible Advanced-default preferences and Business-gated project-backed financial/lifecycle data. |
-| F/G · Reports and stock | Merged and tagged for v0.10.0; deployment evidence remains separate. Includes historical monthly filters/comparisons/coverage, safe outcome inference/cache invalidation and exact-milligram stock/correction/archive ledgers. |
+| F/G · Reports and stock | Released and production-verified in v0.10.0; exact deployment evidence remains in LOGBOOK. Includes historical monthly filters/comparisons/coverage, safe outcome inference/cache invalidation and exact-milligram stock/correction/archive ledgers. |
 | H/I · Estimates and project export | Released in v0.8.0: explicit spool units, signed reviewed planned items, atomic project mutations, canonical identity and consistent versioned SQL exports preserving original pricing. |
 
 All final service-packaging code remains subject to its exact-head validation.

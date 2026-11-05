@@ -10,6 +10,8 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from core.demo.network import require_outbound_network
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -51,6 +53,7 @@ def probe_moonraker_server_info(
     error = ""
 
     try:
+        require_outbound_network()
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=float(timeout_seconds)) as resp:
             status_code = getattr(resp, "status", None) or getattr(resp, "code", None)
@@ -143,6 +146,7 @@ def moonraker_get_json(
         url = f"{url}?{urllib.parse.urlencode(params)}"
 
     try:
+        require_outbound_network()
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=float(timeout_seconds)) as resp:
             body = resp.read()

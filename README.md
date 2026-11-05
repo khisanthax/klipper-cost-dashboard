@@ -229,6 +229,33 @@ python -m kcd cache info
 python -m kcd cache clear
 ```
 
+## Ephemeral demo staging
+
+The demo can be exercised locally with independent browser workspaces, a synthetic printer feed, a reset button and automatic expiration cleanup. See [demo staging](docs/demo/demo-staging.md) for the disposable launch and public staging requirements.
+
+The demo foundation now includes SQL-only request-scoped workspaces, the Phase 4
+default-deny application boundary, and the deterministic Phase 5 Basic Demo seed.
+It still does not include simulated printers, polished visitor UX, deployment
+isolation, or public operations. Do not expose it to the internet yet.
+
+Configuration and lifecycle behavior are documented in `docs/demo/`. Start from
+`docs/demo/demo.env.example`; demo startup fails unless the absolute data root and
+compatible immutable seed exist and both storage/report backends are `sql`.
+
+Generate the versioned Basic Demo seed without committing a binary database:
+
+```bash
+python tools/create_demo_seed.py --data-root /absolute/path/to/demo-data --seed-name basic-v1
+```
+
+The command refuses to overwrite an existing seed. It creates only `kcd.db` and
+`seed-manifest.json`; visitor-mutable directories are created in each cloned
+workspace. See `docs/demo/basic-demo-seed.md` for the dataset and validation
+contract.
+
+Normal installations need no new variable: unset `KCD_RUNTIME_MODE` retains the
+existing csv, dual, sql, reports, authentication, migration, and backup contracts.
+
 ## Printer Retirement
 
 Deleting a printer retires it from active configuration. KCD no longer accepts
