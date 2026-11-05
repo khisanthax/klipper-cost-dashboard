@@ -3201,6 +3201,42 @@ def projects_page():
     )
 
 
+@app.route("/orders", methods=["GET", "POST"])
+def orders_page():
+    """Manage project-backed order metadata without repricing tracked jobs."""
+    from core import orders
+
+    if not _is_sql_only():
+        abort(404)
+    if get_application_mode() != "business":
+        return render_template("orders.html", unavailable=True), 403
+    catalog = projects.load_projects()
+    values = request.form if request.method == "POST" else request.args
+    project_uid = values.get("project", "")
+    project = catalog.get(project_uid)
+    if project_uid and project is None:
+        abort(404)
+    error = None
+    if request.method == "POST":
+        if project is None:
+            abort(400)
+        try:
+            orders.save_order(project_uid, values)
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            return redirect(url_for("orders_page", project=project_uid), code=303)
+    order = orders.get_order(project_uid) if project else None
+    form = values if error else order or {"status": "draft", "priority": "normal"}
+    financial = orders.financial_view(project, order) if order else None
+    return render_template(
+        "orders.html", orders=orders.list_orders(), projects=catalog.values(), project=project,
+        order=order, form=form, financial=financial, amounts=orders.AMOUNTS,
+        statuses=orders.STATUSES, priorities=orders.PRIORITIES, error=error,
+        revision=values.get("revision", "") if error else order["updated_at"] if order else "",
+    ), 400 if error else 200
+
+
 @app.route("/settings", methods=["GET", "POST"])
 def settings_page():
     """Back-compat settings entrypoint (redirects to /settings/printers)."""
@@ -4081,7 +4117,11 @@ def download_csv():
 @app.context_processor
 def application_mode_context():
     mode = get_application_mode()
-    return {"application_mode": mode, "show_advanced": mode != "personal"}
+    return {
+        "application_mode": mode,
+        "show_advanced": mode != "personal",
+        "show_orders": mode == "business" and _is_sql_only(),
+    }
 
 
 # ============================================================================

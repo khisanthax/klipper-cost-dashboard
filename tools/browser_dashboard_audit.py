@@ -17,9 +17,11 @@ ROOT=Path(__file__).resolve().parents[1]
 SEED='''
 import json,os,time
 from core import db,projects,profiles,rates,live
+from core.application_mode import set_application_mode
 from core.registration import register_printer
 moons=json.loads(os.environ['KCD_AUDIT_MOONS'])
 for name,url in moons.items():register_printer(name,url)
+set_application_mode('business')
 profiles.upsert_profile(dict(id='petg-15',name='PETG 15/kg',material='PETG',filament_mode='per_kg',filament_rate=15,cost_per_kg=15,grams_per_meter=3))
 rates.upsert_rate_profile(dict(id='free',name='Free printing time',rate_per_hour=0))
 project=projects.create_project('RaRa acceptance',hourly_rate_override=0,filament_cost_per_kg_override=15)
@@ -78,7 +80,7 @@ def main():
                 failed_requests=[]
                 page.on('requestfailed',lambda request:failed_requests.append({'url':request.url,'failure':request.failure}))
                 results=[]
-                routes=['/','/printers/Idle','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
+                routes=['/','/printers/Idle','/reports','/projects','/projects/'+project+'/pricing','/orders?project='+project,'/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
                 if '--workflows-only' in sys.argv:routes=[]
                 try:
                     sizes=[(1920,1080,1,'large'),(1440,1000,1,'desktop'),(900,900,1,'narrow'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')]
@@ -99,7 +101,7 @@ def main():
                                 audit=page.evaluate("async()=>{const r=await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa','best-practice']}});return {violations:r.violations.map(v=>({id:v.id,impact:v.impact,help:v.help,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),incomplete:r.incomplete.length}}")
                                 result['accessibility']=audit
                             results.append(result)
-                            page.screenshot(path=str(artifacts/(route.replace('/','_').strip('_')+'-'+label+'.png')),full_page=True)
+                            page.screenshot(path=str(artifacts/(route.split('?',1)[0].replace('/','_').strip('_')+'-'+label+'.png')),full_page=True)
                             assert response.status==200,result
                     (artifacts/'page-audit.json').write_text(json.dumps({'pages':results,'browser_errors':errors},indent=2))
                     assert not errors,errors
@@ -131,6 +133,44 @@ def main():
                         page.get_by_label('Compare previous period').check()
                         page.get_by_role('button',name='Apply dates').click()
                         assert 'compare=1' in page.url
+                        page.get_by_role('link',name='Projects',exact=True).click()
+                        page.get_by_role('link',name='Business orders',exact=True).click()
+                        page.get_by_label('Project',exact=True).select_option(project)
+                        page.get_by_role('button',name='Open order').click()
+                        page.get_by_label('Customer (optional)').fill('Fixture customer')
+                        page.get_by_label('Status',exact=True).select_option('active')
+                        page.get_by_label('Quoted price ($)').fill('80')
+                        page.get_by_label('Selling price ($)').fill('70')
+                        page.get_by_label('Recorded revenue ($)').fill('60')
+                        page.get_by_label('Additional expenses ($)').fill('2')
+                        page.get_by_role('button',name='Save order').click()
+                        profit=page.get_by_role('row').filter(has=page.get_by_role('rowheader',name='Profit',exact=True))
+                        profit.get_by_role('cell',name='$17.17').wait_for()
+                        page.get_by_label('Status',exact=True).select_option('complete')
+                        page.get_by_role('button',name='Save order').click()
+                        page.get_by_text('Completed at',exact=False).wait_for()
+                        page.screenshot(path=str(artifacts/'business-order.png'),full_page=True)
+                        for mode in ('advanced','personal','business'):
+                            page.goto(base+'/settings/other')
+                            page.get_by_label('Mode',exact=True).select_option(mode)
+                            page.get_by_role('button',name='Save Application Mode').click()
+                            response=page.goto(base+'/orders?project='+project)
+                            assert response.status==(200 if mode=='business' else 403)
+                            assert page.get_by_role('navigation',name='Primary navigation').get_by_role('link',name='Orders',exact=True).count()==(1 if mode=='business' else 0)
+                        page.get_by_text('Completed at',exact=False).wait_for()
+                        assert page.get_by_label('Customer (optional)').input_value()=='Fixture customer'
+                        with sqlite3.connect(Path(tmp)/'kcd.db') as connection:
+                            order_jobs_before=connection.execute('SELECT * FROM jobs ORDER BY job_uid').fetchall()
+                        for status in ('active','draft'):
+                            page.get_by_label('Status',exact=True).select_option(status)
+                            page.get_by_role('button',name='Save order').click()
+                            assert page.get_by_text('Completed at',exact=False).count()==0
+                            assert page.get_by_label('Recorded revenue ($)').input_value()=='60'
+                        page.once('dialog',lambda dialog:dialog.accept())
+                        page.get_by_role('button',name='Delete draft order').click()
+                        assert page.get_by_label('Customer (optional)').input_value()==''
+                        with sqlite3.connect(Path(tmp)/'kcd.db') as connection:
+                            assert connection.execute('SELECT * FROM jobs ORDER BY job_uid').fetchall()==order_jobs_before
                         page.goto(base+'/')
                         from dashboard_workflows import exercise
                         exercise(page,context,base,project,tmp,artifacts)

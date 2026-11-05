@@ -37,6 +37,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Changes.** Equal history timestamps now have a stable row-ID order across pages. Missing Moonraker durations and filament readings stay unknown, and live price components are calculated only for available measurements.
 - **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
 - **Release.** Review, merge and deployment are pending.
+### 2026-11-05 — Orders lifecycle and revised mode coverage
+
+- **Status.** Extended the stacked milestone E candidate in PR 66 and integrated the revised Personal mode Projects navigation from PR 65.
+- **Verification.** Added full Draft/Active/Complete/reopen/delete transitions, stable completion times on repeated saves, assigned-job preservation, signed-cost reconciliation, explicit zero revenue versus unknown revenue, and invalid currency rejection. The mode regression verifies Projects remains accessible while Orders keeps its Business presentation rule.
+- **Release.** Required CI, review, merge and deployment remain the promotion gates.
 
 ### 2026-11-05 — Personal mode includes Projects
 
@@ -99,6 +104,21 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Additional confirmed defects being repaired:** assigned hourly-profile deletion could leave a dangling reference and break readiness; assigned filament-profile deletion silently removed mappings and switched future pricing. Both now require replacement/base selection first, use canonical profile UIDs, and protect SQL assignment/deletion with write transactions. Nonexistent deletions no longer produce success events. Numeric profile UIDs cannot be confused with unrelated SQL row IDs. Inline confirmation strings also failed for names containing apostrophes; dynamic messages now use JSON-safe quoting and browser fixtures explicitly verify confirmations for quoted names.
 - **Tests / evidence:** 13 targeted new regressions currently pass. Whole-workflow tests verify profile CRUD, blocked active-profile deletion, unchanged historical jobs and readiness after rejection. Final rerun including quoted confirmations and new browser memory/request metrics is in progress. Known mass subtotals explicitly count unknown weights; printer Today totals are independent of History filters. The full-suite count will be recorded after the current changes finish CI.
 - **Production / next action:** production remains v0.7.2; read-only Settings/Diagnostics Playwright checks passed for all four identities. Finish final validations and documentation, then mark PR 59 ready for required review. Retain all current production data, credentials, client files and rollback evidence.
+
+### 2026-11-04 — Milestone E, project-backed order workflow
+
+- **Status:** implemented for independent review from `7892765`. Business mode integration, required CI, merge, release and deployment are pending.
+- **Changes:** SQL migration `0009_business_orders` links one Draft, Active or Complete order to each project. The workflow stores optional commercial amounts in USD cents and keeps quote, selling price, estimates, actual expenses and recorded revenue distinct. The view uses saved tracked prices and project-only snapshots with manual work, preserves signed adjustments, and excludes active plans from actual costs. Unknown amounts prevent unsupported profit calculations. Revision and delete guards protect concurrent edits and attached orders.
+- **Verification:** three targeted SQL and Flask tests passed for unknown versus zero, cent reconciliation, manual and planned costs, saved-price preservation, stale revisions and completion. SQL-only filesystem validation passed. A disposable browser saved an order, verified profit and completed the order. Responsive and archive restore checks are included in candidate validation.
+- **Production:** candidate only. The last read-only verification confirmed production v0.7.3. No order schema or UI has been released or deployed.
+- **Next step:** validate the candidate and complete Business mode navigation integration before release. See [order workflow and recovery notes](docs/business-orders.md).
+
+### 2026-11-04 — Milestones D and E integration
+
+- **Status.** Orders are integrated with the application modes candidate. The stacked [draft PR 66](https://github.com/khisanthax/klipper-cost-dashboard/pull/66) targets `codex/application-modes` and requires review and combined validation.
+- **Changes.** Business mode exposes Orders in SQL-only mode. Advanced and Personal hide both links, return a mode prompt on direct navigation, and block writes to the Orders route. Returning to Business restores the saved order, completion status and financial inputs.
+- **Verification.** The targeted regression switches through Advanced, Personal and Business, checks navigation and direct requests, and compares the complete order record across switches. The disposable browser workflow exercises the same mode changes. Required CI will verify the stacked head.
+- **Production.** No new release or deployment. The last verified production image was v0.7.3.
 
 ## New entry template
 
