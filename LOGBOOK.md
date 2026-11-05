@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Owner scope decision: retain isolated demo only
+
+- The owner explicitly selected **KEEP DEMO ISOLATED FOR NOW**. Complete code, staging regression and release packaging, with no public endpoint and no demo/admin service activation on the production Master. Public deployment is not a pending approval blocker for this program; any future exposure is a separate requested and approved operation.
+- Updated the staging runbook to distinguish this delivered scope from its retained future public-security checklist. Existing isolated TLS, workspace separation, network-none/non-root/read-only container and default-deny tests remain required. No public or production setting was changed.
+
 ### 2026-11-05 — demo prepared over atomic Orders migration support
 
 - Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.

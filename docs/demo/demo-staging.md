@@ -1,5 +1,12 @@
 # Stage the interactive demo
 
+**Owner decision, November 5, 2026: keep the demo isolated for now.** The current
+delivery includes code, isolated browser/container acceptance and release
+packaging only. Do not publish a demo endpoint or activate demo mode on the
+production Master. Public hosting is not a pending completion blocker for this
+program; it requires a separate future request and target-specific security
+approval. The public staging checklist below is retained for that future task.
+
 The demo starts as a separate KCD process with a dedicated data root and synthetic seed. Normal KCD keeps its existing runtime and SQL data path. Use a staging host or a disposable container with no production data, configuration, credentials, SSH agent, Docker socket, or printer network access.
 
 ## Local acceptance
