@@ -140,7 +140,7 @@
                     href="{{ url_for('inventory_page') }}">Inventory</a>
                 {% endif %}
                 {% endif %}
-                {% if show_orders %}
+                {% if show_orders and (not kcd_demo_mode or demo_endpoint_available('orders_page')) %}
                 <a class="btn btn-sm btn-outline-light {% if request.path == '/orders' %}active{% endif %}"
                     href="{{ url_for('orders_page') }}">Orders</a>
                 {% endif %}

@@ -68,11 +68,19 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Changes.** Equal history timestamps now have a stable row-ID order across pages. Missing Moonraker durations and filament readings stay unknown, and live price components are calculated only for available measurements.
 - **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
 - **Release.** Review, merge and deployment are pending.
+
+### 2026-11-05 — Demo Orders boundary and browser fixture cleanup
+
+- **Status.** PR 66 follow-up implemented and tested on the latest PR 65 stack; not merged, released or deployed.
+- **Changes.** Demo navigation and Projects hide Orders links when the enforced demo policy denies them. Normal Business mode retains Orders. The browser acceptance fixture now closes both direct SQLite readers, preventing a Windows database-handle leak during temporary-directory cleanup.
+- **Verification.** All seven Orders tests passed, including denied-demo link absence, preserved project access and unchanged order records. The combined real Chromium workflow passed all product assertions before exposing the fixture cleanup issue; the corrected fixture requires its final integrated rerun. Production is unchanged.
+
 ### 2026-11-05 — Orders lifecycle and revised mode coverage
 
 - **Status.** Extended the stacked milestone E candidate in PR 66 and integrated the revised Personal mode Projects navigation from PR 65.
 - **Verification.** Added full Draft/Active/Complete/reopen/delete transitions, stable completion times on repeated saves, assigned-job preservation, signed-cost reconciliation, explicit zero revenue versus unknown revenue, and invalid currency rejection. The mode regression verifies Projects remains accessible while Orders keeps its Business presentation rule.
 - **Release.** Required CI, review, merge and deployment remain the promotion gates.
+
 
 ### 2026-11-05 — Demo application-mode boundary
 
