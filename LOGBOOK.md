@@ -20,6 +20,12 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Demo application-mode boundary
+
+- **Status.** PR 65 follow-up implemented and tested; not merged, released or deployed.
+- **Changes.** The public-demo presentation now explains that application-mode changes are unavailable when its route/action policy denies them. Normal installations retain the complete reversible selector and Personal Projects navigation.
+- **Verification.** Both application-mode tests passed, including rendered demo form absence and unchanged SQL history and assignments. The combined rehearsal will exercise the actual demo policy; production is unchanged.
+
 ### 2026-11-05 — Personal mode includes Projects
 
 - **Status.** Updated the milestone D candidate in PR 65 for the owner's revised Personal mode requirement.
