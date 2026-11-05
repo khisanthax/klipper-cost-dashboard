@@ -1633,15 +1633,9 @@ def index():
 def reports_page():
     """Reports page with monthly breakdown and top printers."""
     data = reports_repo.get_reports_data(request.args)
-    start,end,_label,_quick=get_date_range_from_params(request.args)
-    history=history_repo.list_history_rows(history_repo.HistoryQuery(start_dt=start,end_dt=end),page=1,per_page=10)
-    recent=history.rows_page
-    from core.filament import describe_job,summarize_weights
-    all_profiles=profiles.get_all_profiles()
-    data.setdefault('summary',{}).update(summarize_weights(history.rows_all,all_profiles))
+    recent=data.get("recent_jobs", [])
     printer_settings=load_settings(SETTINGS_FILE)
     for row in recent:
-        describe_job(row,all_profiles.get(row.get('filament_profile_id')))
         enabled=printer_settings.get(row['printer'],{}).get('thumbnails_enabled',True)
         row['_thumb_small']=get_job_thumbnail_url(row['printer'],row['filename'],'small',job_uid=row.get('job_uid')) if enabled else None
 
@@ -1658,6 +1652,9 @@ def reports_page():
         quick_range=data.get("quick_range", ""),
         start_date=data.get("start_date", ""),
         end_date=data.get("end_date", ""),
+        selected_printer=data["selected_printer"],
+        printer_choices=data.get("printer_choices", []),
+        report_timezone=data["timezone"],
         error=data.get("error"),
     )
 

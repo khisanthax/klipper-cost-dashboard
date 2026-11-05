@@ -1,9 +1,15 @@
 # Monthly print outcomes
 
-Open **Reports** and choose a date range. Monthly Breakdown groups recorded jobs by the installation timezone used by History and the report filters. When the range includes all dates, a job without a usable date appears in an Unknown date row.
+Open **Reports** and choose a printer and date range. Every section, including recent prints, follows the same selected printer. End Date includes the whole local day. Monthly Breakdown groups recorded jobs by the installation timezone shown above the table, including daylight-saving boundaries. When the range includes all dates, a job without a usable date appears in an Unknown date row.
 
 The table counts completed, canceled, failed, and unknown outcomes separately. The completion rate divides completed jobs by the sum of completed, canceled, and failed jobs. When every outcome is unknown, the rate reads Unknown.
 
-Known hours and saved cost use recorded values. A saved zero contributes to the subtotal. The table also counts jobs without a usable duration or saved cost. An entirely unpriced month displays Unpriced. A partial subtotal excludes the jobs shown as missing or unpriced.
+The monthly table shows known hours, filament length, filament weight and saved time, material and total costs. Decimal aggregation rounds half up only for display. A saved zero contributes to the subtotal; negative saved costs stay signed. Each field counts missing values independently. An entirely unpriced field displays Unpriced; an entirely unknown measurement displays Unknown. A partial subtotal excludes the jobs shown as missing. Saved component costs and saved totals are summed independently, retaining any signed adjustments already present in the saved total. No price is recalculated by viewing Reports.
 
-The monthly table reports historical production data. Revenue and profit require the business records planned for the Orders milestone.
+Weight uses saved job grams when present, otherwise the job's saved grams-per-meter factor or saved material density and input filament diameter. The table distinguishes recorded and estimated weights. It never substitutes a current profile's changed factor for missing historical conversion data. Nozzle diameter is not the input filament diameter. A missing or malformed factor leaves mass unknown while retaining a valid recorded length.
+
+Changes compare the immediately preceding calendar month **within the selected results**. They do not skip an empty month or assume it contained zero prints. Counts show absolute changes and completion rate shows percentage-point changes. A measurement/cost change is available only when both months have complete coverage for that metric; partial known subtotals are not compared as if they were complete. Selected dates may contain partial months, and the current month may still be in progress. Comparisons are not normalized or projected.
+
+SQL, CSV and dual compatibility Reports use the same monthly calculations. SQL reads a consistent historical snapshot. Its cache is scoped by printer, dates and timezone, and a streaming content fingerprint invalidates it after an insertion, deletion, identity edit or historical correction, including corrections preserving `updated_at`. No schema migration is required.
+
+The monthly table reports historical production data. Scheduled availability, utilization, capacity, sales revenue, profit, ROI and forecasts are not inferred from print hours or costs. Those metrics need explicit business/availability records and an agreed denominator; they remain separate roadmap work.

@@ -66,6 +66,51 @@ class ArchiveTests(unittest.TestCase):
             thumbnails._evict_cache(str(archive.ARCHIVE_ROOT))
         self.assertTrue(archive.asset_path(digest))
 
+    def test_concurrent_job_deletion_before_reference_is_an_atomic_noop(self):
+        digest=archive.retain_image(PNG)
+        connect=db.connect_db
+        deleted=[]
+        class ConcurrentDelete:
+            def __init__(self):self.connection=connect()
+            def __enter__(self):self.connection.__enter__();return self
+            def __exit__(self,*args):
+                try:return self.connection.__exit__(*args)
+                finally:self.connection.close()
+            def __getattr__(self,name):return getattr(self.connection,name)
+            def execute(self,sql,params=()):
+                if sql.startswith('INSERT INTO job_thumbnails') and not deleted:
+                    with closing(connect()) as other, other:
+                        other.execute("DELETE FROM jobs WHERE job_uid='job-one'")
+                    deleted.append(True)
+                return self.connection.execute(sql,params)
+        with patch.object(db,'connect_db',side_effect=ConcurrentDelete):
+            self.assertFalse(archive._reference('job-one',digest,'archived'))
+        with closing(connect()) as conn:
+            self.assertEqual(conn.execute('SELECT count(*) FROM job_thumbnails').fetchone()[0],0)
+            self.assertEqual(conn.execute('PRAGMA foreign_key_check').fetchall(),[])
+        self.assertTrue(archive.asset_path(digest))  # A shared/live asset must not be removed.
+
+    def test_deleted_during_http_recovery_returns_missing_and_keeps_other_asset(self):
+        import app
+        digest=archive.retain_image(PNG)
+        self.job('job-two');archive.capture_job('job-two','One','part.gcode',live_asset=digest)
+        def fetched(*args,**kwargs):
+            with db.connect_db() as conn:conn.execute("DELETE FROM jobs WHERE job_uid='job-one'")
+            return digest,'archived',None
+        with patch.object(archive,'fetch_image',side_effect=fetched):
+            response=app.app.test_client().get('/jobs/job-one/thumbnail')
+        self.assertEqual(response.status_code,404)
+        self.assertEqual(response.headers['X-KCD-Thumbnail-Status'],'job_deleted')
+        self.assertIsNone(archive.get_job_asset('job-one'))
+        self.assertEqual(archive.get_job_asset('job-two'),digest)
+
+    def test_unrelated_foreign_key_and_database_errors_are_not_hidden(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            archive._reference('job-one','f'*64,'archived')
+        with patch.object(db,'connect_db',side_effect=sqlite3.OperationalError('database unavailable')):
+            with self.assertRaises(sqlite3.OperationalError):
+                archive._reference('job-one',None,'network_error')
+
     def test_exact_saved_token_recovers_expired_cache(self):
         token='a'*40
         with db.connect_db() as conn:conn.execute('UPDATE jobs SET thumbnail=? WHERE job_uid=?',(token,'job-one'))
