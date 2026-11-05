@@ -210,7 +210,8 @@ class InventoryTests(unittest.TestCase):
             advanced = render_template("base.html", inventory_available=True, show_advanced=True)
             compatibility = render_template("base.html", inventory_available=False, show_advanced=True)
             demo = render_template("base.html", inventory_available=True, show_advanced=True,
-                                   kcd_demo_mode=True, demo_endpoint_available=lambda _endpoint: False)
+                                   kcd_demo_mode=True, kcd_demo_has_session=True,
+                                   demo_endpoint_available=lambda _endpoint: False)
         self.assertIn('href="/inventory_page"', normal)
         self.assertIn('href="/inventory_page"', advanced)
         self.assertNotIn('href="/inventory_page"', personal)

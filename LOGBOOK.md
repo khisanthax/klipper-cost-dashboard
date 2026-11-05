@@ -23,6 +23,7 @@ Never include credentials, API keys, personal data, private backup contents, or 
 ### 2026-11-05 — inventory synchronized to current solo-maintainer main
 
 - Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
+- Backported the proved combined-demo fixture correction: navigation tests explicitly model an authenticated workspace when checking that Inventory is hidden while Projects remains available. Public welcome pages intentionally have no workspace navigation. No authorization policy was loosened.
 
 
 ### 2026-11-05 — Inventory corrections, estimates and recovery
