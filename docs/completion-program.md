@@ -1,21 +1,21 @@
 # KCD completion and release execution plan
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. PRs 61/71 are merged and v0.7.4 is verified deployed.
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 and v0.8.0 completed verified deployment; the next cohort is Modes/Orders.
 The initial inventory was checked on 2026-11-05 at main `7892765`.
 This plan coordinates existing branches. The unified roadmap remains the product
 roadmap and root LOGBOOK records completed operations and evidence.
 
 ## Verified state
 
-Production is now verified v0.7.4 at immutable index
-`sha256:9e11c14a716a52df6c27fa6245a3d2d584b9484123c63b4905eaf556d779186e`,
-revision `237ccc88`, with 1,047 preserved jobs, four connected/identity-verified
+Production is now verified v0.8.0 at immutable index
+`sha256:3e00a068e7505ee9753b4aa03faf735876c909f6b8abcd913f99c23b22e5df6d`,
+revision `b154137b`, with 1,047 preserved jobs, four connected/identity-verified
 printers, SQL schema `0008_pricing_provenance`, 316 verified objects and 435 archived
 references. Both SV07 recovered rows visibly show Canceled and Unpriced. See
-[actual deployment and rollback evidence](v0.7.4-deployment-2026-11-05.md).
-PR 58 is superseded/closed; 61/71 and later 68/69 have merged normally. The latter
-feature code is queued for v0.8.0 and is not in the deployed v0.7.4 image. The
+[actual deployment and rollback evidence](v0.8.0-deployment-2026-11-05.md).
+PR 58 is superseded/closed; 61/71 and 68/69/62 have merged normally and shipped in
+their recorded release cohorts. Modes is merged for v0.9.0 but not yet deployed. The
 remaining candidates and release cohorts below continue through strict CI.
 Existing local test edits and production configuration are retained.
 
@@ -41,13 +41,13 @@ map to the inventoried PRs, including the preserved v0.7.2 documentation branch.
 | --- | --- | --- |
 | 1 | 61 · lifecycle recovery | Complete: merged normally with governance PR 71, published/deployed v0.7.4 at 237ccc88; fresh backup, isolated restore and live Canceled/Unpriced checks passed. |
 | 2 | 58 · older handoff | Complete: useful AGENTS and historical v0.7.2 evidence preserved in merged PR 71; stale PR 58 closed with linked handoff. |
-| 3 | 62 · printer pages | Finish missing-value and filter/pagination coverage. Rebase onto approved main, resolve shared telemetry changes and rerun all checks. |
+| 3 | 62 · printer pages | Complete in verified v0.8.0: all four actual printer pages, recorded values, comparisons and responsive layouts checked. |
 | 4 | 63 · browser installer | Depends on 61. Finish scoped discovery, effective macro inspection and actionable repair diagnostics through the same CLI engine. Keep service and destructive host operations CLI-only. |
 | 5 | 65 · modes | Personal now includes Projects under the Nov 5 directive. Verify direct routes, reversible settings and complete data preservation. |
 | 6 | 66 · orders | Depends on 65. Preserve Business gating after the modes correction. Complete transitions, partial financial inputs and deleted-project handling. |
 | 7 | 67 · inventory | SQL migration 0010. Review milligram ledger, exact-once replay, linked corrections, archival, concurrent writes and archive recovery. |
-| 8 | 68 · estimates | Finish reviewed estimate-to-planned conversion with replay protection and preserved assumptions. Strengthen malformed/oversized/missing-metadata tests. |
-| 9 | 69 · export | Complete explicit recorded overrides and original price provenance, versioned schema examples and atomic project isolation tests. |
+| 8 | 68 · estimates | Complete in verified v0.8.0: signed reviewed plans and atomic SQL fixes validated in fixtures; production stateless previews and unchanged history verified. |
+| 9 | 69 · export | Complete in verified v0.8.0: consistent private production export verified against SQL membership/costs/provenance without mutation. |
 | 10 | 70 · reports | Complete date/printer filters, known material/time costs, unavailable measurements and monthly comparisons across SQL/CSV/dual. |
 | 11 | 64 · demo | Finish isolated TLS/proxy tests, fail-closed host/auth/egress boundaries, expiration and interrupted-workspace recovery. Public exposure requires an approved target and security configuration. |
 
