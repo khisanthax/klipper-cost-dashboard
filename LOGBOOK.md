@@ -20,6 +20,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Completion-program inventory and execution plan
+
+- **Status.** Rechecked GitHub and production. Main is `7892765`. PRs 58 and 61–70 remain open and no newer release exists. The required review is still pending.
+- **Production.** Read-only image inspection confirmed v0.7.3 index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. All five SQL health checks passed with schema 0008, 1,047 jobs and four printers.
+- **Plan.** Added [dependency-aware completion and release steps](docs/completion-program.md). Parallel scoped reviews cover the existing feature branches. Updated the current Personal-mode requirement to include Projects. Recovered permanent AGENTS handoff instructions from PR 58.
+- **Review gate.** Main requires an eligible non-author approval, including latest-push approval. The current collaborator inventory lists only the author. An eligible external reviewer is needed for main merges and release. Public demo exposure additionally needs an explicitly approved target and security configuration.
+- **Next.** Complete independent branch fixes, validate each, preserve SV07's existing recovery, supersede stale PR 58 with a linked current handoff and publish test/review results. No production deployment is claimed for these candidates.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.
