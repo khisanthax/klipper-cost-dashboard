@@ -1,4 +1,9 @@
 from io import BytesIO
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -48,3 +53,86 @@ class EstimateTests(unittest.TestCase):
                 estimate_print({**fields, **extra})
         with self.assertRaises(ValueError):
             estimate_print(fields, FileStorage(BytesIO(b";TIME:1"), filename="archive.zip"))
+
+    def test_days_and_spool_prices_are_explicit(self):
+        metadata = extract_gcode_metadata_stream(BytesIO(b"; estimated printing time = 1d 2h 3m 4s\n"))
+        self.assertEqual(metadata.time_s, 93784)
+        self.assertFalse(extract_gcode_metadata_stream(BytesIO(b"; estimated printing time = -3m\n")).found)
+        result = estimate_print({
+            "duration_seconds": 60, "filament_grams": 20, "hourly_rate": 0,
+            "pricing_mode": "spool", "pricing_amount": 15, "net_spool_grams": 500,
+        })
+        self.assertEqual(result["total_cost"], 0.6)
+        self.assertEqual(result["pricing_source"]["net_spool_grams"], "500")
+
+    def test_ambiguous_metadata_is_not_a_partial_measurement(self):
+        for line in (b"; filament used [g] = 12, 34", b"; filament used [g] = 12oops", b"; filament used [mm] = 10, 20"):
+            result = extract_gcode_metadata_stream(BytesIO(b";TIME:60\n" + line))
+            self.assertIsNone(result.filament_g)
+            self.assertIsNone(result.filament_mm)
+        self.assertFalse(extract_gcode_metadata_stream(BytesIO(b"; print time: 01:99:00")).found)
+
+    def test_reviewed_plan_is_atomic_replay_safe_and_preserves_history(self):
+        source = """
+import json, time
+from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
+from core import db, projects
+from core.registration import register_printer
+register_printer('Fixture','http://127.0.0.1:1')
+project=projects.create_project('Estimate destination')
+other=projects.create_project('Other')
+import app
+client=app.app.test_client()
+preview=client.post('/api/estimates',json={
+    'duration_seconds':1800,'filament_grams':20,'hourly_rate':0,
+    'pricing_mode':'spool','pricing_amount':15,'net_spool_grams':1000,
+}).get_json()
+assert preview['total_cost']==0.3
+payload={'review_token':preview['review_token'],'project_id':project.id,'title':'Reviewed part'}
+assert client.post('/estimates/plan',data=payload).status_code==200
+assert client.post('/estimates/plan',data=payload).status_code==200
+assert client.post('/estimates/plan',data={**payload,'project_id':other.id}).status_code==409
+assert client.post('/estimates/plan',data={**payload,'review_token':'tampered'}).status_code==409
+with patch('itsdangerous.timed.TimestampSigner.get_timestamp',return_value=int(time.time())-901):
+    expired=client.post('/api/estimates',json={'duration_seconds':60,'filament_grams':1,'hourly_rate':0,'filament_price_per_kg':15}).get_json()
+assert client.post('/estimates/plan',data={**payload,'review_token':expired['review_token']}).status_code==409
+retry=client.post('/api/estimates',json={'duration_seconds':60,'filament_grams':1,'hourly_rate':0,'filament_price_per_kg':15}).get_json()
+with closing(db.connect_db()) as conn, conn:
+    conn.execute("CREATE TRIGGER reject_plan BEFORE INSERT ON planned_items BEGIN SELECT RAISE(ABORT,'test write failure'); END")
+assert client.post('/estimates/plan',data={**payload,'review_token':retry['review_token']}).status_code==503
+with closing(db.connect_db()) as conn, conn:
+    assert conn.execute('SELECT count(*) FROM planned_items').fetchone()[0]==1
+    conn.execute('DROP TRIGGER reject_plan')
+missing=client.post('/api/estimates',json={
+    'duration_seconds':60,'hourly_rate':0,'filament_price_per_kg':15,
+}).get_json()
+assert missing['review_token'] is None
+with closing(db.connect_db()) as conn:
+    row=conn.execute('SELECT * FROM planned_items').fetchone()
+    assert row['est_cost']==0.3 and row['est_cost_is_override']==1 and row['est_filament_g']==20
+    assert json.loads(row['notes'])['estimate']['hourly_rate']==0
+    assert conn.execute('SELECT count(*) FROM jobs').fetchone()[0]==0
+def save(_):
+    return projects.create_plan_item(project.id,'Concurrent',60,1,est_cost_override=0.1,plan_id='concurrent')
+with ThreadPoolExecutor(max_workers=4) as pool:
+    assert len(list(pool.map(save,range(8))))==8
+with closing(db.connect_db()) as conn:
+    assert conn.execute('SELECT count(*) FROM planned_items').fetchone()[0]==2
+rounded=client.post('/api/estimates',json={'duration_seconds':3600,'filament_grams':1,'hourly_rate':0.005,'filament_price_per_kg':5}).get_json()
+assert rounded['display_total']=='0.02' and rounded['total_cost']==0.01
+assert client.post('/estimates/plan',data={**payload,'review_token':rounded['review_token'],'title':'Reviewed rounding'}).status_code==200
+with closing(db.connect_db()) as conn:
+    assert conn.execute("SELECT est_cost FROM planned_items WHERE filename='Reviewed rounding'").fetchone()[0]==0.02
+assert client.post('/api/estimates',data='x'*17000,content_type='application/json').status_code==413
+assert client.post('/api/estimates',json=['invalid']).status_code==400
+from io import BytesIO
+assert client.post('/estimates',data={'gcode':(BytesIO(b'x'*(16*1024*1024)),'large.gcode')}).status_code==413
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(
+                [sys.executable, "-c", source], check=True, timeout=90,
+                cwd=Path(__file__).resolve().parents[1],
+                env={**os.environ, "KCD_DATA_DIR": tmp, "KCD_STORAGE_BACKEND": "sql", "KCD_API_KEY": "estimate-test-key"},
+            )

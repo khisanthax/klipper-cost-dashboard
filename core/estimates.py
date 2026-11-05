@@ -7,9 +7,14 @@ from .projects import compute_planned_item_cost_components_from_pricing
 
 
 def estimate_print(values, upload=None):
-    for field in ("duration_seconds", "filament_grams", "hourly_rate", "filament_price_per_kg", "grams_per_meter"):
+    for field in (
+        "duration_seconds", "filament_grams", "hourly_rate", "filament_price_per_kg",
+        "grams_per_meter", "pricing_amount", "net_spool_grams", "density_g_cm3", "diameter_mm",
+    ):
         if isinstance(values.get(field), bool):
             raise ValueError("Measurements and rates must be numeric values.")
+        if len(str(values.get(field, ""))) > 64:
+            raise ValueError("A numeric estimate input is too long.")
     metadata = None
     if upload is not None and upload.filename:
         if not upload.filename.lower().endswith(".gcode"):
@@ -25,13 +30,15 @@ def estimate_print(values, upload=None):
     if grams is None and metadata and metadata.filament_g is not None:
         grams, weight_source = metadata.filament_g, "Slicer grams"
     rate = finite_float(values.get("hourly_rate"), label="Machine price per hour", nonnegative=True)
-    per_kg, profile = project_price_from_form({
+    pricing = dict(values)
+    pricing.update({
         "project_filament_profile_id": values.get("filament_profile_id"),
-        "pricing_amount": values.get("filament_price_per_kg"),
-        "pricing_mode": "per_kg",
     })
+    if not str(values.get("pricing_amount", "")).strip():
+        pricing.update(pricing_amount=values.get("filament_price_per_kg"), pricing_mode="per_kg")
+    per_kg, profile = project_price_from_form(pricing)
     if per_kg is None:
-        raise ValueError("Select a material profile or enter its price per kilogram.")
+        raise ValueError("Select a material profile or enter an explicit filament price.")
     per_kg = finite_float(per_kg, label="Filament price per kilogram", nonnegative=True)
     factor = optional_finite_float(values.get("grams_per_meter"), label="Grams per meter", positive=True)
     if factor is None and profile:
@@ -51,6 +58,7 @@ def estimate_print(values, upload=None):
     return {
         **costs, "duration_seconds": duration, "filament_grams": grams, "weight_source": weight_source,
         "filament_price_per_kg": per_kg, "hourly_rate": rate,
+        "grams_per_meter": factor, "pricing_source": profile,
         "slicer": metadata.slicer if metadata else None, "kind": "estimate",
         "display_time": str(displayed_time),
         "display_material": str(displayed_material) if displayed_material is not None else None,

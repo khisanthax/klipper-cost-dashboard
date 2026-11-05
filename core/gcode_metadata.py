@@ -28,11 +28,11 @@ _TIME_SECONDS_PATTERNS = [
 
 _FILAMENT_G_PATTERNS = [
     # Prusa/Orca: ; filament used [g] = 12.34
-    re.compile(r"filament\s+used\s*\[\s*g\s*\]\s*=\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"filament\s+used\s*\[\s*g\s*\]\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE),
     # Generic: ; Filament used: 12.34 g
-    re.compile(r"filament\s+used\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)\s*g\b", re.IGNORECASE),
+    re.compile(r"filament\s+used\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)\s*g\s*$", re.IGNORECASE),
     # Generic: ; Filament (g): 12.34
-    re.compile(r"filament\s*\(\s*g\s*\)\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"filament\s*\(\s*g\s*\)\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE),
 ]
 _FILAMENT_MM_PATTERN = re.compile(
     r"filament\s+used\s*\[\s*mm\s*\]\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.IGNORECASE,
@@ -59,24 +59,17 @@ def _parse_hms(text: str) -> Optional[int]:
     m = re.match(r"^\s*(\d{1,3})\s*:\s*(\d{2})\s*:\s*(\d{2})\s*$", s)
     if m:
         h, mm, ss = m.groups()
+        if int(mm) >= 60 or int(ss) >= 60:
+            return None
         return int(h) * 3600 + int(mm) * 60 + int(ss)
 
-    # Units form.
-    hours = 0
-    minutes = 0
-    seconds = 0
-    mh = re.search(r"(\d+)\s*h", s, re.IGNORECASE)
-    if mh:
-        hours = int(mh.group(1))
-    mm = re.search(r"(\d+)\s*m", s, re.IGNORECASE)
-    if mm:
-        minutes = int(mm.group(1))
-    ms = re.search(r"(\d+)\s*s", s, re.IGNORECASE)
-    if ms:
-        seconds = int(ms.group(1))
-
-    if hours or minutes or seconds:
-        return hours * 3600 + minutes * 60 + seconds
+    units = re.fullmatch(
+        r"\s*(?:(\d+)\s*d\s*)?(?:(\d+)\s*h\s*)?(?:(\d+)\s*m\s*)?(?:(\d+)\s*s\s*)?",
+        s, re.IGNORECASE,
+    )
+    if units and any(value is not None for value in units.groups()):
+        days, hours, minutes, seconds = (int(value or 0) for value in units.groups())
+        return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
     return None
 

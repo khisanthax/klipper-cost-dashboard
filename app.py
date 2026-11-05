@@ -1633,26 +1633,69 @@ def index():
 @app.post("/api/estimates")
 def estimate_page():
     from core.estimates import estimate_print
+    from itsdangerous import URLSafeTimedSerializer
 
     api = request.path == "/api/estimates"
-    request.max_content_length = 16 * 1024 * 1024
+    request.max_content_length = 16 * 1024 * 1024 if request.mimetype == "multipart/form-data" else 16 * 1024
     result, error, values = None, None, {}
+    review_token = None
     if request.method == "POST":
         try:
             values = request.get_json(silent=True) if request.is_json else request.form
             if not isinstance(values, dict) and not hasattr(values, "get"):
                 raise ValueError("Expected an estimate input object.")
             result = estimate_print(values, request.files.get("gcode"))
+            if result["total_cost"] is not None and _is_sql_only():
+                review_token = URLSafeTimedSerializer(API_KEY, salt="kcd-planned-estimate").dumps({
+                    "estimate": result, "plan_id": uuid.uuid4().hex,
+                })
         except ValueError as exc:
             error = str(exc)
             if not hasattr(values, "get"):
                 values = {}
     if api:
-        return (jsonify(error=error), 400) if error else jsonify(result)
+        return (jsonify(error=error), 400) if error else jsonify(**result, review_token=review_token)
     from core.profiles import get_all_profiles
     return render_template(
         "estimates.html", result=result, error=error, values=values, profiles=get_all_profiles(),
+        review_token=review_token, project_candidates=projects.load_projects() if _is_sql_only() else {},
     ), 400 if error else 200
+
+
+@app.post("/estimates/plan")
+def save_estimate_plan():
+    from itsdangerous import BadSignature, URLSafeTimedSerializer
+    import sqlite3
+
+    if not _is_sql_only():
+        return jsonify(error="Reviewed estimate promotion requires SQL-only storage"), 409
+    request.max_content_length = 16 * 1024
+    try:
+        reviewed = URLSafeTimedSerializer(API_KEY, salt="kcd-planned-estimate").loads(
+            request.form.get("review_token", ""), max_age=900,
+        )
+        estimate = reviewed["estimate"]
+        title = request.form.get("title", "").strip()
+        if not title or len(title) > 200:
+            raise ValueError("Enter a planned-item title of at most 200 characters")
+        import math
+        item = projects.create_plan_item(
+            request.form.get("project_id", ""), title, math.ceil(estimate["duration_seconds"]),
+            estimate["filament_grams"], source="reviewed_estimate",
+            notes=json.dumps({"estimate": estimate}, sort_keys=True),
+            est_cost_override=float(estimate["display_total"]), plan_id=reviewed["plan_id"],
+        )
+    except BadSignature:
+        return jsonify(error="The estimate review is invalid or expired. Calculate a fresh estimate."), 409
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409
+    except sqlite3.DatabaseError:
+        return jsonify(error="The planned item could not be saved. Check database health, then retry this review."), 503
+    from core.profiles import get_all_profiles
+    return render_template(
+        "estimates.html", result=estimate, values={}, error=None,
+        profiles=get_all_profiles(), saved_plan=item.plan_id,
+    )
 
 
 @app.route("/reports")

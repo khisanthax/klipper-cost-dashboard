@@ -20,6 +20,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Reviewed estimates and concurrent project mutation repair
+
+- **Status.** Completed the existing [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) implementation on `codex/slicer-estimates`; not merged, released or deployed.
+- **Changes.** Added primary spool-price/net-weight inputs and explicit units. Complete SQL previews can become planned items through a signed, 15-minute review with replay protection. The saved override equals the displayed component sum, including half-cent rounding; raw assumptions remain in notes. Missing weight remains unknown. Bounded parsing now handles multi-day durations and rejects ambiguous partial measurements. Failed inserts roll back with a retryable error.
+- **Confirmed concurrency repair.** Real overlapping edits could erase newly created plans or converted manual work because SQL CRUD rewrote entire tables from stale snapshots. Plan/manual mutations now target individual rows; conversion commits the manual row and plan marker atomically. SQL cleanup no longer treats inconsistent read snapshots as deletion evidence. Compatibility behavior is retained.
+- **Verification.** Seven estimate, five real-SQL concurrency/rollback and nineteen component tests passed; SQL-only isolation passed. The local real Chromium estimate/save/replay workflow passed before the final concurrency change. CI now also covers the estimate route in all six layouts and captures desktop/tablet/mobile/200% CSS-zoom reviewed previews. Full final-head validation remains required.
+- **Production / next.** No production changes. Complete final CI and required non-author review, then integrate incrementally through the established release process. The unavailable eligible reviewer currently blocks main merging and deployment.
+
 ### 2026-11-04 — Slicer estimate candidate
 
 - **Status.** Implemented the independent Milestone H what-if slice in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68). Production remains at the verified v0.7.3 baseline.
