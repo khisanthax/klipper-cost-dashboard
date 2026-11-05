@@ -329,9 +329,12 @@ def consume_rate(
     if session is None:
         forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
         identity = forwarded if trusted_proxy(request, config) and forwarded else request.remote_addr or "unknown"
-        limit = config.rate_invalid_session_limit
-        window = config.rate_invalid_session_window_seconds
-        category = "invalid_session"
+        if category == "lifecycle":
+            limit, window = config.rate_lifecycle_limit, config.rate_lifecycle_window_seconds
+        else:
+            limit = config.rate_invalid_session_limit
+            window = config.rate_invalid_session_window_seconds
+            category = "invalid_session"
     else:
         identity = session.record.workspace_id
         if category == "lifecycle":
