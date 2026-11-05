@@ -926,7 +926,11 @@ def job_start():
     
     profile_id = data.get("profile_id")
     
-    live.start_job(printer_name, filename, start_time, estimated_duration, estimated_filament, profile_id)
+    attempt_token = str(data.get("attempt_token") or "").strip()
+    if len(attempt_token) > 128:
+        return jsonify({"success": False, "error": "attempt_token exceeds 128 characters"}), 400
+    live.start_job(printer_name, filename, start_time, estimated_duration, estimated_filament, profile_id,
+                   attempt_token=attempt_token)
     try:
         asset,_status,_modified=archived_thumbs.fetch_image(printer_name,filename)
         if asset:
@@ -1106,6 +1110,12 @@ def job_cancel():
     filename_raw = data.get("filename")
     reason = data.get("reason")  # Optional failure/cancel reason
     elapsed_raw = data.get("elapsed_seconds")
+    filament_mm = None
+    if data.get("filament_mm") not in (None, ""):
+        try:
+            filament_mm = finite_float(data["filament_mm"], label="filament_mm", nonnegative=True)
+        except NumericValidationError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
     
     canonical = get_canonical_printer_names()
     norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
@@ -1130,10 +1140,24 @@ def job_cancel():
         except NumericValidationError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
 
-    # Prefer the currently active job for this printer (more reliable than inbound payload).
     active_before = live.get_job(printer_name)
-    if active_before and not filename:
-        filename = str(active_before.get("filename") or "").strip()
+    event_time = data.get("event_time")
+    if event_time is not None:
+        try:
+            event_time = finite_float(event_time, label="event_time", nonnegative=True)
+        except NumericValidationError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+    if active_before:
+        active_filename = str(active_before.get("filename") or "").strip()
+        attempt_token = str(data.get("attempt_token") or "").strip()
+        if (filename and filename != active_filename) or (
+            (attempt_token or active_before.get("attempt_token"))
+            and attempt_token != active_before.get("attempt_token")
+        ) or (
+            event_time is not None and event_time < active_before["start_time"]
+        ):
+            return jsonify({"success": True, "job": None, "history": "stale_cancel"}), 200
+        filename = active_filename
 
     # Mark canceled in live state (this also removes it from active jobs).
     live_result = live.cancel_job(printer_name, reason, remove=False)
@@ -1189,7 +1213,6 @@ def job_cancel():
 
     # Record a canceled job in history so it appears in Print History.
     ts = time.time()
-    filament_mm = 0.0
     try:
         paused_seconds_total = float(live_result.get("total_paused_duration") or 0.0)
     except Exception:
@@ -1210,15 +1233,19 @@ def job_cancel():
     cost_data = compute_costs(
         printer_name,
         float(duration_seconds_total),
-        filament_mm,
+        filament_mm if filament_mm is not None else 0.0,
         paused_seconds_total=paused_seconds_total,
     )
+    if filament_mm is None:
+        cost_data.update(material_cost=None, total_cost=None, filament_meters=None,
+                         filament_grams=None, filament_weight_kind="unknown")
 
     row = {
         "timestamp": ts,
         "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
+        "started_at": active_before.get("start_time") if active_before else None,
         "duration_seconds": float(duration_seconds_total),
         "paused_seconds_total": paused_seconds_total,
         "pause_count": pause_count,
@@ -1229,7 +1256,21 @@ def job_cancel():
     row["status"] = "canceled"
     row["failure_reason"] = str(reason or "").strip()
     row["thumbnail_asset"]=live_result.get("thumbnail_asset")
-    storage_backend.write_job(row)
+    audit = {"printer": printer_name, "job_uid": row["job_uid"], "before": active_before,
+             "after": {"status": "canceled", "duration_seconds": duration_seconds_total,
+                       "filament_mm": filament_mm, "time_cost": row.get("time_cost"),
+                       "material_cost": row.get("material_cost"), "total_cost": row.get("total_cost")}}
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            storage_backend.write_job(row, connection=conn)
+            live.end_job(printer_name, connection=conn)
+            system_events.emit_event("activity", "Print canceled", "Saved cancellation and cleared live tracking.",
+                                     meta=audit, connection=conn)
+    else:
+        storage_backend.write_job(row)
+        live.end_job(printer_name)
+        system_events.emit_event("activity", "Print canceled", "Saved cancellation and cleared live tracking.", meta=audit)
     try:
         archived_thumbs.capture_job(row['job_uid'],printer_name,filename,
             live_asset=live_result.get('thumbnail_asset'),ended_at=ts)
@@ -1242,8 +1283,6 @@ def job_cancel():
         filename,
         elapsed_seconds,
     )
-
-    live.end_job(printer_name)
 
     return jsonify({"success": True, "job": live_result, "history_job_uid": row["job_uid"]})
 
@@ -1626,6 +1665,75 @@ def index():
       history_source="SQL" if _is_sql_only() else "CSV",
         active_jobs=active_jobs,
         printer_summaries=printer_summaries,
+    )
+
+
+@app.route("/estimates", methods=["GET", "POST"])
+@app.post("/api/estimates")
+def estimate_page():
+    from core.estimates import estimate_print
+    from itsdangerous import URLSafeTimedSerializer
+
+    api = request.path == "/api/estimates"
+    request.max_content_length = 16 * 1024 * 1024 if request.mimetype == "multipart/form-data" else 16 * 1024
+    result, error, values = None, None, {}
+    review_token = None
+    if request.method == "POST":
+        try:
+            values = request.get_json(silent=True) if request.is_json else request.form
+            if not isinstance(values, dict) and not hasattr(values, "get"):
+                raise ValueError("Expected an estimate input object.")
+            result = estimate_print(values, request.files.get("gcode"))
+            if result["total_cost"] is not None and _is_sql_only():
+                review_token = URLSafeTimedSerializer(API_KEY, salt="kcd-planned-estimate").dumps({
+                    "estimate": result, "plan_id": uuid.uuid4().hex,
+                })
+        except ValueError as exc:
+            error = str(exc)
+            if not hasattr(values, "get"):
+                values = {}
+    if api:
+        return (jsonify(error=error), 400) if error else jsonify(**result, review_token=review_token)
+    from core.profiles import get_all_profiles
+    return render_template(
+        "estimates.html", result=result, error=error, values=values, profiles=get_all_profiles(),
+        review_token=review_token, project_candidates=projects.load_projects() if _is_sql_only() else {},
+    ), 400 if error else 200
+
+
+@app.post("/estimates/plan")
+def save_estimate_plan():
+    from itsdangerous import BadSignature, URLSafeTimedSerializer
+    import sqlite3
+
+    if not _is_sql_only():
+        return jsonify(error="Reviewed estimate promotion requires SQL-only storage"), 409
+    request.max_content_length = 16 * 1024
+    try:
+        reviewed = URLSafeTimedSerializer(API_KEY, salt="kcd-planned-estimate").loads(
+            request.form.get("review_token", ""), max_age=900,
+        )
+        estimate = reviewed["estimate"]
+        title = request.form.get("title", "").strip()
+        if not title or len(title) > 200:
+            raise ValueError("Enter a planned-item title of at most 200 characters")
+        import math
+        item = projects.create_plan_item(
+            request.form.get("project_id", ""), title, math.ceil(estimate["duration_seconds"]),
+            estimate["filament_grams"], source="reviewed_estimate",
+            notes=json.dumps({"estimate": estimate}, sort_keys=True),
+            est_cost_override=float(estimate["display_total"]), plan_id=reviewed["plan_id"],
+        )
+    except BadSignature:
+        return jsonify(error="The estimate review is invalid or expired. Calculate a fresh estimate."), 409
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409
+    except sqlite3.DatabaseError:
+        return jsonify(error="The planned item could not be saved. Check database health, then retry this review."), 503
+    from core.profiles import get_all_profiles
+    return render_template(
+        "estimates.html", result=estimate, values={}, error=None,
+        profiles=get_all_profiles(), saved_plan=item.plan_id,
     )
 
 
