@@ -483,6 +483,11 @@ def compute_job_cost_fields(row: dict) -> dict:
         if row.get('filament_meters') in (None,''):row['filament_meters']=filament_mm/1000
         return row
 
+    if row.get("failure_reason") == "Recovered from Moonraker cancellation history. Historical pricing unavailable.":
+        return row
+    if row.get("status") == "canceled" and row.get("filament_mm") in (None, ""):
+        return row
+
     filament_profile_id = str(row.get("filament_profile_id") or "").strip() or None
     rate_profile_id = str(row.get("hourly_rate_profile_id") or "").strip() or None
 
