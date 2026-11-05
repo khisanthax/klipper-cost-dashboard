@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.4 - 2026-11-05
+
+- Correct Klipper argument delivery and targeted managed cancel payloads, preserving custom macros and legacy client compatibility.
+- Preserve measured cancel consumption, unknown/unpriced history, per-attempt identity and atomic SQL history/live/audit rollback; reject delayed mismatched attempts.
+- Show the two previously recovered SV07 rows as Canceled and Unpriced without replaying recovery or recalculating historical prices.
+- Adopt the owner-authorized solo-maintainer policy: required PRs, strict Release Validation/Python checks and resolved threads with zero human approvals; no administrator bypass.
+- Gate upgrades/rollbacks on nonempty projects/profiles/assignments/manual/planned/original-pricing data, exact schema/object preservation and optional new-feature records.
+- [Verified production deployment and rollback evidence](docs/v0.7.4-deployment-2026-11-05.md).
+
 ## v0.7.3 - 2026-11-03
 
 - Add bounded current Moonraker observations, loaded client identity checks and stale-event warnings without modifying retained jobs; update live estimates without reloading forms.

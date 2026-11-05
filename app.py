@@ -19,7 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import flask
 from importlib.metadata import version
-from flask import Flask, request, jsonify, render_template, redirect, url_for, send_file
+from flask import Flask, abort, request, jsonify, render_template, redirect, url_for, send_file
 from werkzeug.utils import secure_filename
 from core.config import (
     API_KEY, CSV_FILE, HEADERS, FRIENDLY_HEADERS, PRINTER_COLORS,
@@ -1351,18 +1351,72 @@ def printer_status():
         if stored and (not item['connected'] or item['state'] not in ('printing','paused') or item.get('filename')!=stored.get('filename')):
             item['tracking_warning']='Stored job differs from current Moonraker state. Review tracking; no job was automatically cleared or finalized.'
         if item['connected'] and item['state'] in ('printing','paused'):
+            item.update(grams=None, time_cost=None, material_cost=None, total_cost=None)
             try:
                 cfg=pricing._get_effective_filament_pricing(name)
-                measure=conversion({'filament_mm':item['filament_mm'],'grams_per_meter':cfg['grams_per_meter']})
                 seconds=item['total_seconds'] if pricing._include_paused_time_for_printer(name) else item['print_seconds']
-                item['grams']=float(measure['grams'])
-                item['time_cost']=pricing.compute_live_time_cost(name,seconds)
-                item['material_cost']=float(material_cost(measure,price_spec(cfg['filament_mode'],cfg['filament_rate'])))
-                item['total_cost']=item['time_cost']+item['material_cost']
-                item['conversion_source']=str(cfg['grams_per_meter'])+' g/m; current printer pricing'
+                if seconds is not None:
+                    item['time_cost']=pricing.compute_live_time_cost(name,seconds)
+                if item['filament_mm'] is not None:
+                    measure=conversion({'filament_mm':item['filament_mm'],'grams_per_meter':cfg['grams_per_meter']})
+                    item['grams']=float(measure['grams'])
+                    item['material_cost']=float(material_cost(measure,price_spec(cfg['filament_mode'],cfg['filament_rate'])))
+                    item['conversion_source']=str(cfg['grams_per_meter'])+' g/m; current printer pricing'
+                if item['time_cost'] is not None and item['material_cost'] is not None:
+                    item['total_cost']=item['time_cost']+item['material_cost']
+                else:
+                    item['pricing_error']='Live estimate incomplete; Moonraker measurements are unavailable'
             except (ValueError,RuntimeError,TypeError):
                 item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
     return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}
+
+
+@app.get("/printers/<path:printer_name>")
+def printer_detail(printer_name):
+    from core import printer_reports
+
+    if printer_name not in get_canonical_printer_names():
+        abort(404)
+    now = datetime.now(TIMEZONE_OBJ)
+    start_value = request.args.get("start", "")
+    end_value = request.args.get("end", "")
+    compare = request.args.get("compare") == "1"
+    view = dict(printer_name=printer_name, start_value=start_value, end_value=end_value, compare=compare)
+    try:
+        period, previous = printer_reports.report_periods(start_value, end_value, now)
+    except ValueError as exc:
+        return render_template("printer_detail.html", error=str(exc), **view), 400
+    start, end = period
+    filters = dict(printer=printer_name, end_exclusive=True, recorded_costs_only=True)
+    history = history_repo.list_history_rows(
+        history_repo.HistoryQuery(start_dt=start, end_dt=end, **filters),
+        page=request.args.get("page", 1), per_page=25,
+    )
+    view.update(
+        start_value=start.date().isoformat(),
+        end_value=(end.date() - timedelta(days=1)).isoformat(),
+        summary=printer_reports.summarize(history.rows_all, period, now),
+        rows=[printer_reports.display_job(row) for row in history.rows_page],
+        error=history.error,
+        backend=history.backend,
+    )
+    view["pager"] = _pager_links(
+        "printer_detail",
+        dict(printer_name=printer_name, start=view["start_value"], end=view["end_value"], compare="1" if compare else "0"),
+        "page", "per_page", history.pager,
+    )
+    if compare:
+        prior = history_repo.list_history_rows(
+            history_repo.HistoryQuery(start_dt=previous[0], end_dt=previous[1], **filters),
+            page=1, per_page=1,
+        )
+        view.update(
+            prior=printer_reports.summarize(prior.rows_all, previous, now),
+            prior_start=previous[0].date(),
+            prior_end=previous[1].date() - timedelta(days=1),
+            comparison_error=prior.error,
+        )
+    return render_template("printer_detail.html", **view)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -2678,6 +2732,23 @@ def project_pricing_page(project_uid):
     return render_template('project_pricing.html',plan=plan,error=error),409 if error else 200
 
 
+@app.get("/projects/<project_uid>/export.json")
+def export_project(project_uid):
+    if not _is_sql_only():
+        return jsonify(error="Project export requires SQL-only storage"), 404
+    from core.project_export import project_document
+
+    with closing(db_module.connect_db()) as connection:
+        connection.execute("BEGIN")
+        document = project_document(connection, project_uid)
+    if document is None:
+        return jsonify(error="Project not found"), 404
+    response = jsonify(document)
+    response.headers["Content-Disposition"] = 'attachment; filename="kcd-project.json"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/projects", methods=["GET", "POST"])
 def projects_page():
     """
@@ -3242,6 +3313,7 @@ def projects_page():
         "projects.html",
         error=error,
         message=message,
+        project_export_enabled=_is_sql_only(),
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
         display_settings=display_settings,
