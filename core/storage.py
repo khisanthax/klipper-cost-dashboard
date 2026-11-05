@@ -68,17 +68,12 @@ def _save_user_settings_sql(key: str, value) -> None:
             db_module.apply_migrations(conn)
             now = datetime.now(timezone.utc).isoformat()
             raw = json.dumps(value, indent=2)
-            row = conn.execute("SELECT 1 FROM user_settings WHERE key = ?", (key,)).fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE user_settings SET value_json = ?, updated_at = ? WHERE key = ?",
-                    (raw, now, key),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)",
-                    (key, raw, now),
-                )
+            conn.execute(
+                """INSERT INTO user_settings (key, value_json, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
+                   updated_at = excluded.updated_at""",
+                (key, raw, now),
+            )
             conn.commit()
     except Exception:
         logger.exception("Failed to persist SQL user setting %s", key)
