@@ -25,6 +25,26 @@ def exercise(page,context,base,project,data,artifacts):
         if not panel.is_visible():page.locator('[data-bs-target="#proj-'+uid+'"]').click()
         panel.wait_for(state='visible')
         return panel
+    # Change the global mode from each major viewport and verify the same SQL history.
+    original_mode_jobs = query("SELECT * FROM jobs ORDER BY job_uid")
+    for width, mode in ((390, "personal"), (768, "business"), (1440, "advanced")):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.goto(base + "/settings/other")
+        selector = page.get_by_label("Mode", exact=True)
+        if width == 390:
+            selector.focus()
+            page.keyboard.press("Home")
+            assert selector.input_value() == mode
+        else:
+            selector.select_option(mode)
+        click(page.get_by_role("button", name="Save Application Mode"))
+        assert selector.input_value() == mode
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        page.goto(base + "/")
+        assert page.get_by_role("navigation", name="Primary navigation").get_by_role("link", name="Projects").count() == 1
+        assert query("SELECT * FROM jobs ORDER BY job_uid") == original_mode_jobs
+        if mode == "personal":
+            assert page.goto(base + "/projects?edit_project=" + project).ok
     # Read-only current observations must not modify persisted event state.
     live_before=query("SELECT value_json FROM user_settings WHERE key='live_jobs'")
     response=context.request.get(base+'/api/printer-status');assert response.ok

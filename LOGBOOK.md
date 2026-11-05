@@ -38,6 +38,20 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
 - **Release.** Review, merge and deployment are pending.
 
+### 2026-11-05 — Personal mode includes Projects
+
+- **Status.** Updated the milestone D candidate in PR 65 for the owner's revised Personal mode requirement.
+- **Changes.** Projects remains in the ordinary navigation for Personal, Advanced and Business. Reports and Recalculate retain the existing Advanced and Business presentation rules. Settings and the mode guide describe the revised scope.
+- **Verification.** The cross-browser SQL regression and the desktop/tablet/mobile browser workflow require the Projects link in every mode while verifying preserved jobs and assignments. Required CI validates the candidate head.
+- **Release.** Review, merge and deployment are pending.
+
+### 2026-11-04 — Milestone D application modes
+
+- Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.
+- Switching preserves the existing SQL schema, printer identities, stored prices, history, projects, and assignments. Existing direct links continue working. SQL-only stores the choice in `user_settings`. CSV and dual store it in the backed-up data directory. The [operator guide](docs/application-modes.md) documents how to switch.
+- The two targeted Python tests passed with disposable data, including switches between all three modes across two clients, invalid input, compatibility persistence, SQL history and assignment equality, and filesystem isolation. The standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including phone keyboard, tablet, and desktop switches with equal SQL history after each.
+- [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) contains implementation commit `295698f`. Required CI, review, release, and deployment remain separate gates. Milestone E supplies order and profitability controls in Business mode.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.

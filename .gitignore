@@ -31,6 +31,7 @@ data/thumb_cache/
 data/settings.json
 data/print_costs.csv
 data/display.json
+data/application_mode.json
 data/install_state.json
 data/live_jobs.json
 data/_tmp_print_costs_from_sql.csv

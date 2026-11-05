@@ -1,3 +1,29 @@
+<div class="card mb-4">
+    <div class="card-header">
+        <h2 class="h5 mb-0">Application Mode</h2>
+    </div>
+    <div class="card-body">
+        <p id="application-mode-description">This setting applies to everyone who uses this KCD installation. Switch modes any time to change the menus and controls you see. Your print history, projects, prices, and settings are preserved.</p>
+        <ul>
+            <li><strong>Personal</strong> includes the dashboard, print history, Projects, basic costs, profiles, and everyday settings.</li>
+            <li><strong>Advanced</strong> also shows Projects, Reports, Recalculate, exports, and additional settings.</li>
+            <li><strong>Business</strong> keeps the Advanced workspace and prepares it for future order and profitability tools.</li>
+        </ul>
+        <form method="post" class="d-flex flex-wrap align-items-end gap-2">
+            <input type="hidden" name="action" value="update_application_mode">
+            <div>
+                <label for="application-mode" class="form-label">Mode</label>
+                <select id="application-mode" name="mode" class="form-select" aria-describedby="application-mode-description">
+                    {% for option in ('personal', 'advanced', 'business') %}
+                    <option value="{{ option }}" {% if option == application_mode %}selected{% endif %}>{{ option|title }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Application Mode</button>
+        </form>
+    </div>
+</div>
+
 <!-- Column Visibility -->
 <div class="card mb-4">
     <div class="card-header">
@@ -41,6 +67,7 @@
             <button type="submit" class="btn btn-primary">Save Print History Columns</button>
         </form>
 
+        {% if show_advanced %}
         <h3 class="h6 mb-2">Recalculate Center (Jobs table)</h3>
         <form method="post" class="mb-4">
             <input type="hidden" name="action" value="update_columns">
@@ -145,13 +172,14 @@
             </div>
             <button type="submit" class="btn btn-primary">Save Planned Item Columns</button>
         </form>
+        {% endif %}
     </div>
 </div>
 
 <!-- Backups & Export -->
 <div class="card mb-4">
     <div class="card-header">
-        <h2 class="h5 mb-0">Backups &amp; Export</h2>
+        <h2 class="h5 mb-0">Backups{% if show_advanced %} &amp; Export{% endif %}</h2>
     </div>
     <div class="card-body">
         <div class="text-muted small mb-3">
@@ -164,7 +192,9 @@
                 <input type="hidden" name="action" value="backup_now">
                 <button type="submit" class="btn btn-outline-primary">Backup now</button>
             </form>
+            {% if show_advanced %}
             <a href="{{ url_for('download_csv') }}" class="btn btn-outline-primary">Download CSV</a>
+            {% endif %}
         </div>
 
         <form method="post" class="row g-3 align-items-end">

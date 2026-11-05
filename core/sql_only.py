@@ -17,6 +17,7 @@ from typing import Optional
 FORBIDDEN_SQL_ONLY_RUNTIME_BASENAMES = frozenset(
     {
         "app_settings.json",
+        "application_mode.json",
         "display.json",
         "install_state.json",
         "live_jobs.json",
