@@ -81,6 +81,8 @@ register_printer('Fixture','http://127.0.0.1:1')
 project=projects.create_project('Download')
 projects.create_project('Private other project',notes='Unrelated private note')
 import app
+mode_context={'show_advanced':True}
+app.app.context_processor(lambda:mode_context)
 client=app.app.test_client()
 response=client.get('/projects/'+project.id+'/export.json')
 assert response.status_code==200
@@ -89,6 +91,9 @@ assert response.headers['Cache-Control']=='no-store'
 assert 'Unrelated private note' not in response.get_data(as_text=True)
 assert client.get('/projects/absent/export.json').status_code==404
 assert 'Download project JSON' in client.get('/projects').get_data(as_text=True)
+mode_context['show_advanced']=False
+assert 'Download project JSON' not in client.get('/projects').get_data(as_text=True)
+assert client.get('/projects/'+project.id+'/export.json').status_code==200
 """
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(

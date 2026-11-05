@@ -238,7 +238,7 @@
                                         </a>
 
                                         <a class="btn btn-outline-secondary" href="{{ url_for('recalculate_page',project=p.id) }}">Advanced Recalculate saved history…</a>
-                                        {% if project_export_enabled %}
+                                        {% if project_export_enabled and (show_advanced|default(true)) %}
                                         <a class="btn btn-outline-secondary" href="{{ url_for('export_project', project_uid=p.id) }}">Download project JSON</a>
                                         {% endif %}
                                         <div class="small text-muted w-100">{{ p.adjusted_jobs }} tracked job(s) use an explicitly applied project snapshot. Other tracked jobs use saved historical costs. Manual jobs use project defaults; planned items remain hypothetical.</div>
