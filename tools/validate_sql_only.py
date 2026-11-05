@@ -102,6 +102,7 @@ def _run_validation() -> int:
                 "/reports",
                 "/projects",
                 "/orders",
+                "/inventory",
                 "/settings/printers",
                 "/settings/other",
                 "/system-events",
