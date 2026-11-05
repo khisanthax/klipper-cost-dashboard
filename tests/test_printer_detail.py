@@ -50,6 +50,14 @@ class PrinterDetailTests(unittest.TestCase):
             self.assertNotIn(b"other-printer.gcode", result.data)
             self.assertEqual(client.get("/printers/Unknown").status_code, 404)
             self.assertEqual(client.get("/printers/Mercury%201?start=invalid").status_code, 400)
+            self.assertIn(b'href="/printers/Mercury%201"', client.get("/").data)
+            processors = app.app.template_context_processors[None]
+            with patch.dict(app.app.template_context_processors, {None: [*processors, lambda: {
+                "kcd_demo_mode": True, "demo_endpoint_available": lambda *_args: False,
+            }]}):
+                demo_html = client.get("/").data
+            self.assertNotIn(b'href="/printers/', demo_html)
+            self.assertIn(b"Mercury 1", demo_html)
 
     def test_calendar_utilization_handles_dst(self):
         from core.printer_reports import report_periods, summarize
