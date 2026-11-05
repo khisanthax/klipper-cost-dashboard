@@ -20,6 +20,12 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Atomic migration and ledger recovery before Orders release
+
+- **Confirmed defect.** Migration SQL used `executescript`, which implicitly committed DDL before inserting its ledger record. A failure between CREATE and the ledger write left unrecorded schema and could make the non-idempotent 0009 CREATE fail on restart.
+- **Repair.** The migration runner now executes complete SQLite statements inside one `BEGIN IMMEDIATE` transaction with the ledger insertion. It rechecks the version after obtaining the writer lock so concurrent initializers cannot apply the same migration twice. Any error rolls back the entire pending migration. Existing migration files/checksums are unchanged; already-applied versions are not rewritten. Caller-owned transactions are rejected explicitly rather than silently committed. An existing unrecorded table is not silently stamped as valid.
+- **Verification.** Five real-SQL tests passed: ledger-failure rollback/retry, multi-statement/trigger rollback, two concurrent fresh connections, caller-transaction preservation and unrecorded-schema rejection. Eight Orders tests and SQL-only filesystem isolation passed. Full exact-head CI, seeded business-data image upgrade/rollback and normal merge remain required. Production has not received 0009 and no live SQL was changed by this repair.
+
 ### 2026-11-05 — Orders retargeted after validated Modes merge
 
 - Modes PR 65 merged normally at `4cfa69c31f86049e9ab64cd596dfefa186b24e7e` after exact-head validation. Restacked Orders over that commit and retargeted PR 66 to main. Runtime source is unchanged from the prepared stack; required CI is rerun for this ancestry.

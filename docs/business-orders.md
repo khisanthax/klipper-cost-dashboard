@@ -1,5 +1,12 @@
 # Project-backed business orders
 
+The additive 0009 migration is committed together with its migration-ledger row.
+Concurrent startup rechecks the version under the SQLite writer lock; a failed
+migration rolls back and can be retried. Apply pending migrations outside any
+caller-owned transaction. If older interrupted tooling left an unrecorded Orders
+table, stop and inspect a consistent backup instead of deleting data or manually
+stamping the migration as successful.
+
 Orders use the same stable project identity as Projects, including legacy project identifiers. If an explicit project identity shadows an older numeric identifier, the older order remains listed with an identifier-conflict notice rather than linking to the other project. Resolve that identity conflict through a separately reviewed recovery operation; KCD does not reassign its history or prices automatically.
 
 On a SQL-only installation, select **Business** in **Settings → Other → Application Mode**. Open **Orders** from the main navigation or **Business orders** from Projects. Choose an existing project and save an order with a Draft, Active or Complete status.
