@@ -661,7 +661,11 @@
                                     {{ row.get(h, '')|upper }}
                                 </span>
                                  {% elif h == 'total_cost' or h == 'time_cost' or h == 'material_cost' %}
+                                 {% if row.get(h) in (none, '') and (row.get('failure_reason') == 'Recovered from Moonraker cancellation history. Historical pricing unavailable.' or (row.get('status') == 'canceled' and row.get('filament_mm') in (none, ''))) %}
+                                 <span class="text-muted">Unpriced</span>
+                                 {% else %}
                                  <span class="fw-semibold">${{ "%.2f"|format(row.get(h, 0)|float) }}</span>
+                                 {% endif %}
                                  {% elif h == 'duration_hours' %}
                                  {% set val = row.get(h) %}
                                  {% if val is none or val == '' %}

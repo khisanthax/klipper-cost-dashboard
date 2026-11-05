@@ -1,5 +1,7 @@
 # Project-backed business orders
 
+Orders use the same stable project identity as Projects, including legacy project identifiers. If an explicit project identity shadows an older numeric identifier, the older order remains listed with an identifier-conflict notice rather than linking to the other project. Resolve that identity conflict through a separately reviewed recovery operation; KCD does not reassign its history or prices automatically.
+
 On a SQL-only installation, select **Business** in **Settings → Other → Application Mode**. Open **Orders** from the main navigation or **Business orders** from Projects. Choose an existing project and save an order with a Draft, Active or Complete status.
 Customer name, description, notes, due date and priority are optional business
 context. Completing an order records its completion time. Reopening it clears

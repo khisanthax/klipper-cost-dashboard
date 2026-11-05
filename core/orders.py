@@ -61,20 +61,32 @@ def list_orders():
     with closing(db.connect_db()) as conn:
         db.apply_migrations(conn)
         return [dict(row) for row in conn.execute("""
-            SELECT p.project_uid, p.name, o.status, o.customer, o.priority, o.due_date, o.completed_at
+            SELECT COALESCE(NULLIF(p.project_uid,''),CAST(p.id AS TEXT)) AS project_uid,
+                   p.name, o.status, o.customer, o.priority, o.due_date, o.completed_at,
+                   ((p.project_uid IS NULL OR p.project_uid='') AND EXISTS(
+                       SELECT 1 FROM projects named WHERE named.project_uid=CAST(p.id AS TEXT)
+                   )) AS identity_conflict
             FROM business_orders o JOIN projects p ON p.id = o.project_id
             ORDER BY CASE o.status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
                      o.due_date IS NULL, o.due_date, p.name
         """)]
 
 
+def _project_id(conn, project_uid):
+    row = conn.execute(
+        """SELECT id FROM projects
+           WHERE COALESCE(NULLIF(project_uid,''),CAST(id AS TEXT))=?
+           ORDER BY CASE WHEN project_uid=? THEN 0 ELSE 1 END LIMIT 1""",
+        (project_uid, project_uid),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
 def get_order(project_uid):
     with closing(db.connect_db()) as conn:
         db.apply_migrations(conn)
-        row = conn.execute("""
-            SELECT o.* FROM business_orders o JOIN projects p ON p.id = o.project_id
-            WHERE p.project_uid = ?
-        """, (project_uid,)).fetchone()
+        row = conn.execute("SELECT * FROM business_orders WHERE project_id=?",
+                           (_project_id(conn, project_uid),)).fetchone()
     if row is None:
         return None
     result = dict(row)
@@ -90,10 +102,9 @@ def save_order(project_uid, form):
     with closing(db.connect_db()) as conn:
         db.apply_migrations(conn)
         conn.execute("BEGIN IMMEDIATE")
-        project = conn.execute("SELECT id FROM projects WHERE project_uid = ?", (project_uid,)).fetchone()
-        if project is None:
+        project_id = _project_id(conn, project_uid)
+        if project_id is None:
             raise ValueError("Project no longer exists.")
-        project_id = project["id"]
         current = conn.execute("SELECT * FROM business_orders WHERE project_id = ?", (project_id,)).fetchone()
         if (current["updated_at"] if current else "") != form.get("revision", ""):
             raise ValueError("This order changed. Reload the page before editing.")
@@ -126,8 +137,8 @@ def financial_view(project, order):
             FROM project_assignments a JOIN jobs j ON j.job_uid = a.job_uid
             JOIN projects p ON p.id = a.project_id
             LEFT JOIN project_job_pricing pp ON pp.project_id = a.project_id AND pp.job_uid = j.job_uid
-            WHERE p.project_uid = ? ORDER BY j.ended_at DESC, j.id DESC
-        """, (project.id,))]
+            WHERE a.project_id = ? ORDER BY j.ended_at DESC, j.id DESC
+        """, (_project_id(conn, project.id),))]
     actual = dict.fromkeys(COMPONENTS, Decimal(0))
     missing_totals = 0
     manual = projects.load_manual_jobs().get(project.id, [])

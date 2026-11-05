@@ -130,6 +130,38 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(response.status_code,500)
         self.assertIn("One",live._jobs)
 
+    def test_cancellation_audit_failure_rolls_back_history_and_live_state(self):
+        import app
+        from core import live
+        previous = live._jobs
+        self.addCleanup(setattr, live, "_jobs", previous)
+        live._jobs = {}
+        register_printer("One", "http://127.0.0.1:1")
+        live.start_job("One", "part.gcode", start_time=1234)
+        payload = {"printer_name": "One", "filename": "part.gcode", "elapsed_seconds": 20,
+                   "filament_mm": 454.66522}
+        with patch.object(app, "API_KEY", "test-secret"), patch.dict(app.app.config, {"PROPAGATE_EXCEPTIONS": False}):
+            client = app.app.test_client()
+            with patch.object(app.system_events, "emit_event", side_effect=RuntimeError("audit unavailable")):
+                response = client.post("/job-cancel", json=payload, headers={"X-API-Key": "test-secret"})
+            self.assertEqual(response.status_code, 500)
+            with db.connect_db() as conn:
+                self.assertEqual(conn.execute("SELECT count(*) FROM jobs").fetchone()[0], 0)
+            live._load_state()
+            self.assertEqual(live.get_job("One")["start_time"], 1234)
+            self.assertEqual(live.get_job("One")["status"], "printing")
+            with patch.object(app.archived_thumbs, "capture_job"):
+                first = client.post("/job-cancel", json=payload, headers={"X-API-Key": "test-secret"})
+                second = client.post("/job-cancel", json=payload, headers={"X-API-Key": "test-secret"})
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(second.get_json()["history"], "already_canceled")
+        with db.connect_db() as conn:
+            row = conn.execute("SELECT status,filament_mm FROM jobs").fetchone()
+            self.assertEqual(tuple(row), ("canceled", 454.66522))
+            self.assertEqual(conn.execute("SELECT count(*) FROM system_events WHERE title='Print canceled'").fetchone()[0], 1)
+        live._load_state()
+        self.assertIsNone(live.get_job("One"))
+
     def test_explicit_active_duration_does_not_subtract_pause_twice(self):
         import app
         from core import live
@@ -258,9 +290,50 @@ class DiscoveryTests(unittest.TestCase):
             (root/'print_cost.cfg').write_text(old)
             plan=client_plan(tmp,'One','http://master:6060','fake-key')
             after=plan[root/'print_cost.cfg'][0]
-            self.assertTrue(after.startswith(old))
+            self.assertIn('RESPOND MSG="custom"', after)
+            self.assertIn('variable_attempt_token: ""', after)
             self.assertIn('[gcode_macro KCD_JOB_PAUSE]',after)
             self.assertEqual(after.count('[gcode_macro _KCD_VARS]'),1)
+
+    def test_managed_event_upgrade_is_targeted_and_idempotent(self):
+        from installer.utils import _render_print_cost_cfg
+        from installer.workflow import client_plan
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); (root/'printer.cfg').write_text('[include print_cost.cfg]\n')
+            current = _render_print_cost_cfg(tmp, 'One')
+            old = current.replace('variable_attempt_token: ""\n', '')
+            old = __import__('re').sub(r'^    .*attempt_token.*\n', '', old, flags=__import__('re').M)
+            old = old.replace('    {% set filament_mm = printer.print_stats.filament_used|default("") %}\n', '')
+            old = old.replace('    RUN_SHELL_COMMAND CMD=kcd_job_start', '    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}\n    RUN_SHELL_COMMAND CMD=kcd_job_start')
+            old = old.replace('    RUN_SHELL_COMMAND CMD=kcd_job_cancel', '    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}\n    RUN_SHELL_COMMAND CMD=kcd_job_cancel')
+            old += '\n[gcode_macro CUSTOM]\ngcode:\n    G28\n'
+            (root/'print_cost.cfg').write_text(old)
+            first=client_plan(tmp,'One','http://master:6060','fake-key')[root/'print_cost.cfg'][0]
+            self.assertIn('filament_mm ~ "|" ~ attempt_token', first)
+            self.assertIn('VARIABLE=attempt_token', first)
+            self.assertIn('[gcode_macro CUSTOM]\ngcode:\n    G28\n', first)
+            (root/'print_cost.cfg').write_text(first)
+            self.assertEqual(client_plan(tmp,'One','http://master:6060','fake-key')[root/'print_cost.cfg'][0], first)
+
+    def test_generated_macros_render_matching_attempt_and_measured_zero(self):
+        import ast, configparser, shlex
+        from jinja2 import Environment
+        from installer.utils import _render_print_cost_cfg
+        parser=configparser.RawConfigParser(); parser.read_string(_render_print_cost_cfg('/fixture', 'One'))
+        environment=Environment('{%', '%}', '{', '}')  # Klipper's template delimiters.
+        printer={'gcode_macro _KCD_VARS': {'printer_name': 'One', 'attempt_token': ''},
+                 'print_stats': {'filename': 'same.gcode', 'filament_used': 0, 'print_duration': 2},
+                 'toolhead': {'estimated_print_time': 123.45}}
+        started=environment.from_string(parser.get('gcode_macro KCD_JOB_START', 'gcode')).render(printer=printer)
+        line=next(line for line in started.splitlines() if line.startswith('SET_GCODE_VARIABLE'))
+        value=next(field.split('=', 1)[1] for field in shlex.split(line) if field.startswith('VALUE='))
+        token=ast.literal_eval(value)
+        self.assertEqual(token, '123.45')
+        printer['gcode_macro _KCD_VARS']['attempt_token']=token
+        canceled=environment.from_string(parser.get('gcode_macro KCD_JOB_CANCEL', 'gcode')).render(printer=printer)
+        fields=shlex.split(next(line for line in canceled.splitlines() if line.startswith('RUN_SHELL_COMMAND')))
+        payload=next(field.split('=', 1)[1] for field in fields if field.startswith('PARAMS='))
+        self.assertEqual(payload.split('|'), ['One', 'same.gcode', '2.0', '0', token])
 
     def test_secret_corruption_is_not_silently_replaced(self):
         from core.storage import ensure_api_key

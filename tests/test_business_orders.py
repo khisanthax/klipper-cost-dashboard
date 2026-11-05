@@ -165,3 +165,34 @@ class BusinessOrderTests(unittest.TestCase):
                     status="active", priority="normal", revision=before["updated_at"], revenue=value,
                 ))
             self.assertEqual(self.orders.get_order(self.project.id), before)
+
+    def test_legacy_project_alias_and_explicit_uid_keep_distinct_order_history(self):
+        with self.db.connect_db() as conn:
+            project_id = conn.execute("SELECT id FROM projects WHERE project_uid=?", (self.project.id,)).fetchone()[0]
+            conn.execute("UPDATE projects SET project_uid='' WHERE id=?", (project_id,))
+            self.db.upsert_job(conn, dict(job_uid="legacy-job", printer="Fixture", filename="legacy.gcode",
+                                         status="completed", time_cost=1, material_cost=.25, total_cost=1.25))
+            conn.execute("INSERT INTO project_assignments VALUES (?, 'legacy-job', 'now')", (project_id,))
+        alias = str(project_id)
+        self.orders.save_order(alias, dict(status="draft", priority="normal", customer="Legacy order", revenue="2", expenses="0"))
+        legacy = self.orders.get_order(alias)
+        project = self.projects.load_projects()[alias]
+        self.assertEqual(self.orders.financial_view(project, legacy)["profit"], Decimal("0.75"))
+        self.assertEqual(self.orders.list_orders()[0]["project_uid"], alias)
+        self.assertEqual(self.client.get("/orders", query_string={"project": alias}).status_code, 200)
+
+        with self.db.connect_db() as conn:
+            conn.execute("INSERT INTO projects (project_uid,name,created_at,updated_at) VALUES (?, 'Explicit numeric UID', 'now', 'now')", (alias,))
+            explicit_id = conn.execute("SELECT id FROM projects WHERE project_uid=?", (alias,)).fetchone()[0]
+        self.assertIsNone(self.orders.get_order(alias))
+        self.orders.save_order(alias, dict(status="active", priority="normal", customer="Explicit order", revenue="5", expenses="0"))
+        explicit = self.orders.get_order(alias)
+        self.assertEqual(explicit["project_id"], explicit_id)
+        self.assertEqual(self.orders.financial_view(self.projects.load_projects()[alias], explicit)["profit"], Decimal("5"))
+        listed = self.orders.list_orders()
+        self.assertEqual(next(item for item in listed if item["customer"] == "Legacy order")["identity_conflict"], 1)
+        self.assertEqual(next(item for item in listed if item["customer"] == "Explicit order")["identity_conflict"], 0)
+        self.assertIn(b"Project identifier conflict", self.client.get("/orders").data)
+        with self.db.connect_db() as conn:
+            self.assertEqual(conn.execute("SELECT customer FROM business_orders WHERE project_id=?", (project_id,)).fetchone()[0], "Legacy order")
+            self.assertEqual(conn.execute("SELECT total_cost FROM jobs WHERE job_uid='legacy-job'").fetchone()[0], 1.25)

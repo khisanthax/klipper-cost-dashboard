@@ -19,7 +19,9 @@
         <tbody>
             {% for item in orders %}
             <tr>
-                <th scope="row"><a href="{{ url_for('orders_page', project=item.project_uid) }}">{{ item.name }}</a></th>
+                <th scope="row">{% if item.identity_conflict %}{{ item.name }}
+                    <div class="small text-muted">Project identifier conflict; this order has not been reassigned.</div>
+                    {% else %}<a href="{{ url_for('orders_page', project=item.project_uid) }}">{{ item.name }}</a>{% endif %}</th>
                 <td>{{ item.status|capitalize }}</td><td>{{ item.customer or 'Not set' }}</td>
                 <td>{{ item.priority|capitalize }}</td><td>{{ item.due_date or 'Not set' }}</td>
             </tr>
