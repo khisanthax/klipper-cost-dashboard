@@ -133,3 +133,22 @@ the current key before reactivation.
 
 See [pricing and thumbnail recovery](pricing-and-thumbnail-recovery.md) for the
 new previews, original-price recovery, thumbnail backfill and object backups.
+
+## Cancellation event compatibility
+
+Updated managed helpers pass the consumed filament measurement and an attempt
+token from start to cancel. Repair previews upgrade recognizable managed payload
+lines without replacing surrounding custom motion or temperature logic. Review
+the preview and load configuration only during an idle maintenance window; the
+installer does not restart Klipper. Both start and cancel helpers must be loaded
+together. A token-bearing active job rejects a cancel with a different or missing
+token, including delayed events for another attempt of the same filename.
+
+Legacy tokenless integrations remain compatible with filename and timestamp
+checks. They cannot distinguish every delayed same-filename event. A legacy
+cancel with no measured consumption is retained with unknown filament and
+Unpriced material/total cost rather than inventing a zero. A supplied zero is a
+valid measurement. SQL-only cancellation saves its job, cleared live snapshot
+and before/after audit evidence atomically; a failed write keeps tracking
+recoverable for retry. This does not infer cancellation from an idle or
+disconnected printer or alter previously saved historical prices.

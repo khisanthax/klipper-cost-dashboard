@@ -926,7 +926,11 @@ def job_start():
     
     profile_id = data.get("profile_id")
     
-    live.start_job(printer_name, filename, start_time, estimated_duration, estimated_filament, profile_id)
+    attempt_token = str(data.get("attempt_token") or "").strip()
+    if len(attempt_token) > 128:
+        return jsonify({"success": False, "error": "attempt_token exceeds 128 characters"}), 400
+    live.start_job(printer_name, filename, start_time, estimated_duration, estimated_filament, profile_id,
+                   attempt_token=attempt_token)
     try:
         asset,_status,_modified=archived_thumbs.fetch_image(printer_name,filename)
         if asset:
@@ -1106,6 +1110,12 @@ def job_cancel():
     filename_raw = data.get("filename")
     reason = data.get("reason")  # Optional failure/cancel reason
     elapsed_raw = data.get("elapsed_seconds")
+    filament_mm = None
+    if data.get("filament_mm") not in (None, ""):
+        try:
+            filament_mm = finite_float(data["filament_mm"], label="filament_mm", nonnegative=True)
+        except NumericValidationError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
     
     canonical = get_canonical_printer_names()
     norm = normalize_incoming_printer_and_filename(printer_name_raw, filename_raw, canonical_printers=canonical)
@@ -1139,7 +1149,11 @@ def job_cancel():
             return jsonify({"success": False, "error": str(exc)}), 400
     if active_before:
         active_filename = str(active_before.get("filename") or "").strip()
+        attempt_token = str(data.get("attempt_token") or "").strip()
         if (filename and filename != active_filename) or (
+            (attempt_token or active_before.get("attempt_token"))
+            and attempt_token != active_before.get("attempt_token")
+        ) or (
             event_time is not None and event_time < active_before["start_time"]
         ):
             return jsonify({"success": True, "job": None, "history": "stale_cancel"}), 200
@@ -1199,7 +1213,6 @@ def job_cancel():
 
     # Record a canceled job in history so it appears in Print History.
     ts = time.time()
-    filament_mm = 0.0
     try:
         paused_seconds_total = float(live_result.get("total_paused_duration") or 0.0)
     except Exception:
@@ -1220,15 +1233,19 @@ def job_cancel():
     cost_data = compute_costs(
         printer_name,
         float(duration_seconds_total),
-        filament_mm,
+        filament_mm if filament_mm is not None else 0.0,
         paused_seconds_total=paused_seconds_total,
     )
+    if filament_mm is None:
+        cost_data.update(material_cost=None, total_cost=None, filament_meters=None,
+                         filament_grams=None, filament_weight_kind="unknown")
 
     row = {
         "timestamp": ts,
         "job_uid": str(uuid.uuid4()),
         "printer": printer_name,
         "filename": filename,
+        "started_at": active_before.get("start_time") if active_before else None,
         "duration_seconds": float(duration_seconds_total),
         "paused_seconds_total": paused_seconds_total,
         "pause_count": pause_count,
@@ -1239,7 +1256,21 @@ def job_cancel():
     row["status"] = "canceled"
     row["failure_reason"] = str(reason or "").strip()
     row["thumbnail_asset"]=live_result.get("thumbnail_asset")
-    storage_backend.write_job(row)
+    audit = {"printer": printer_name, "job_uid": row["job_uid"], "before": active_before,
+             "after": {"status": "canceled", "duration_seconds": duration_seconds_total,
+                       "filament_mm": filament_mm, "time_cost": row.get("time_cost"),
+                       "material_cost": row.get("material_cost"), "total_cost": row.get("total_cost")}}
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            storage_backend.write_job(row, connection=conn)
+            live.end_job(printer_name, connection=conn)
+            system_events.emit_event("activity", "Print canceled", "Saved cancellation and cleared live tracking.",
+                                     meta=audit, connection=conn)
+    else:
+        storage_backend.write_job(row)
+        live.end_job(printer_name)
+        system_events.emit_event("activity", "Print canceled", "Saved cancellation and cleared live tracking.", meta=audit)
     try:
         archived_thumbs.capture_job(row['job_uid'],printer_name,filename,
             live_asset=live_result.get('thumbnail_asset'),ended_at=ts)
@@ -1252,8 +1283,6 @@ def job_cancel():
         filename,
         elapsed_seconds,
     )
-
-    live.end_job(printer_name)
 
     return jsonify({"success": True, "job": live_result, "history_job_uid": row["job_uid"]})
 
