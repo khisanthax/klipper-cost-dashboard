@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import os
 from pathlib import Path
+import re
 
 from core.runtime import RuntimeConfigurationError
 
@@ -41,6 +43,8 @@ class DemoConfiguration:
     max_export_bytes: int = 10 * 1024 * 1024
     trust_proxy: bool = False
     expect_https: bool = False
+    allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "::1")
+    trusted_proxy_addresses: tuple[str, ...] = ("127.0.0.1", "::1")
 
     @property
     def seeds_root(self) -> Path:
@@ -77,6 +81,28 @@ def _boolean(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     raise RuntimeConfigurationError(f"{name} must be a boolean value.")
+
+
+def _hostnames() -> tuple[str, ...]:
+    values = os.getenv("KCD_DEMO_ALLOWED_HOSTS", "localhost,127.0.0.1,::1").split(",")
+    hosts = []
+    for value in values:
+        host = value.strip().lower()
+        try:
+            host = str(ipaddress.ip_address(host))
+        except ValueError:
+            if not host or len(host) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host):
+                raise RuntimeConfigurationError("KCD_DEMO_ALLOWED_HOSTS requires explicit hostnames or IP addresses.")
+        hosts.append(host)
+    return tuple(hosts)
+
+
+def _proxy_addresses() -> tuple[str, ...]:
+    try:
+        return tuple(str(ipaddress.ip_address(value.strip())) for value in
+                     os.getenv("KCD_DEMO_TRUSTED_PROXY_ADDRESSES", "127.0.0.1,::1").split(","))
+    except ValueError as exc:
+        raise RuntimeConfigurationError("KCD_DEMO_TRUSTED_PROXY_ADDRESSES requires explicit IP addresses.") from exc
 
 
 def load_demo_configuration() -> DemoConfiguration:
@@ -152,4 +178,6 @@ def load_demo_configuration() -> DemoConfiguration:
         max_export_bytes=_positive_int("KCD_DEMO_MAX_EXPORT_BYTES", 10 * 1024 * 1024),
         trust_proxy=_boolean("KCD_DEMO_TRUST_PROXY", False),
         expect_https=expect_https,
+        allowed_hosts=_hostnames(),
+        trusted_proxy_addresses=_proxy_addresses(),
     )

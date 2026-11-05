@@ -209,6 +209,37 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             with self.assertRaises(RuntimeConfigurationError):
                 load_demo_configuration()
 
+    def test_host_and_trusted_proxy_requirements(self):
+        from core.demo.security import DemoSecurityError, validate_transport
+        configuration = replace(self.manager.configuration, expect_https=True, trust_proxy=True)
+        cases = [
+            ("http://localhost", {}, "127.0.0.1", False),
+            ("https://evil.example", {}, "127.0.0.1", False),
+            ("http://localhost", {"X-Forwarded-Proto": "https"}, "192.0.2.20", False),
+            ("http://localhost", {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "evil.example"}, "127.0.0.1", False),
+            ("http://localhost", {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "localhost"}, "127.0.0.1", True),
+            ("https://localhost", {}, "192.0.2.20", True),
+        ]
+        for base, headers, address, allowed in cases:
+            with self.subTest(base=base, headers=headers, address=address), self.app.test_request_context(
+                "/", base_url=base, headers=headers, environ_overrides={"REMOTE_ADDR": address}
+            ):
+                if allowed:
+                    validate_transport(request, configuration)
+                else:
+                    with self.assertRaises(DemoSecurityError):
+                        validate_transport(request, configuration)
+
+    def test_nested_and_wide_requests_are_bounded(self):
+        client = self.client()
+        headers = {"X-CSRF-Token": self.csrf(client)}
+        payload = {}
+        for _ in range(10):
+            payload = {"child": payload}
+        self.assertEqual(client.post("/json", json=payload, headers=headers).status_code, 422)
+        data = {f"field-{index}": "x" for index in range(self.manager.configuration.max_list_length + 1)}
+        self.assertEqual(client.post("/mutate", data=data, headers=headers).status_code, 422)
+
     def test_normal_mode_bypasses_demo_policy_network_limits_and_configuration(self):
         with mock.patch.dict(os.environ, {
             "KCD_RUNTIME_MODE": "normal",

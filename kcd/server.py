@@ -49,7 +49,12 @@ def main():
         Thread(target=clean_demo_workspaces, args=(demo_manager,), daemon=True).start()
     # In-memory live state is serialized and persisted in SQL. Multiple worker
     # processes are intentionally unsupported; use one process with threads.
-    serve(app, host=args.host, port=args.port, threads=4, max_request_body_size=1024*1024)
+    options = {}
+    if demo_manager is not None and demo_manager.configuration.trust_proxy:
+        # Keep the socket peer in REMOTE_ADDR. The demo boundary validates that
+        # peer against its explicit proxy allowlist before consulting headers.
+        options["clear_untrusted_proxy_headers"] = False
+    serve(app, host=args.host, port=args.port, threads=4, max_request_body_size=1024*1024, **options)
 
 
 if __name__ == "__main__":

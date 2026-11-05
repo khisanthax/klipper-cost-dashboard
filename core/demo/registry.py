@@ -437,8 +437,8 @@ class DemoWorkspaceRegistry:
         value = now.astimezone(timezone.utc).isoformat()
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM demo_workspaces WHERE state='active'
-                   AND (idle_expires_at <= ? OR absolute_expires_at <= ?)
+                """SELECT * FROM demo_workspaces
+                   WHERE (state='active' AND idle_expires_at <= ?) OR absolute_expires_at <= ?
                    ORDER BY created_at""", (value, value)
             ).fetchall()
         return [self._record(row) for row in rows]
@@ -457,8 +457,8 @@ class DemoWorkspaceRegistry:
                 raise ActiveWorkspaceLease("Workspace has active request leases.")
             result = conn.execute(
                 """UPDATE demo_workspaces SET state='expired', updated_at=?
-                   WHERE workspace_id=? AND state='active'
-                   AND (idle_expires_at <= ? OR absolute_expires_at <= ?)""",
+                   WHERE workspace_id=?
+                   AND ((state='active' AND idle_expires_at <= ?) OR absolute_expires_at <= ?)""",
                 (value, workspace_id, value, value),
             )
             if result.rowcount != 1:

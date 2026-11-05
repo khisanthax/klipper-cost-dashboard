@@ -6,7 +6,8 @@ import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import time
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -20,7 +21,8 @@ def wait_until_ready(server, base_url):
         if server.poll() is not None:
             raise RuntimeError("Demo server exited before startup")
         try:
-            with urlopen(base_url + "/health", timeout=1) as response:
+            request = Request(base_url + "/health", headers={"X-Forwarded-Proto": "https"})
+            with urlopen(request, timeout=1) as response:
                 if response.status == 200:
                     return
         except OSError:
@@ -31,8 +33,8 @@ def wait_until_ready(server, base_url):
 def exercise(base_url):
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        with browser.new_context(viewport={"width": 1280, "height": 800}) as first, \
-             browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True) as second:
+        with browser.new_context(viewport={"width": 1280, "height": 800}, ignore_https_errors=True) as first, \
+             browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, ignore_https_errors=True) as second:
             first.tracing.start(screenshots=True, snapshots=True)
             try:
                 desktop = first.new_page()
@@ -46,6 +48,12 @@ def exercise(base_url):
                     button.press("Enter")
                     expect(page.get_by_label("Demo workspace")).to_be_visible()
 
+                cookie = next(cookie for cookie in first.cookies(base_url) if cookie["name"] == "kcd_demo_session")
+                assert cookie["secure"] and cookie["httpOnly"] and cookie["sameSite"] == "Lax"
+                health = first.request.get(base_url + "/health", headers={"X-Forwarded-Host": "evil.example"})
+                assert health.status == 200
+                assert health.headers["strict-transport-security"].startswith("max-age=")
+                assert first.request.get(base_url + "/health", headers={"Host": "evil.example"}).status == 403
                 telemetry = first.request.get(base_url + "/api/printer-status")
                 observations = list(telemetry.json()["printers"].values())
                 assert len(observations) == 3
@@ -90,7 +98,10 @@ def main():
             "KCD_STORAGE_BACKEND": "sql",
             "KCD_REPORTS_BACKEND": "sql",
             "KCD_DEMO_DATA_ROOT": str(demo),
-            "KCD_DEMO_COOKIE_SECURE": "0",
+            "KCD_DEMO_COOKIE_SECURE": "1",
+            "KCD_DEMO_EXPECT_HTTPS": "1",
+            "KCD_DEMO_TRUST_PROXY": "1",
+            "KCD_DEMO_TRUSTED_PROXY_ADDRESSES": "127.0.0.1",
             "KCD_DATA_DIR": str(scratch / "normal-data"),
             "KCD_API_KEY": "",
         }
@@ -109,7 +120,15 @@ def main():
             )
             try:
                 wait_until_ready(server, base_url)
-                exercise(base_url)
+                try:
+                    urlopen(base_url + "/health", timeout=3)
+                except HTTPError as error:
+                    assert error.code == 403
+                else:
+                    raise AssertionError("Demo allowed plain HTTP with HTTPS required")
+                from demo_tls_fixture import tls_proxy
+                with tls_proxy(base_url, scratch) as secure_url:
+                    exercise(secure_url)
                 assert not (scratch / "normal-data").exists(), "Demo accessed normal storage"
             finally:
                 server.terminate()

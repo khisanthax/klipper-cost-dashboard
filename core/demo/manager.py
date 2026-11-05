@@ -410,10 +410,7 @@ class DemoWorkspaceManager:
         try:
             record = self._transition_if_unleased(record, "resetting")
             transitioned = True
-            temporary = Path(tempfile.mkdtemp(
-                prefix=".resetting-", dir=self.configuration.workspaces_root
-            ))
-            shutil.rmtree(temporary)
+            temporary = self.configuration.workspaces_root / f".resetting-{record.workspace_id}"
             self._clone_seed(temporary)
             os.replace(root, previous)
             try:
@@ -448,11 +445,19 @@ class DemoWorkspaceManager:
     def delete_workspace(self, record: WorkspaceRecord) -> None:
         if record.state != "deleting":
             record = self._transition_if_unleased(record, "deleting")
-        path = self.configuration.workspaces_root / record.relative_storage_path
-        self._contained(self.configuration.workspaces_root, path)
-        if path.exists():
-            self._assert_no_symlinks(path)
-            shutil.rmtree(path)
+        paths = [
+            self.configuration.workspaces_root / record.relative_storage_path,
+            self.configuration.workspaces_root / f".creating-{record.workspace_id}",
+            self.configuration.workspaces_root / f".resetting-{record.workspace_id}",
+            self.configuration.workspaces_root / f".{record.workspace_id}.previous",
+        ]
+        for path in paths:
+            self._contained(self.configuration.workspaces_root, path)
+            if path.exists() or path.is_symlink():
+                self._assert_no_symlinks(path)
+        for path in paths:
+            if path.exists():
+                shutil.rmtree(path)
         self.registry.delete_record(record.workspace_id)
 
     def cleanup_expired_workspaces(self, *, dry_run: bool = False) -> list[str]:

@@ -114,6 +114,26 @@ class DemoWorkspaceTests(unittest.TestCase):
         next_session = manager.create_workspace()
         self.assertNotEqual(next_session.record.workspace_id, first.record.workspace_id)
 
+    def test_absolute_expiration_reclaims_interrupted_lifecycle_paths(self):
+        for state in ("creating", "resetting", "error", "deleting"):
+            with self.subTest(state=state):
+                session = self.manager.create_workspace()
+                uid = session.record.workspace_id
+                with self.manager.registry._connect() as conn:
+                    conn.execute("UPDATE demo_workspaces SET state=? WHERE workspace_id=?", (state, uid))
+                paths = [self.config.workspaces_root / name for name in (
+                    f".creating-{uid}", f".resetting-{uid}", f".{uid}.previous",
+                )]
+                for path in paths:
+                    path.mkdir()
+                    (path / "fixture").write_text("synthetic")
+                self.assertEqual(self.manager.cleanup_expired_workspaces(), [])
+                self.clock.advance(hours=73)
+                self.assertEqual(self.manager.cleanup_expired_workspaces(), [uid])
+                self.assertIsNone(self.manager.registry.get(uid))
+                self.assertFalse(session.context.workspace_root.exists())
+                self.assertTrue(all(not path.exists() for path in paths))
+
     def test_registry_schema_state_touch_and_expiration(self):
         session = self.manager.create_workspace()
         record = self.manager.registry.get(session.record.workspace_id)

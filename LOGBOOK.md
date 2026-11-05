@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Demo transport and interrupted-cleanup acceptance
+
+- **Status.** Further implementation and validation in draft [PR #64](https://github.com/khisanthax/klipper-cost-dashboard/pull/64); no public hosting or production deployment.
+- **Changes.** Enforced explicit allowed hostnames and HTTPS, accepted forwarded headers only from configured proxy socket peers, bounded nested JSON and wide forms, and reclaimed interrupted lifecycle rows and recognized staging directories after absolute expiry. Waitress preserves headers for this application validation without rewriting the original peer address. Normal runtime is unchanged.
+- **Verification.** Local `test_demo_security.py` passed all 20 tests; `test_demo_workspaces.py` passed 20 tests with two Windows symlink skips. Real Chromium desktop/mobile workflows passed through a disposable loopback TLS proxy, including Secure/HttpOnly/SameSite cookies, HSTS, rejected unknown hosts and plain HTTP, spoofed-header stripping, workspace isolation, reset and denied printer/installer/export endpoints. Synthetic seed, private temporary storage, screenshots and trace were used. Full CI for this code is pending.
+- **Deployment preparation / remaining work.** The private TLS fixture complements the existing Linux network-none container rehearsal. Public host/network capacity and egress enforcement must still be verified on an approved hosting target. Review is required before merging; see [staging runbook](docs/demo/demo-staging.md).
+
 ### 2026-11-04 — Milestone B interactive demo recovery
 
 - **Status.** Implementation in the separate `codex/demo-recovery` branch for staged review. No public hosting or production deployment.

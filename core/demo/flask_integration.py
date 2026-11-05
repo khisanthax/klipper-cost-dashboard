@@ -18,7 +18,7 @@ from core.demo.manager import (
 from core.demo.security import (
     DemoAccessPolicy, DemoPolicyClass, DemoSecurityError, csrf_token,
     consume_rate, reserve_quota, validate_csrf, validate_request_input,
-    validate_same_origin,
+    validate_same_origin, validate_transport,
 )
 from core.runtime import is_demo_runtime
 from core.workspace_context import (
@@ -170,6 +170,7 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
             return None
 
         assert manager is not None
+        validate_transport(request, manager.configuration)
         policy = app.extensions["kcd_demo_policy"]
         endpoint = request.endpoint
         method = request.method.upper()

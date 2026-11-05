@@ -7,6 +7,7 @@ from datetime import timedelta
 from enum import Enum
 import hashlib
 import hmac
+import ipaddress
 import math
 import re
 from typing import Iterable, Mapping, Optional
@@ -187,16 +188,43 @@ def validate_same_origin(request: Request, configuration: DemoConfiguration) -> 
         parsed = urlsplit(source)
     except ValueError as exc:
         raise DemoSecurityError(403, "origin_rejected", "The request origin is invalid.") from exc
-    forwarded_scheme = request.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip()
-    forwarded_host = request.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip()
-    expected_scheme = (
-        "https" if configuration.expect_https
-        else forwarded_scheme if configuration.trust_proxy and forwarded_scheme
-        else request.scheme
-    )
-    expected_host = forwarded_host if configuration.trust_proxy and forwarded_host else request.host
+    expected_scheme, expected_host = request_origin(request, configuration)
     if parsed.scheme.lower() != expected_scheme.lower() or parsed.netloc.lower() != expected_host.lower():
         raise DemoSecurityError(403, "origin_rejected", "Cross-origin changes are not allowed.")
+
+
+def trusted_proxy(request: Request, configuration: DemoConfiguration) -> bool:
+    if not configuration.trust_proxy:
+        return False
+    try:
+        address = str(ipaddress.ip_address(request.remote_addr or ""))
+    except ValueError:
+        return False
+    return address in configuration.trusted_proxy_addresses
+
+
+def request_origin(request: Request, configuration: DemoConfiguration) -> tuple[str, str]:
+    if trusted_proxy(request, configuration):
+        scheme = request.headers.get("X-Forwarded-Proto", request.scheme).strip().lower()
+        host = request.headers.get("X-Forwarded-Host", request.host).strip().lower()
+        return scheme, host
+    return request.scheme, request.host
+
+
+def validate_transport(request: Request, configuration: DemoConfiguration) -> None:
+    scheme, authority = request_origin(request, configuration)
+    try:
+        parsed = urlsplit("//" + authority)
+        host = parsed.hostname
+        if not host or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError("Invalid authority")
+        parsed.port
+    except ValueError as exc:
+        raise DemoSecurityError(403, "host_rejected", "This demo hostname is unavailable.") from exc
+    if host.lower() not in configuration.allowed_hosts:
+        raise DemoSecurityError(403, "host_rejected", "This demo hostname is unavailable.")
+    if scheme not in {"http", "https"} or (configuration.expect_https and scheme != "https"):
+        raise DemoSecurityError(403, "https_required", "Use the secure demo address.")
 
 
 def _validate_scalar(name: str, value, configuration: DemoConfiguration) -> None:
@@ -235,20 +263,25 @@ def validate_request_input(request: Request, configuration: DemoConfiguration) -
     if request.is_json:
         try:
             payload = request.get_json(silent=False)
-        except BadRequest as exc:
+        except (BadRequest, ValueError, RecursionError) as exc:
             raise DemoSecurityError(400, "malformed_json", "The JSON request is malformed.") from exc
 
-        def visit(name: str, value) -> None:
+        visited = 0
+        def visit(name: str, value, depth=0) -> None:
+            nonlocal visited
+            visited += 1
+            if depth > 8 or visited > configuration.max_list_length:
+                raise DemoSecurityError(422, "invalid_input", "The request contains too many nested values.")
             if isinstance(value, dict):
                 if len(value) > configuration.max_list_length:
                     raise DemoSecurityError(422, "invalid_input", "The request contains too many values.")
                 for child_name, child in value.items():
-                    visit(str(child_name), child)
+                    visit(str(child_name), child, depth + 1)
             elif isinstance(value, list):
                 if len(value) > configuration.max_list_length:
                     raise DemoSecurityError(422, "invalid_input", "The request contains too many values.")
                 for child in value:
-                    visit(name, child)
+                    visit(name, child, depth + 1)
             else:
                 _validate_scalar(name, value, configuration)
 
@@ -258,6 +291,8 @@ def validate_request_input(request: Request, configuration: DemoConfiguration) -
         "application/x-www-form-urlencoded", "application/json",
     }:
         raise DemoSecurityError(415, "unsupported_media_type", "The request content type is unsupported.")
+    if sum(len(values) for _name, values in request.form.lists()) > configuration.max_list_length:
+        raise DemoSecurityError(422, "invalid_input", "The request contains too many values.")
     for name in request.form:
         values = request.form.getlist(name)
         if len(values) > configuration.max_list_length:
@@ -280,7 +315,7 @@ def consume_rate(
     config = manager.configuration
     if session is None:
         forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
-        identity = forwarded if config.trust_proxy and forwarded else request.remote_addr or "unknown"
+        identity = forwarded if trusted_proxy(request, config) and forwarded else request.remote_addr or "unknown"
         limit = config.rate_invalid_session_limit
         window = config.rate_invalid_session_window_seconds
         category = "invalid_session"
