@@ -1,5 +1,7 @@
 # KCD completion and release execution plan
 
+
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes all earlier human-review blockers below. Required PRs and strict CI remain enforced. PR 61 is merged; release/deployment validation is continuing.
 Rechecked 2026-11-05 against GitHub, current main `7892765`, and production.
 This plan coordinates existing branches. The unified roadmap remains the product
 roadmap and root LOGBOOK records completed operations and evidence.
@@ -19,6 +21,16 @@ contains only `khisanthax`, who authored these PRs. A review request cannot be
 assigned to an eligible collaborator with the current access inventory. A
 repository owner must make an eligible reviewer available. CI and internal
 engineering review do not satisfy that external gate.
+
+Remote branch inventory additionally found `feature/sql-hardening` with one
+unmerged January 3 commit, `0624952`, after its earlier PR 44 had merged. Its
+useful local-template ignore rules already exist on main. Its automatic settings
+bootstrap is superseded by today's explicit registration contract: fresh settings
+start empty and strict SQL never bootstraps legacy business-state files. Importing
+its old storage implementation would reintroduce seeded identities and remove
+current guards. The branch is retained as evidence; no new feature or stale
+runtime implementation is merged from it. The remaining unmerged remote branches
+map to the inventoried PRs, including the preserved v0.7.2 documentation branch.
 
 ## Work inventory and dependency order
 

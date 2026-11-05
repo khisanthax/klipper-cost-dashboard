@@ -53,3 +53,8 @@ the authoritative deployed image, backup and rollback report. No new release,
 deployment or rollback rehearsal was performed while protected-main review is
 pending. Fresh coordinated backups and isolated restore checks remain mandatory
 immediately before an authorized eligible deployment.
+
+The retained host tag `kcd-rollback:v0.7.2-20261103` was independently inspected
+again on November 5 and still resolves to the documented image ID
+`sha256:6348b7891dd50a0b52dcb3240a70ff97fcb76787dc57a0471593ba9ec9f7296d`.
+It was not started against production data.
