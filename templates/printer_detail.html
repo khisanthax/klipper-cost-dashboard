@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block content %}
+{% macro money(value) %}{{ '$%.2f'|format(value) if value is not none else 'Unpriced' }}{% endmacro %}
+{% macro hours(value) %}{{ '%.2f h'|format(value) if value is not none else 'Unknown' }}{% endmacro %}
+{% macro mass(value) %}{{ '%.2f kg'|format(value / 1000) if value is not none and value >= 1000 else ('%.2f g'|format(value) if value is not none else 'Unknown') }}{% endmacro %}
+<a href="{{ url_for('index') }}" class="btn btn-outline-secondary mb-3">Dashboard</a>
+<h1 class="h3 text-break">{{ printer_name }}</h1>
+
+<section class="card mb-4" aria-labelledby="printer-live-heading" data-kcd-printer="{{ printer_name }}" data-kcd-require-identity>
+    <div class="card-body">
+        <h2 id="printer-live-heading" class="h5">Live printer status <span class="badge bg-secondary" data-live-state>UNVERIFIED</span></h2>
+        <p data-live-message role="status">Waiting for Moonraker.</p>
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Current file</dt><dd class="col-sm-8 text-break" data-live-detail-file>Unverified</dd>
+            <dt class="col-sm-4">Progress</dt>
+            <dd class="col-sm-8">
+                <progress max="1" value="0" aria-label="Current print progress" data-live-progress hidden></progress>
+                <span data-live-progress-label>Unverified</span>
+            </dd>
+            <dt class="col-sm-4">Elapsed print time</dt><dd class="col-sm-8" data-live-elapsed>Unverified</dd>
+            <dt class="col-sm-4">Estimated remaining time</dt><dd class="col-sm-8" data-live-remaining>Unverified</dd>
+            <dt class="col-sm-4">Filament consumed</dt><dd class="col-sm-8" data-live-filament>Unverified</dd>
+            <dt class="col-sm-4">Estimated time cost</dt><dd class="col-sm-8" data-live-time-cost>Unverified</dd>
+            <dt class="col-sm-4">Estimated material cost</dt><dd class="col-sm-8" data-live-material-cost>Unverified</dd>
+            <dt class="col-sm-4">Estimated total cost</dt><dd class="col-sm-8" data-live-cost>Unverified</dd>
+        </dl>
+    </div>
+</section>
+
+<section aria-labelledby="printer-history-heading">
+    <h2 id="printer-history-heading" class="h5">Printer history</h2>
+    <form method="get" class="d-flex flex-wrap align-items-end gap-3 mb-3">
+        <div>
+            <label for="start" class="form-label">Start date</label>
+            <input class="form-control" type="date" id="start" name="start" value="{{ start_value }}">
+        </div>
+        <div>
+            <label for="end" class="form-label">End date</label>
+            <input class="form-control" type="date" id="end" name="end" value="{{ end_value }}">
+        </div>
+        <div class="form-check my-2">
+            <input class="form-check-input" type="checkbox" id="compare" name="compare" value="1" {% if compare %}checked{% endif %}>
+            <label for="compare" class="form-check-label">Compare previous period</label>
+        </div>
+        <button class="btn btn-primary" type="submit">Apply dates</button>
+    </form>
+    {% if error %}<p class="alert alert-warning" role="alert">{{ error }}</p>{% endif %}
+    {% if summary is defined %}
+    {% if comparison_error %}<p class="alert alert-warning" role="alert">Previous period unavailable. {{ comparison_error }}</p>{% endif %}
+    {% set periods = [summary, prior] if prior is defined and not comparison_error else [summary] %}
+    <p class="text-muted small">Dates are inclusive in the dashboard timezone. History totals use saved costs. Weight estimates use conversion data saved with each job.</p>
+    <div class="table-responsive mb-3" tabindex="0" role="region" aria-label="Selected printer totals">
+        <table class="table table-sm align-middle">
+            <caption class="caption-top">Job and cost totals ({{ backend|upper }} history)</caption>
+            <thead><tr><th scope="col">Measure</th><th scope="col">Selected period</th>
+                {% if prior is defined and not comparison_error %}<th scope="col">{{ prior_start }} to {{ prior_end }}</th>{% endif %}
+            </tr></thead>
+            <tbody>
+                <tr><th scope="row">Jobs</th><td>{{ summary.job_count }}</td>{% if prior is defined and not comparison_error %}<td>{{ prior.job_count }}</td>{% endif %}</tr>
+                {% for outcome, count in summary.counts.items() %}
+                <tr><th scope="row">{{ outcome }}</th><td>{{ count }}</td>{% if prior is defined and not comparison_error %}<td>{{ prior.counts[outcome] }}</td>{% endif %}</tr>
+                {% endfor %}
+                {% for key, title in [('hours', 'Print hours'), ('_weight_grams', 'Filament consumed'), ('time_cost', 'Time cost'), ('material_cost', 'Material cost'), ('total_cost', 'Total cost')] %}
+                <tr><th scope="row">{{ title }}</th>
+                    {% for data in periods %}
+                    <td>{{ hours(data.totals[key]) if key == 'hours' else mass(data.totals[key]) if key == '_weight_grams' else money(data.totals[key]) }}
+                        {% if data.unknown[key] %}<span class="text-muted small">({{ data.unknown[key] }} unknown)</span>{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <section class="col-md-6" aria-labelledby="utilization-heading">
+            <h3 id="utilization-heading" class="h6">Recorded workload</h3>
+            {% if summary.utilization is not none %}
+                <p><strong>{{ '%.1f'|format(summary.utilization) }}%</strong> of elapsed calendar hours</p>
+            {% else %}<p>Insufficient recorded duration.</p>{% endif %}
+            <p class="small text-muted">Uses duration of jobs recorded in the date range. Jobs crossing the date boundaries and missing measurements can affect this estimate.</p>
+            {% if summary.trend %}
+            <p class="small mb-1">Hours by {{ 'week starting' if summary.weekly else 'recorded date' }}</p>
+            {% set max_hours = summary.trend|map(attribute=1)|max %}
+            <ul class="list-unstyled small" aria-label="Recorded print hours by {{ 'week starting' if summary.weekly else 'date' }}">
+                {% for day, value in summary.trend %}
+                <li class="d-flex flex-wrap gap-2 align-items-center mb-1"><span>{{ day }}</span>
+                    <meter min="0" max="{{ max_hours or 1 }}" value="{{ value }}" aria-label="Print hours for {{ day }}"></meter>
+                    <span>{{ hours(value) }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </section>
+        <section class="col-md-6" aria-labelledby="outcomes-heading">
+            <h3 id="outcomes-heading" class="h6">Job outcomes</h3>
+            {% if summary.job_count %}
+            <ul class="list-unstyled small">
+                {% for outcome, count in summary.counts.items() %}
+                <li class="d-flex flex-wrap gap-2 align-items-center mb-1">
+                    <span>{{ outcome }}</span>
+                    <meter min="0" max="{{ summary.job_count }}" value="{{ count }}" aria-label="{{ outcome }} jobs"></meter>
+                    <span>{{ count }} / {{ summary.job_count }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}<p>No jobs in this date range.</p>{% endif %}
+        </section>
+    </div>
+
+    <div class="table-responsive" tabindex="0" role="region" aria-label="History for {{ printer_name }}">
+        <table class="table table-striped table-sm align-middle">
+            <caption class="caption-top">Recorded jobs for {{ printer_name }}</caption>
+            <thead><tr>
+                <th scope="col" style="min-width: 6rem">Recorded at</th>
+                <th scope="col" style="min-width: 11rem">File</th><th scope="col">Outcome</th>
+                <th scope="col">Duration</th><th scope="col">Filament</th>
+                <th scope="col">Time</th><th scope="col">Material</th><th scope="col">Total</th>
+            </tr></thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>{{ row.timestamp or 'Unknown' }}</td><td class="text-break">{{ row.filename }}</td><td>{{ row.outcome }}</td>
+                    <td>{{ hours(row.hours) }}</td><td title="{{ row._weight_source }}">{{ mass(row._weight_grams) }}</td>
+                    <td>{{ money(row.time_cost) }}</td><td>{{ money(row.material_cost) }}</td><td>{{ money(row.total_cost) }}</td>
+                </tr>
+                {% else %}<tr><td colspan="8">No jobs in this date range.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if pager.pages > 1 %}
+    <nav class="d-flex flex-wrap gap-2 align-items-center" aria-label="Printer history pages">
+        {% if pager.prev_url %}<a class="btn btn-outline-secondary" href="{{ pager.prev_url }}">Previous</a>{% endif %}
+        <span>Page {{ pager.page }} of {{ pager.pages }}</span>
+        {% if pager.next_url %}<a class="btn btn-outline-secondary" href="{{ pager.next_url }}">Next</a>{% endif %}
+    </nav>
+    {% endif %}
+    {% endif %}
+</section>
+<script src="{{ url_for('static', filename='js/printer_status.js') }}"></script>
+<script>
+    window.kcdRefreshPrinterStatus();
+    setInterval(() => {
+        if (document.visibilityState === 'visible') window.kcdRefreshPrinterStatus();
+    }, 10000);
+</script>
+{% endblock %}

@@ -50,7 +50,7 @@ def main():
             def log_message(self,*args):pass
             def do_GET(self):
                 if self.path.startswith('/printer/objects/query'):
-                    result={'status':{'gcode_macro _KCD_VARS':{'printer_name':self.server.identity},'print_stats':{'state':self.server.state,'filename':'paused.gcode' if self.server.state=='paused' else 'active.gcode','print_duration':600,'total_duration':660,'filament_used':10000}}}
+                    result={'status':{'gcode_macro _KCD_VARS':{'printer_name':self.server.identity},'print_stats':{'state':self.server.state,'filename':'paused.gcode' if self.server.state=='paused' else 'active.gcode','print_duration':600,'total_duration':660,'filament_used':10000},'display_status':{'progress':0.5}}}
                 elif self.path=='/server/info':result={'klippy_connected':True}
                 else:self.send_response(404);self.end_headers();return
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps({'result':result}).encode())
@@ -78,7 +78,7 @@ def main():
                 failed_requests=[]
                 page.on('requestfailed',lambda request:failed_requests.append({'url':request.url,'failure':request.failure}))
                 results=[]
-                routes=['/','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events','/estimates']
+                routes=['/','/printers/Idle','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events','/estimates']
                 if '--workflows-only' in sys.argv:routes=[]
                 try:
                     sizes=[(1920,1080,1,'large'),(1440,1000,1,'desktop'),(900,900,1,'narrow'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')]
@@ -108,6 +108,30 @@ def main():
                         assert not any(r['overflow'] or r['unlabelled'] for r in results),'Resolve layout/label findings in page-audit.json'
                         assert not any(r.get('accessibility',{}).get('violations') for r in results),'Resolve automated accessibility findings in page-audit.json'
                         page.set_viewport_size({'width':1440,'height':1000});page.goto(base+'/')
+                        printer_link=page.get_by_role('link',name='Printing',exact=True)
+                        printer_link.focus()
+                        page.keyboard.press('Enter')
+                        page.wait_for_url('**/printers/Printing')
+                        page.get_by_text('10 min estimated from progress',exact=True).wait_for()
+                        assert page.get_by_role('heading',name='Printing',exact=True).is_visible()
+                        assert page.get_by_text('paused.gcode',exact=True).count()==0
+                        page.screenshot(path=str(artifacts/'printer-detail-live.png'),full_page=True)
+                        def missing_measurements(route):
+                            route.fulfill(json={'printers':{'Printing':dict(
+                                connected=True,identity_verified=True,state='printing',filename='active.gcode',
+                                print_seconds=None,total_seconds=None,filament_mm=None,progress=None,
+                                grams=None,time_cost=None,material_cost=None,total_cost=None,observed_at=time.time(),
+                            )}})
+                        context.route(base+'/api/printer-status',missing_measurements)
+                        page.evaluate('window.kcdRefreshPrinterStatus()')
+                        page.get_by_text('Elapsed time unavailable',exact=True).wait_for()
+                        assert page.locator('[data-live-cost]').inner_text()=='Estimate unavailable'
+                        assert page.locator('[data-live-time-cost]').inner_text()=='Unavailable'
+                        context.unroute(base+'/api/printer-status',missing_measurements)
+                        page.get_by_label('Compare previous period').check()
+                        page.get_by_role('button',name='Apply dates').click()
+                        assert 'compare=1' in page.url
+                        page.goto(base+'/')
                         from dashboard_workflows import exercise
                         exercise(page,context,base,project,tmp,artifacts)
                         assert not errors,errors
