@@ -118,6 +118,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification.** Four targeted SQLite tests passed locally, including concurrent retries for a canceled job, rollback of invalid amounts and no inventory access in compatibility mode. The coordinated backup test passed with a spool balance and measured deduction in its isolated restored database, including integrity and foreign-key checks. Existing Release Validation now exercises the Inventory browser flow and responsive layout.
 - **CI and browser.** Fixed an inaccessible printer selector label from the first browser pass. The corrected implementation at `1b5c47a` passed local Chromium mobile spool creation, assignment, measured canceled-job deduction and replay, low-stock display, and unchanged job cost. The full [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41873613169) and Python Compile Check passed, including SQL-only isolation, browser, installer, Docker and upgrade-preservation checks.
 - **Migration and next action.** Migration `0010_filament_inventory` adds tables without rewriting existing history. Review draft [PR #67](https://github.com/khisanthax/klipper-cost-dashboard/pull/67). Automatic and estimated deductions remain outside this slice. See [Filament inventory](docs/filament-inventory.md).
+
+### 2026-11-05 — Canonical project identity collision repair
+
+- **Status.** Implemented and tested in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68); review, merge, release and deployment remain pending.
+- **Changes.** SQL project resolution now prefers the canonical UID over a matching display name or legacy numeric alias. Name fallback remains available only when no canonical match exists. This prevents a colliding project name from redirecting planned items or manual work into another project.
+- **Verification.** Two real SQLite tests passed for earlier-name/later-UID collisions, explicit numeric UIDs and legacy numeric/name fallback. All six planned-item concurrency/rollback tests and SQL-only filesystem validation passed. Historical job data and costs are unchanged.
+- **Production / next.** No production action. Run final CI and the combined candidate rehearsal, then obtain required non-author review through the established workflow.
+
 ### 2026-11-05 — Reviewed estimates and concurrent project mutation repair
 
 - **Status.** Completed the existing [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) implementation on `codex/slicer-estimates`; not merged, released or deployed.
@@ -125,6 +133,7 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Confirmed concurrency repair.** Real overlapping edits could erase newly created plans or converted manual work because SQL CRUD rewrote entire tables from stale snapshots. Plan/manual mutations now target individual rows; conversion commits the manual row and plan marker atomically. SQL cleanup no longer treats inconsistent read snapshots as deletion evidence. Compatibility storage behavior is retained. Conversion now rejects unknown gram weight rather than inventing zero consumption; explicit zero remains valid.
 - **Verification.** Seven estimate, five real-SQL concurrency/rollback and nineteen component tests passed; SQL-only isolation passed. The local real Chromium estimate/save/replay workflow passed before the final concurrency change. CI now also covers the estimate route in all six layouts and captures desktop/tablet/mobile/200% CSS-zoom reviewed previews. Full final-head validation remains required.
 - **Production / next.** No production changes. Complete final CI and required non-author review, then integrate incrementally through the established release process. The unavailable eligible reviewer currently blocks main merging and deployment.
+- **Demo integration.** The calculator entry respects the isolated demo's explicit route policy; unavailable upload/plan controls are not advertised. Normal installations retain the workflow. Template rendering regression covers this boundary; server enforcement remains the demo service's responsibility.
 
 ### 2026-11-04 — Slicer estimate candidate
 

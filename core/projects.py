@@ -325,9 +325,15 @@ def _resolve_project_db_id(conn: sqlite3.Connection, project_uid: str) -> Option
     if not project_uid:
         return None
     row = conn.execute(
-        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+        """SELECT id FROM projects
+           WHERE COALESCE(NULLIF(project_uid,''),CAST(id AS TEXT))=?
+           ORDER BY CASE WHEN project_uid=? THEN 0 ELSE 1 END LIMIT 1""",
         (project_uid, project_uid),
     ).fetchone()
+    if row is None:
+        # Compatibility imports may still identify a project by its display
+        # name. Never let that fallback shadow a canonical historical key.
+        row = conn.execute("SELECT id FROM projects WHERE name=? ORDER BY id LIMIT 1", (project_uid,)).fetchone()
     if not row:
         return None
     if isinstance(row, sqlite3.Row):

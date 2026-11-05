@@ -56,7 +56,9 @@
 </div>
 {% if show_orders and (not kcd_demo_mode or demo_endpoint_available('orders_page')) %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
 
+{% if not kcd_demo_mode or demo_endpoint_available('estimate_page') %}
 <p class="mb-3"><a href="{{ url_for('estimate_page') }}">Calculate a pre-print estimate</a></p>
+{% endif %}
 
 {% if error %}
 <div class="alert alert-danger" role="alert">
