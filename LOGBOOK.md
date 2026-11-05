@@ -31,6 +31,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification.** Compared the restored pre-change database against production. Unrelated jobs, printer rows, settings, events, projects and thumbnail rows matched. Integrity, foreign keys and all five readiness checks passed. Live status showed four connected and identity-verified printers, SV07 canceled, and the stale warning cleared. Production GET-only Playwright passed ten routes, mobile History checkbox/layout and archived thumbnail retrieval. Local cancellation tests passed (6), reconciliation tests passed (2 plus Linux-only Bash test), and SQL-only isolation passed. PR checks record the full Python, browser, installer and Docker validation.
 - **Prevention and limits.** New configurations omit the literal placeholder and generated scripts tolerate it for already-loaded configurations. The proposed endpoint rejects different filenames and cancellation payloads timestamped before the retained start. Legacy requests without an event timestamp cannot distinguish all delayed same-filename attempts. The recovery command previews by default and requires unique printer, filename, history ID and start-time evidence, a reachable inactive printer and the reviewed digest for application. It does not infer a terminal result on disconnect or automatically finalize any job. The next step is required review of PR 61 and normal release of the app/installer changes. Observe the next genuine SV07 lifecycle event during normal use.
 
+### 2026-11-05 — Printer pagination and missing measurement review
+
+- **Status.** Refined milestone C in PR 62.
+- **Changes.** Equal history timestamps now have a stable row-ID order across pages. Missing Moonraker durations and filament readings stay unknown, and live price components are calculated only for available measurements.
+- **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
+- **Release.** Review, merge and deployment are pending.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.
@@ -80,6 +87,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Production / next action:** production remains v0.7.2; read-only Settings/Diagnostics Playwright checks passed for all four identities. Finish final validations and documentation, then mark PR 59 ready for required review. Retain all current production data, credentials, client files and rollback evidence.
 
 ## New entry template
+
+### 2026-11-04 — Milestone C, individual printer pages
+
+- **Status:** implemented on `codex/printer-detail` from `7892765`. Candidate only. Review, merge, release and deployment are pending.
+- **Changes:** dashboard printer cards open the selected registry identity. The dedicated page uses the shared read-only Moonraker observations for live progress, elapsed time, remaining-time estimates and live cost components. The history reader scopes to the printer and inclusive date range, preserves saved prices, and displays unavailable measurements separately. Date comparison, recorded workload, outcome charts and paginated job history use the same filtered rows.
+- **Verification:** focused SQL, identity and measurement tests passed on Windows. The daylight-saving test requires host IANA timezone data and is skipped when it is unavailable. `python tools/validate_sql_only.py` passed. Playwright coverage exercises keyboard navigation from the dashboard, live progress, comparison, responsive layouts and accessibility. Full-suite and release checks are tracked on the candidate PR.
+- **Production:** read-only SSH confirmed the existing v0.7.3 immutable image index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. The two Mercury instances are verified independently using distinct fixture endpoints and the loaded printer identity checks. The new page has no production deployment verification yet.
+- **Next step:** review the candidate and required release checks. Verify real Mercury 1 and Mercury 2 pages independently after a permitted safe deployment.
 
 ### 2026-11-02 — Final dashboard acceptance passed; ready for review
 

@@ -255,14 +255,15 @@
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <h3 class="h6 card-title mb-0">
-                                <span class="printer-tag"
+                                <a class="printer-tag stretched-link text-dark"
+                                      href="{{ url_for('printer_detail', printer_name=printer_name) }}"
                                       style="background-color: {{ printer_colors.get(printer_name, '#eee') }}">
                                     {{ printer_name }}
-                                </span>
+                                </a>
                             </h3>
                             <div class="d-flex align-items-center gap-2">
                                 {% if ps.status != 'idle' %}
-                                <form method="post" class="mb-0">
+                                <form method="post" class="mb-0 position-relative z-2">
                                     <input type="hidden" name="action" value="clear_live_job">
                                     <input type="hidden" name="printer_name" value="{{ printer_name }}">
                                     <button type="submit" class="btn btn-sm btn-outline-danger" title="Clear stuck job for this printer" onclick="return confirm('Clear retained KCD tracking only? This does not cancel the printer or create a history record.')">
