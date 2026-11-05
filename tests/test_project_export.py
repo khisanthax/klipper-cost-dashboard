@@ -73,6 +73,21 @@ class ProjectExportTests(unittest.TestCase):
                 self.assertEqual(result["recorded_jobs"][0]["total_cost"], 1.25)
                 self.assertEqual(writer.execute("SELECT total_cost FROM jobs").fetchone()[0], 9.5)
 
+    def test_canonical_uid_wins_over_an_unrelated_legacy_numeric_alias(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            conn.row_factory = sqlite3.Row
+            db.apply_migrations(conn)
+            conn.execute("INSERT INTO projects (id,project_uid,name,notes,created_at,updated_at) VALUES (1,NULL,'Legacy','Private legacy note','now','now')")
+            conn.execute("INSERT INTO projects (id,project_uid,name,created_at,updated_at) VALUES (2,'1','Canonical','now','now')")
+            db.upsert_job(conn, {'job_uid':'private-legacy','printer':'Fixture','filename':'private.gcode','total_cost':3})
+            db.upsert_job(conn, {'job_uid':'requested','printer':'Fixture','filename':'requested.gcode','total_cost':4})
+            conn.execute("INSERT INTO project_assignments VALUES (1,'private-legacy','now')")
+            conn.execute("INSERT INTO project_assignments VALUES (2,'requested','now')")
+            result = project_document(conn, '1')
+            self.assertEqual(result['project']['name'], 'Canonical')
+            self.assertEqual([row['job_uid'] for row in result['recorded_jobs']], ['requested'])
+            self.assertNotIn('Private legacy note', json.dumps(result))
+
     def test_http_download_and_project_exclusion(self):
         source = """
 from core.registration import register_printer
