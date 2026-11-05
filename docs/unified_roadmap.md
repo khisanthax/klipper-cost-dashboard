@@ -179,7 +179,7 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.7.3 was independently verified on 2026-11-03, pinned to immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. Phase 6 shipped in v0.4.0; SQL-only remains the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes. Recalculate is deliberately pricing-only. Read root `LOGBOOK.md` for the authoritative engineering handoff and exact deployment evidence.
+Production v0.7.4 was independently verified on 2026-11-05, pinned to immutable index `sha256:9e11c14a716a52df6c27fa6245a3d2d584b9484123c63b4905eaf556d779186e`, revision `237ccc88`. Both SV07 recovered rows visibly show Canceled and Unpriced; all four loaded identities, SQL readiness/integrity, 1,047 jobs and 316 objects are preserved. See [actual deployment/rollback evidence](v0.7.4-deployment-2026-11-05.md). Later feature integrations belong to v0.8.0 and are not in that running image. Phase 6 shipped in v0.4.0; SQL-only remains canonical, CSV/dual remain compatibility modes and Recalculate remains pricing-only. Read root LOGBOOK for current release outcomes.
 
 ## Current Active Work
 
@@ -187,7 +187,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ## Next Planned Work
 
-1. Preserve the two SV07 cancellations already recovered on November 4; the November 5 read-only check confirms canceled outcomes and null costs. PR 61 merged under the owner-authorized solo-maintainer policy. Complete the separately coordinated v0.7.4 release process without replaying that recovery.
+1. Monitor genuine SV07 lifecycle events after verified v0.7.4 deployment; preserve the two recovered canceled/unpriced rows without replaying recovery or recalculating their costs.
 2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
 3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 

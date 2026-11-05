@@ -28,6 +28,7 @@ class HistoryQuery:
     end_exclusive: bool = False
     paused_min: int = 0
     has_runout: bool = False
+    recorded_costs_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -162,8 +163,9 @@ def list_history_rows_csv(query: HistoryQuery, page: int, per_page: int, error: 
         rows = filtered
 
     # Ensure any missing derived cost fields are computed consistently.
-    for row in rows:
-        compute_job_cost_fields(row)
+    if not query.recorded_costs_only:
+        for row in rows:
+            compute_job_cost_fields(row)
     rows = _sort_history_rows(rows)
     total = len(rows)
     pager = _pager_meta(total, page, per_page)
@@ -232,8 +234,8 @@ def list_history_rows_sql(query: HistoryQuery, page: int, per_page: int, error: 
         limit = pager["per_page"]
         offset = (pager["page"] - 1) * pager["per_page"]
 
-        rows_page = _fetch_sql_rows(conn, where_sql, params, limit=limit, offset=offset)
-        rows_all = _fetch_sql_rows(conn, where_sql, params, limit=None, offset=None)
+        rows_page = _fetch_sql_rows(conn, where_sql, params, limit=limit, offset=offset, recorded_costs_only=query.recorded_costs_only)
+        rows_all = _fetch_sql_rows(conn, where_sql, params, limit=None, offset=None, recorded_costs_only=query.recorded_costs_only)
 
         _warn_if_uniform_profile_id(conn)
 
@@ -270,7 +272,7 @@ def printer_card_rows(start_dt,end_dt):
         return _fetch_sql_rows(conn,where,[int(start_dt.timestamp()),int(end_dt.timestamp())],None,None)
 
 
-def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limit: Optional[int], offset: Optional[int]) -> List[dict]:
+def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limit: Optional[int], offset: Optional[int], *, recorded_costs_only: bool = False) -> List[dict]:
     ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
     sql = f"""
         SELECT
@@ -321,7 +323,7 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
         FROM jobs j
         JOIN printers p ON j.printer_id = p.id
         {where_sql}
-        ORDER BY timestamp_epoch DESC
+        ORDER BY timestamp_epoch DESC, j.id DESC
     """
     if limit is not None:
         sql += " LIMIT ?"
@@ -371,7 +373,7 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
                 record[key] = "" if key not in ("paused_seconds_total", "pause_count", "runout_count") else 0
 
         # If duration_seconds is missing but we have both started_at and ended_at, derive it.
-        if not _as_float(record.get("duration_seconds")):
+        if not recorded_costs_only and not _as_float(record.get("duration_seconds")):
             started_at = record.get("started_at")
             ended_at = record.get("ended_at")
             if started_at and ended_at:
@@ -381,7 +383,8 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
                     record["duration_seconds"] = max(0.0, end_epoch - start_epoch)
 
         # Compute derived fields if missing/zero.
-        compute_job_cost_fields(record)
+        if not recorded_costs_only:
+            compute_job_cost_fields(record)
 
         rows.append(record)
     return rows
