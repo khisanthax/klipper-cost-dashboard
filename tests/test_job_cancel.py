@@ -103,6 +103,18 @@ class JobCancelTests(unittest.TestCase):
         self.assertEqual(rows[0].get("failure_reason"), "")
         self.assertEqual(float(rows[0].get("duration_seconds") or 0.0), 5.0)
 
+    def test_delayed_cancel_cannot_clear_restarted_same_filename(self):
+        self.live_module.start_job("SV08", "same.gcode", start_time=2000)
+        self.live_module._load_state()
+        with patch.object(self.app_module, "get_canonical_printer_names", lambda: {"SV08"}):
+            response = self.client.post(
+                "/job-cancel", headers=self.auth_headers,
+                json={"printer_name": "SV08", "filename": "same.gcode", "event_time": 1999},
+            )
+        self.assertEqual(response.get_json()["history"], "stale_cancel")
+        self.assertEqual(self.live_module.get_job("SV08")["start_time"], 2000)
+        self.assertEqual(self._read_rows(), [])
+
     def test_job_cancel_twice_is_idempotent(self):
         self.live_module.start_job("SV08", "Cube_PETG_0.2_11m55s.gcode", start_time=1000.0)
 

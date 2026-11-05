@@ -1130,10 +1130,20 @@ def job_cancel():
         except NumericValidationError as exc:
             return jsonify({"success": False, "error": str(exc)}), 400
 
-    # Prefer the currently active job for this printer (more reliable than inbound payload).
     active_before = live.get_job(printer_name)
-    if active_before and not filename:
-        filename = str(active_before.get("filename") or "").strip()
+    event_time = data.get("event_time")
+    if event_time is not None:
+        try:
+            event_time = finite_float(event_time, label="event_time", nonnegative=True)
+        except NumericValidationError as exc:
+            return jsonify({"success": False, "error": str(exc)}), 400
+    if active_before:
+        active_filename = str(active_before.get("filename") or "").strip()
+        if (filename and filename != active_filename) or (
+            event_time is not None and event_time < active_before["start_time"]
+        ):
+            return jsonify({"success": True, "job": None, "history": "stale_cancel"}), 200
+        filename = active_filename
 
     # Mark canceled in live state (this also removes it from active jobs).
     live_result = live.cancel_job(printer_name, reason, remove=False)
