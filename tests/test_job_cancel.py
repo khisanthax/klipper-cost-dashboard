@@ -103,6 +103,61 @@ class JobCancelTests(unittest.TestCase):
         self.assertEqual(rows[0].get("failure_reason"), "")
         self.assertEqual(float(rows[0].get("duration_seconds") or 0.0), 5.0)
 
+    def test_delayed_cancel_cannot_clear_restarted_same_filename(self):
+        self.live_module.start_job("SV08", "same.gcode", start_time=2000)
+        self.live_module._load_state()
+        with patch.object(self.app_module, "get_canonical_printer_names", lambda: {"SV08"}):
+            response = self.client.post(
+                "/job-cancel", headers=self.auth_headers,
+                json={"printer_name": "SV08", "filename": "same.gcode", "event_time": 1999},
+            )
+        self.assertEqual(response.get_json()["history"], "stale_cancel")
+        self.assertEqual(self.live_module.get_job("SV08")["start_time"], 2000)
+        self.assertEqual(self._read_rows(), [])
+
+    def test_attempt_token_rejects_late_same_file_cancel_even_with_later_timestamp(self):
+        self.live_module.start_job("SV08", "same.gcode", start_time=2000)
+        self.live_module.update_job("SV08", attempt_token="new-attempt")
+        with patch.object(self.app_module, "get_canonical_printer_names", lambda: {"SV08"}):
+            response = self.client.post("/job-cancel", headers=self.auth_headers, json={
+                "printer_name": "SV08", "filename": "same.gcode",
+                "event_time": 3000, "attempt_token": "old-attempt",
+            })
+        self.assertEqual(response.get_json()["history"], "stale_cancel")
+        self.assertEqual(self.live_module.get_job("SV08")["attempt_token"], "new-attempt")
+        self.live_module._load_state()
+        self.assertEqual(self.live_module.get_job("SV08")["attempt_token"], "new-attempt")
+        with patch.object(self.app_module, "get_canonical_printer_names", lambda: {"SV08"}):
+            legacy = self.client.post("/job-cancel", headers=self.auth_headers,
+                                     json={"printer_name": "SV08", "filename": "same.gcode"})
+        self.assertEqual(legacy.get_json()["history"], "stale_cancel")
+        self.assertEqual(self._read_rows(), [])
+
+    def test_cancel_retains_optional_filament_and_rejects_invalid_measurements(self):
+        self.live_module.start_job("SV08", "same.gcode", start_time=1000)
+        with patch.object(self.app_module, "get_canonical_printer_names", lambda: {"SV08"}), patch.object(
+            self.app_module, "compute_costs", return_value={"time_cost": 1, "material_cost": 2, "total_cost": 3}
+        ):
+            bad = self.client.post("/job-cancel", headers=self.auth_headers,
+                                   json={"printer_name": "SV08", "filament_mm": -1})
+            self.assertEqual(bad.status_code, 400)
+            self.assertIsNotNone(self.live_module.get_job("SV08"))
+            response = self.client.post("/job-cancel", headers=self.auth_headers,
+                                       json={"printer_name": "SV08", "filament_mm": 454.66522})
+        self.assertEqual(response.status_code, 200)
+        self.assertAlmostEqual(float(self._read_rows()[0]["filament_mm"]), 454.66522)
+        self.assertEqual(float(self._read_rows()[0]["total_cost"]), 3)
+
+    def test_legacy_cancel_keeps_missing_consumption_unknown(self):
+        self.live_module.start_job("SV08", "same.gcode", start_time=1000)
+        with patch.object(self.app_module, "get_canonical_printer_names", lambda: {"SV08"}):
+            response = self.client.post("/job-cancel", headers=self.auth_headers, json={"printer_name": "SV08"})
+        self.assertEqual(response.status_code, 200)
+        row = self._read_rows()[0]
+        self.assertEqual(row["filament_mm"], "")
+        self.assertEqual(row["material_cost"], "")
+        self.assertEqual(row["total_cost"], "")
+
     def test_job_cancel_twice_is_idempotent(self):
         self.live_module.start_job("SV08", "Cube_PETG_0.2_11m55s.gcode", start_time=1000.0)
 

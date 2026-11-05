@@ -78,7 +78,7 @@ def main():
                 failed_requests=[]
                 page.on('requestfailed',lambda request:failed_requests.append({'url':request.url,'failure':request.failure}))
                 results=[]
-                routes=['/','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/inventory','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events']
+                routes=['/','/reports','/projects','/projects/'+project+'/pricing','/recalculate','/inventory','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events','/estimates']
                 if '--workflows-only' in sys.argv:routes=[]
                 try:
                     sizes=[(1920,1080,1,'large'),(1440,1000,1,'desktop'),(900,900,1,'narrow'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')]
