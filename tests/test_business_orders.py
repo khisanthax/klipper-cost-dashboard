@@ -98,6 +98,7 @@ class BusinessOrderTests(unittest.TestCase):
             dashboard = self.client.get("/")
             projects = self.client.get("/projects")
             self.assertNotIn(b'href="/orders"', dashboard.data)
+            self.assertIn(b'href="/projects"', dashboard.data)
             self.assertNotIn(b'href="/orders"', projects.data)
             blocked = self.client.get(path)
             self.assertEqual(blocked.status_code, 403)
@@ -109,3 +110,48 @@ class BusinessOrderTests(unittest.TestCase):
         self.assertIn(b'href="/orders"', self.client.get("/").data)
         self.assertIn(b"Private customer", self.client.get(path).data)
         self.assertEqual(self.orders.get_order(self.project.id), saved)
+
+    def test_reopen_and_draft_deletion_preserve_assigned_jobs(self):
+        self._add_job("kept-job", time_cost=1, material_cost=2, total_cost=2)
+        with self.db.connect_db() as conn:
+            before = tuple(conn.execute("SELECT * FROM jobs WHERE job_uid='kept-job'").fetchone())
+        self.orders.save_order(self.project.id, dict(status="draft", priority="normal"))
+        for status in ("active", "complete", "complete", "active", "draft"):
+            old = self.orders.get_order(self.project.id)
+            self.orders.save_order(self.project.id, dict(status=status, priority="normal", revision=old["updated_at"]))
+            current = self.orders.get_order(self.project.id)
+            if status == "complete":
+                self.assertIsNotNone(current["completed_at"])
+                if old["status"] == "complete":
+                    self.assertEqual(current["completed_at"], old["completed_at"])
+            else:
+                self.assertIsNone(current["completed_at"])
+        self.orders.save_order(self.project.id, dict(action="delete", revision=current["updated_at"]))
+        self.assertIsNone(self.orders.get_order(self.project.id))
+        self.assertIn(self.project.id, self.projects.load_projects())
+        with self.db.connect_db() as conn:
+            self.assertEqual(tuple(conn.execute("SELECT * FROM jobs WHERE job_uid='kept-job'").fetchone()), before)
+
+    def test_zero_revenue_loss_and_unknown_revenue_are_distinct(self):
+        self._add_job("expense", time_cost=1, material_cost=2, total_cost=2)
+        for revenue, expected in (("0", Decimal("-2.00")), ("", None)):
+            prior = self.orders.get_order(self.project.id)
+            self.orders.save_order(self.project.id, dict(
+                status="active", priority="normal", quote="100", selling_price="100", expenses="0",
+                revenue=revenue, revision=prior["updated_at"] if prior else "",
+            ))
+            order = self.orders.get_order(self.project.id)
+            financial = self.orders.financial_view(self.project, order)
+            self.assertEqual(financial["actual"]["adjustment"], Decimal("-1.00"))
+            self.assertEqual(financial["profit"], expected)
+            self.assertIsNone(financial["margin"])
+
+    def test_invalid_currency_values_do_not_replace_saved_amounts(self):
+        self.orders.save_order(self.project.id, dict(status="draft", priority="normal", revenue="12.34"))
+        before = self.orders.get_order(self.project.id)
+        for value in ("-0.01", "NaN", "Infinity", "1.001", "1000000000.01"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.orders.save_order(self.project.id, dict(
+                    status="active", priority="normal", revision=before["updated_at"], revenue=value,
+                ))
+            self.assertEqual(self.orders.get_order(self.project.id), before)

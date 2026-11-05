@@ -20,6 +20,19 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Orders lifecycle and revised mode coverage
+
+- **Status.** Extended the stacked milestone E candidate in PR 66 and integrated the revised Personal mode Projects navigation from PR 65.
+- **Verification.** Added full Draft/Active/Complete/reopen/delete transitions, stable completion times on repeated saves, assigned-job preservation, signed-cost reconciliation, explicit zero revenue versus unknown revenue, and invalid currency rejection. The mode regression verifies Projects remains accessible while Orders keeps its Business presentation rule.
+- **Release.** Required CI, review, merge and deployment remain the promotion gates.
+
+### 2026-11-05 — Personal mode includes Projects
+
+- **Status.** Updated the milestone D candidate in PR 65 for the owner's revised Personal mode requirement.
+- **Changes.** Projects remains in the ordinary navigation for Personal, Advanced and Business. Reports and Recalculate retain the existing Advanced and Business presentation rules. Settings and the mode guide describe the revised scope.
+- **Verification.** The cross-browser SQL regression and the desktop/tablet/mobile browser workflow require the Projects link in every mode while verifying preserved jobs and assignments. Required CI validates the candidate head.
+- **Release.** Review, merge and deployment are pending.
+
 ### 2026-11-04 — Milestone D application modes
 
 - Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.

@@ -4,6 +4,8 @@ On a SQL-only installation, select **Business** in **Settings → Other → Appl
 Customer name, description, notes, due date and priority are optional business
 context. Completing an order records its completion time. Reopening it clears
 that time so a later completion can be recorded.
+Saving an already Complete order retains its original completion time. Status
+changes can reopen completed work through Active or Draft.
 
 Assign tracked jobs, record manual work and manage plans in the linked project.
 Each project has at most one order. Removing a draft order preserves its project

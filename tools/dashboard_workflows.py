@@ -41,9 +41,7 @@ def exercise(page,context,base,project,data,artifacts):
         assert selector.input_value() == mode
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         page.goto(base + "/")
-        assert page.get_by_role("navigation", name="Primary navigation").get_by_role("link", name="Projects").count() == (
-            0 if mode == "personal" else 1
-        )
+        assert page.get_by_role("navigation", name="Primary navigation").get_by_role("link", name="Projects").count() == 1
         assert query("SELECT * FROM jobs ORDER BY job_uid") == original_mode_jobs
         if mode == "personal":
             assert page.goto(base + "/projects?edit_project=" + project).ok
