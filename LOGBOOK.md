@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Orders retargeted after validated Modes merge
+
+- Modes PR 65 merged normally at `4cfa69c31f86049e9ab64cd596dfefa186b24e7e` after exact-head validation. Restacked Orders over that commit and retargeted PR 66 to main. Runtime source is unchanged from the prepared stack; required CI is rerun for this ancestry.
+- Final migration review: 0009 adds only the project-backed Orders table, nonnegative optional integer-cent amounts and an `ON DELETE RESTRICT` project reference. No jobs, original prices or inventory rows are rewritten. The eight focused lifecycle/financial/legacy-identity regressions passed before this ancestry-only update. No v0.9.0 release or deployment is claimed.
+
 ### 2026-11-05 — Orders prepared over the v0.8.0 feature cohort
 
 - Integrated b154137 feature baseline (Orders through the updated modes stack), retaining canonical export, stable expanded-panel actions and printer-page telemetry/history. Additive feature browser routes and shared workflows remain tested together. No feature deployment or public exposure is claimed. Strict exact-head CI and cohort tag boundaries govern future normal merges.
