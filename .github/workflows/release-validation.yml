@@ -81,3 +81,4 @@ jobs:
           docker run --rm kcd-release-ci python tools/smoke_production.py
           python tools/dashboard_docker_upgrade.py --image kcd-release-ci
           python tools/demo_container_smoke.py kcd-release-ci
+          python tools/dashboard_docker_upgrade.py --image kcd-release-ci --baseline v0.7.2

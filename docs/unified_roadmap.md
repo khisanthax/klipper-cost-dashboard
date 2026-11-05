@@ -204,6 +204,11 @@ The November 1 proposal's v0.5.1 baseline is historical. Preserve the released C
 | I | Notifications and exports | [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) adds a versioned SQL project JSON snapshot. Order, inventory and printable exports and optional notification delivery remain work. |
 
 These PRs are separate review candidates. Rebase and validate each against current main before release. Review the stacked Business Orders after Modes, reconcile overlapping reporting and Projects changes, and retest the demo route policy with integrated features. Retain previous rollback images and coordinated archives.
+### Release and recovery priorities
+
+1. Preserve the two SV07 cancellations already recovered on November 4; the November 5 read-only check confirms canceled outcomes and null costs. Complete PR 61 review and the v0.7.4 release process without replaying that recovery.
+2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
+3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
 ## Deferred Feature Track
 
@@ -228,6 +233,7 @@ These PRs are separate review candidates. Rebase and validate each against curre
 - Advanced is the default and preserves the existing controls. Personal includes Projects and simplifies the remaining advanced navigation and dashboard controls. The stacked milestone E candidate adds Orders and profitability to Business on SQL-only installations. Switching modes retains the saved orders.
 - The preference uses the existing SQL schema and keeps history, project assignments, and prices unchanged. Compatibility installations also support the selector.
 - See [Application modes](application-modes.md) for the operator workflow. See the logbook for validation and release status.
+- The candidate is not merged or deployed. Orders enforce their Business-mode boundary; presentation modes do not replace service authentication.
 
 ### Historical reporting
 
