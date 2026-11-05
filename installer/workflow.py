@@ -35,6 +35,36 @@ def master_request(master, key, payload=None):
         raise RuntimeError("Master network/response failure; registration was not verified, rerun repair") from None
 
 
+def _upgrade_managed_event_payloads(config):
+    """Upgrade only recognizable managed payload lines; keep surrounding custom logic."""
+    start = '{% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}'
+    cancel = '{% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}'
+    def section(match):
+        text = match[0]
+        if match[1] == "KCD_JOB_START" and start in text:
+            text = text.replace(start, '\n    '.join([
+                '{% set attempt_token = printer.toolhead.estimated_print_time|string %}',
+                'SET_GCODE_VARIABLE MACRO=_KCD_VARS VARIABLE=attempt_token VALUE=\'"{attempt_token}"\'',
+                '{% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament ~ "|" ~ attempt_token %}',
+            ]))
+        if match[1] == "KCD_JOB_CANCEL" and cancel in text:
+            text = text.replace(cancel, '\n    '.join([
+                '{% set filament_mm = printer.print_stats.filament_used|default("") %}',
+                '{% set attempt_token = printer["gcode_macro _KCD_VARS"].attempt_token|default("", true)|string %}',
+                '{% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed ~ "|" ~ filament_mm ~ "|" ~ attempt_token %}',
+            ]))
+        return text
+    config = re.sub(r'^\[gcode_macro (KCD_JOB_START|KCD_JOB_CANCEL)\]\n.*?(?=^\[|\Z)',
+                    section, config, flags=re.M | re.S)
+    if "VARIABLE=attempt_token" in config:
+        def variables(match):
+            if re.search(r'^variable_attempt_token:', match[0], re.M):
+                return match[0]
+            return re.sub(r'^(variable_printer_name:.*)$', r'\1\nvariable_attempt_token: ""', match[0], count=1, flags=re.M)
+        config = re.sub(r'^\[gcode_macro _KCD_VARS\]\n.*?(?=^\[|\Z)', variables, config, flags=re.M | re.S)
+    return config
+
+
 def client_plan(config_dir, name, master, key):
     from . import utils
     directory = Path(config_dir).resolve()
@@ -63,6 +93,7 @@ def client_plan(config_dir, name, master, key):
         for section in re.finditer(r'^\[(gcode_shell_command kcd_job_\w+|gcode_macro KCD_JOB_\w+)\]\n.*?(?=^\[|\Z)', rendered, re.M | re.S):
             if not re.search(r'^\['+re.escape(section[1])+r'\]', config, re.M | re.I):
                 config += "\n" + section[0]
+        config = _upgrade_managed_event_payloads(config)
     plan = {current: (config, 0o644)}
     for filename, generator in [("kcd_job_start.sh", utils.generate_job_start_script),
              ("kcd_job_cancel.sh", utils.generate_job_cancel_script),

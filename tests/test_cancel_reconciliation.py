@@ -87,3 +87,8 @@ class CancelRecoveryTests(unittest.TestCase):
                 self.assertEqual(payload["printer_name"], "SV07")
                 self.assertEqual(payload["filename"], "Maker's same file.gcode")
                 self.assertEqual(payload["elapsed_seconds"], 20.5)
+                measured = json.loads(subprocess.check_output(
+                    ["bash", str(script), *prefix, "SV07|same.gcode|20.5|454.66522|attempt-1"], env=env,
+                ))
+                self.assertEqual(measured["filament_mm"], 454.66522)
+                self.assertEqual(measured["attempt_token"], "attempt-1")
