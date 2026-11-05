@@ -2,6 +2,11 @@
 
 ## Purpose
 
+The [completion execution plan](completion-program.md) records the November 5
+inventory, branch dependencies, release sequence and externally imposed gates.
+Personal mode includes Projects under the current owner directive. Full
+Recompute remains deferred.
+
 This document is the single source of truth for Klipper Cost Dashboard roadmap planning. It captures:
 
 - project history
@@ -182,9 +187,9 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ## Next Planned Work
 
-1. Continue production monitoring and intentionally review SV07's retained cancelled-job discrepancy; do not automatically finalize uncertain tracking.
-2. Review/merge the deployment handoff documentation. Retain v0.7.2 and earlier recovery artifacts and follow the established validation, backup and immutable-digest process for future releases.
-3. Choose further work deliberately. Full Recompute remains deferred. Physical hardware, assistive-technology, and long-running performance certification are separate validation limits.
+1. Preserve the two SV07 cancellations already recovered on November 4; the November 5 read-only check confirms canceled outcomes and null costs. PR 61 merged under the owner-authorized solo-maintainer policy. Complete the separately coordinated v0.7.4 release process without replaying that recovery.
+2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
+3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
 ## Deferred Feature Track
 
@@ -205,10 +210,16 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ### Application modes
 
-- Milestone D implements a global, reversible Personal, Advanced, or Business preference on the application-modes branch.
-- Advanced is the default and preserves the existing controls. Personal includes Projects and simplifies the remaining advanced navigation and dashboard controls. Business includes Advanced pending the order and profitability work in milestone E.
-- The preference uses the existing SQL schema and keeps history, project assignments, and prices unchanged. Compatibility installations also support the selector.
-- See [Application modes](application-modes.md) for the operator workflow. See the logbook for validation and release status.
+- status: implemented candidate in PR 65; not merged or deployed
+- current requirements:
+  - single global mode per KCD instance
+  - reversible switching with no data deletion
+  - Personal includes everyday history, Projects and basic pricing under the November 5 directive
+  - Advanced is the existing-installation default
+  - Business includes Advanced plus the separately reviewed Orders candidate in PR 66
+  - mode preferences preserve history, pricing, profiles, assignments and identities
+  - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
+- See [Application modes](application-modes.md) for the operator workflow and root LOGBOOK for exact validation and deployment status.
 
 ## Current Risks / Contradictions
 

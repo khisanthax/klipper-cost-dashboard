@@ -37,6 +37,8 @@ def _ensure_cost_fields(row: dict) -> dict:
 
     This keeps SQL rows consistent with CSV behavior.
     """
+    if row.get("status") == "canceled" and row.get("filament_mm") in (None, ""):
+        return row
     printer_name = str(row.get("printer") or "").strip()
     if not printer_name:
         return row
@@ -77,9 +79,14 @@ def _ensure_cost_fields(row: dict) -> dict:
     return row
 
 
-def write_job(row: dict) -> None:
+def write_job(row: dict, *, connection=None) -> None:
     mode = _mode()
     row = _ensure_cost_fields(row)
+    if connection is not None:
+        if mode != "sql":
+            raise ValueError("A shared job transaction requires SQL-only mode")
+        db_module.upsert_job(connection, row)
+        return
     if mode in ("csv", "dual"):
         append_row(CSV_FILE, HEADERS, row)
     if mode in ("sql", "dual"):
