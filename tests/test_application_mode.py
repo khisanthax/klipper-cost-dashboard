@@ -14,6 +14,17 @@ from core.sql_only import SqlOnlyFilesystemMonitor
 
 
 class ApplicationModeTests(unittest.TestCase):
+    def test_public_demo_context_uses_default_without_opening_mutable_storage(self):
+        import app
+
+        with app.app.test_request_context("/demo/"), patch.dict(os.environ, {"KCD_RUNTIME_MODE": "demo"}):
+            with patch.object(app, "get_application_mode", side_effect=AssertionError("Public demo must not open mutable storage")):
+                self.assertEqual(app.application_mode_context()["application_mode"], "advanced")
+            app.flask.g.demo_workspace_session = object()
+            with patch.object(app, "get_application_mode", return_value="personal") as setting:
+                self.assertEqual(app.application_mode_context()["application_mode"], "personal")
+                setting.assert_called_once_with()
+
     def test_compatibility_backends_remember_preference_and_reject_invalid_mode(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(application_mode, "DATA_DIR", tmp):
             for backend in ("csv", "dual"):
