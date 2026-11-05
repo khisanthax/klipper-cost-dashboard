@@ -61,6 +61,16 @@ class BackupConsistencyTests(unittest.TestCase):
 
     def test_archive_restores_consistent_sqlite_state_without_wal_files(self):
         self._seed_sql_state()
+        with closing(self.db_module.connect_db()) as conn:
+            conn.execute("""
+                INSERT INTO projects (id, project_uid, name, created_at, updated_at)
+                VALUES (1, 'order-project', 'Order project', 'fixture', 'fixture')
+            """)
+            conn.execute("""
+                INSERT INTO business_orders (project_id, status, priority, revenue_cents, expenses_cents, updated_at)
+                VALUES (1, 'active', 'normal', 250, NULL, 'fixture')
+            """)
+            conn.commit()
         with open(os.path.join(self.data_dir, "secret.json"), "w", encoding="utf-8") as handle:
             json.dump({"api_key": "sensitive"}, handle)
         with open(os.path.join(self.backups_dir, "old.tar.gz"), "wb") as handle:
@@ -83,8 +93,11 @@ class BackupConsistencyTests(unittest.TestCase):
         with closing(sqlite3.connect(restored_db)) as conn:
             schema = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
             job = conn.execute("SELECT job_uid, total_cost FROM jobs WHERE job_uid = ?", ("backup-job",)).fetchone()
-        self.assertEqual(schema, "0008_pricing_provenance")
+            order = conn.execute("SELECT status, revenue_cents, expenses_cents FROM business_orders").fetchone()
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        self.assertEqual(schema, "0009_business_orders")
         self.assertEqual(job, ("backup-job", 4.25))
+        self.assertEqual(order, ("active", 250, None))
 
     def test_archive_permission_hardening_is_applied(self):
         with patch.object(self.backup.os, "chmod", wraps=os.chmod) as chmod:

@@ -36,7 +36,7 @@
     }
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
     <h1 class="h3">Projects</h1>
     <div class="d-flex align-items-center gap-3">
         <form method="post" class="mb-0">
@@ -54,6 +54,7 @@
         <a class="btn btn-outline-secondary" href="/">Back to Dashboard</a>
     </div>
 </div>
+{% if show_orders and (not kcd_demo_mode or demo_endpoint_available('orders_page')) %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
 
 {% if not kcd_demo_mode or demo_endpoint_available('estimate_page') %}
 <p class="mb-3"><a href="{{ url_for('estimate_page') }}">Calculate a pre-print estimate</a></p>
