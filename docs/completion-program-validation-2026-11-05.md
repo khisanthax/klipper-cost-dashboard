@@ -1,7 +1,7 @@
 # KCD completion-program acceptance record
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes human-review blockers. Required PRs and strict CI remain enforced. Current production is verified v0.8.0 at b154137b; see its [actual evidence](v0.8.0-deployment-2026-11-05.md). Earlier v0.7.4 evidence remains the historical lifecycle deployment record.
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes human-review blockers. Required PRs and strict CI remain enforced. Current production is verified v0.10.0 at d5df3a81; see its [actual evidence](v0.10.0-deployment-2026-11-05.md). Earlier v0.7.4 evidence remains the historical lifecycle deployment record.
 This record distinguishes candidate validation from production deployment.
 The read-only production baseline below was v0.7.3; subsequent actual deployment
 outcomes belong in LOGBOOK and release evidence. PRs 61, 71, 68 and 69 have merged;
@@ -70,11 +70,11 @@ KCD after verified backup/restore; history, configuration and objects remained u
 | Operation | Status | Required next condition |
 | --- | --- | --- |
 | Required main review policy | Updated | Zero human approvals; inspect final diff/migrations, resolve findings and require strict validate/compile checks |
-| Main integration / release / production deployment | Incremental | Lifecycle/governance shipped in v0.7.4; 68/69/62 are now verified deployed in v0.8.0 at b154137b. Later Modes/Orders code is not yet deployed |
+| Main integration / release / production deployment | Incremental | Lifecycle/governance shipped in v0.7.4; 68/69/62 shipped v0.8.0; Modes/Orders 65/66 are verified deployed v0.9.0 at c282f889. Inventory/reporting67/70 is verified deployed v0.10.0 at d5df3a81; optional administration/demo remains isolated for the next cohort |
 | Public demo exposure | Not performed | Explicit approval of a concrete endpoint and security configuration, followed by target-specific TLS/egress/capacity verification |
 | Physical Pi fresh installation / real power failure / native toolbar zoom / assistive-technology certification | Not tested here | Separate physical/environment validation; automated viewport/CSS zoom and axe results do not establish these |
 | Utilization / profit / ROI without defined availability or revenue data | Not implemented by inference | Approved semantics and valid source data; cost alone is insufficient |
 
-The running v0.8.0 digest and checks are recorded in its linked actual evidence.
+The running v0.10.0 digest and checks are recorded in its linked actual evidence.
 Existing v0.7.3 and earlier rollback evidence remains intact. A passing candidate does not replace
 the repository's required CI or final engineering inspection.

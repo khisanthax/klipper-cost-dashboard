@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.10.0 - 2026-11-05
+
+- Add physical spool inventory with exact milligram accounting, explicit verified consumption, idempotent replay, linked corrections, manual adjustment reasons, archival and recovery. Estimated consumption does not silently deduct physical stock or rewrite historical costs.
+- Add monthly saved outcomes, measurements and cost coverage, local-time/printer filters and prior-month comparisons. Preserve unknown/zero/signed values and invalidate SQL reports after relevant content changes.
+- Give explicit Moonraker terminal outcomes precedence during new imports, and prevent permanent-thumbnail deletion racing new attachments.
+- Additive 0010/0011 inventory migrations retain prior business rows. [Verified production deployment and v0.9.0 rollback evidence](docs/v0.10.0-deployment-2026-11-05.md).
+
+## v0.9.0 - 2026-11-05
+
+- Add Personal, Advanced and Business presentation modes; existing installations retain Advanced and switching preserves business data.
+- Add SQL project-backed Orders with Business-mode guards, lifecycle tracking, optional customer/scheduling data, distinct cost/quote/price/revenue/profit fields and unknown-value handling without repricing historical prints.
+- Apply pending SQL migration DDL and its ledger entry atomically; preserve additive 0009 schema and recovery behavior under failures/concurrency.
+- [Verified production deployment and rollback evidence](docs/v0.9.0-deployment-2026-11-05.md): immutable image, fresh restored backup, unchanged historical data, Advanced default and direct Orders boundary.
+
 ## v0.8.0 - 2026-11-05
 
 - Add individual registered-printer pages with verified telemetry, missing-value handling, recorded-cost history, date comparisons and stable pagination.

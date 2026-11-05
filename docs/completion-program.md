@@ -1,22 +1,23 @@
 # KCD completion and release execution plan
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 and v0.8.0 completed verified deployment; the next cohort is Modes/Orders.
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 through v0.10.0 completed verified deployment; all requested source work is implemented. The final optional-service packaging cohort must finish strict CI, normal integration, tagging and verified deployment.
 The initial inventory was checked on 2026-11-05 at main `7892765`.
 This plan coordinates existing branches. The unified roadmap remains the product
 roadmap and root LOGBOOK records completed operations and evidence.
 
 ## Verified state
 
-Production is now verified v0.8.0 at immutable index
-`sha256:3e00a068e7505ee9753b4aa03faf735876c909f6b8abcd913f99c23b22e5df6d`,
-revision `b154137b`, with 1,047 preserved jobs, four connected/identity-verified
-printers, SQL schema `0008_pricing_provenance`, 316 verified objects and 435 archived
-references. Both SV07 recovered rows visibly show Canceled and Unpriced. See
-[actual deployment and rollback evidence](v0.8.0-deployment-2026-11-05.md).
-PR 58 is superseded/closed; 61/71 and 68/69/62 have merged normally and shipped in
-their recorded release cohorts. Modes is merged for v0.9.0 but not yet deployed. The
-remaining candidates and release cohorts below continue through strict CI.
+Production is now verified v0.10.0 at immutable index
+`sha256:dad13e3622dc253b324cf24ff9ca23c8c1d19c6b145ca4fd18efad6883c16822`,
+revision `d5df3a81`, with 1,047 preserved jobs, four connected/identity-verified
+printers, SQL schema `0011_inventory_recovery`, 316 objects and 435 archived
+references. Inventory and Orders remain empty, Advanced remains unchanged.
+Both SV07 recovered rows show Canceled and Unpriced. Actual per-printer monthly
+counts/outcomes and saved cost subtotals matched SQL. See
+[deployment and rollback evidence](v0.10.0-deployment-2026-11-05.md).
+PR 58 is superseded/closed; 61/71, 68/69/62, 65/66 and 67/70 have merged normally
+and shipped in their recorded cohorts. Private administration PR 63 is merged at ce42e1d; the isolated-demo implementation is complete and this final PR 64 integration carries the remaining v0.11.0 packaging gate. Shipping optional code does not activate either service or public exposure.
 Existing local test edits and production configuration are retained.
 
 The owner replaced the unavailable-human-review gate on November 5 with the
@@ -42,14 +43,14 @@ map to the inventoried PRs, including the preserved v0.7.2 documentation branch.
 | 1 | 61 · lifecycle recovery | Complete: merged normally with governance PR 71, published/deployed v0.7.4 at 237ccc88; fresh backup, isolated restore and live Canceled/Unpriced checks passed. |
 | 2 | 58 · older handoff | Complete: useful AGENTS and historical v0.7.2 evidence preserved in merged PR 71; stale PR 58 closed with linked handoff. |
 | 3 | 62 · printer pages | Complete in verified v0.8.0: all four actual printer pages, recorded values, comparisons and responsive layouts checked. |
-| 4 | 63 · browser installer | Depends on 61. Finish scoped discovery, effective macro inspection and actionable repair diagnostics through the same CLI engine. Keep service and destructive host operations CLI-only. |
-| 5 | 65 · modes | Personal now includes Projects under the Nov 5 directive. Verify direct routes, reversible settings and complete data preservation. |
-| 6 | 66 · orders | Depends on 65. Preserve Business gating after the modes correction. Complete transitions, partial financial inputs and deleted-project handling. |
-| 7 | 67 · inventory | SQL migration 0010. Review milligram ledger, exact-once replay, linked corrections, archival, concurrent writes and archive recovery. |
+| 4 | 63 · browser installer | Source complete and merged normally at ce42e1d after strict validation. Shared-engine configured local/SSH discovery, inspection, registration/repair, credential verification and private backup previews are packaged for v0.11.0. Advanced host/macro/destructive operations remain deliberately CLI-only; optional authenticated listener stays off in production. |
+| 5 | 65 · modes | Complete in verified v0.9.0: Advanced default preserved; modes/route/data preservation tested in fixtures and production read-only acceptance. |
+| 6 | 66 · orders | Complete in verified v0.9.0: Business lifecycle/financial boundaries tested in fixtures; production Advanced GET boundary and empty additive schema verified without customer mutations. |
+| 7 | 67 · inventory | Complete in verified v0.10.0: exact milligram ledger/replay/corrections/concurrency/archive recovery tested in fixtures; additive empty 0010/0011 schema and preserved production history verified. |
 | 8 | 68 · estimates | Complete in verified v0.8.0: signed reviewed plans and atomic SQL fixes validated in fixtures; production stateless previews and unchanged history verified. |
 | 9 | 69 · export | Complete in verified v0.8.0: consistent private production export verified against SQL membership/costs/provenance without mutation. |
-| 10 | 70 · reports | Complete date/printer filters, known material/time costs, unavailable measurements and monthly comparisons across SQL/CSV/dual. |
-| 11 | 64 · demo | Finish isolated TLS/proxy tests, fail-closed host/auth/egress boundaries, expiration and interrupted-workspace recovery. Public exposure requires an approved target and security configuration. |
+| 10 | 70 · reports | Complete in verified v0.10.0: SQL/CSV/dual fixtures and real per-printer production counts/outcomes/saved costs verified without historical mutation. |
+| 11 | 64 · demo | Source and isolated staging complete; final integration PR 64 must pass strict combined CI and normal merge for v0.11.0. TLS/proxy/host/auth/egress, quotas, reset/expiry/interruption and cross-visitor boundaries are tested. Owner explicitly chose to keep it isolated; no public endpoint or pending approval blocker. |
 
 Orders migration 0009 and inventory migrations 0010/0011 are additive. Migration
 0011 preserves 0010 and adds correction/recovery records for existing installations. Verify upgrade
@@ -99,13 +100,11 @@ preservation, permanent object hashes, all four printer identities and the featu
 through its normal browser flow. Attach sanitized deployment and rollback evidence
 to the release and commit the actual outcome to LOGBOOK.
 
-## Current blockers and continuing work
+## Final packaging and deployment gate
 
-Human review is no longer a blocker. Finish required CI and normal incremental
-merges, then publish and deploy verified releases with coordinated backups.
-Public demo publication still requires explicit approval of its concrete endpoint
-and security configuration. Isolated implementation and staging continue without
-public exposure.
+All requested source implementations are complete. Finish the exact-head combined service CI and final normal merge, then publish and deploy v0.11.0 with its own coordinated backup and live verification. No source item is awaiting an unavailable human reviewer.
+The owner explicitly chose to keep the demo isolated. Complete implementation and
+isolated staging without public exposure or production demo activation.
 
 The [November 5 production check](completion-program-production-2026-11-05.md)
 confirms all four loaded identities, both previously recovered SV07 rows, SQL

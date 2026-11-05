@@ -11,7 +11,7 @@ import sys
 from contextlib import closing
 
 
-def exercise(env,base,moon,tmp):
+def exercise(env,base,moon,tmp, *, browser_admin=False):
     assert os.name=='posix','SSH Docker fixture requires Linux'
     root=Path(tmp);key=root/'fixture-key';config=root/'ssh-config';known=root/'known-hosts'
     real_ssh=shutil.which('ssh');real_scp=shutil.which('scp')
@@ -62,6 +62,9 @@ def exercise(env,base,moon,tmp):
             artifact=Path(__file__).resolve().parents[1]/'browser-artifacts'/'installer'
             artifact.mkdir(parents=True,exist_ok=True)
             (artifact/'remote-terminal.txt').write_text(menu.stdout)
+            if browser_admin:
+                from browser_web_admin import exercise_ssh
+                exercise_ssh(env, base, moon, tmp)
             payload['key']='wrong-fixture-credential'
             try:remote_operation('kcd-fixture','repair',payload);raise AssertionError('Wrong key accepted')
             except RuntimeError:pass
