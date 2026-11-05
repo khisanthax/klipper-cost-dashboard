@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Reports prepared over the v0.8.0 feature cohort
+
+- Integrated b154137 feature baseline (Orders through the updated modes stack), retaining canonical export, stable expanded-panel actions and printer-page telemetry/history. Additive feature browser routes and shared workflows remain tested together. No feature deployment or public exposure is claimed. Strict exact-head CI and cohort tag boundaries govern future normal merges.
+
+
 ### 2026-11-05 — Reports synchronized to current solo-maintainer main
 
 - Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
@@ -42,11 +47,75 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - SQL and compatibility Reports use the same installation timezone and decimal aggregation. The report cache refreshes on job edits. This work reads existing data and requires no migration. See [Monthly print outcomes](docs/report-outcomes.md) for the calculations.
 - The two disposable Python tests passed. They cover monthly timezone boundaries, SQL/CSV parity for recorded statuses, signed and zero costs, missing values, and cache refresh after a status edit. Standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including the monthly outcomes table and completion rate in the mobile layout.
 - [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) contains implementation commit `887451f`. Required CI, review, release, and deployment remain separate gates. Printer utilization, comparisons, report presets, and analytics over business records remain future Milestone F slices.
+### 2026-11-05 — Printer pages aligned to verified v0.7.4 handoff
+
+- Integrated main 1cdaf7e after verified v0.7.4 deployment evidence PR 72. This update changes ancestry/documentation only; the scoped printer-page code at d8f05d5 passed full Release Validation42073549728 and compile. Fresh strict CI is required for this head before normal merge into the v0.8.0 H/I/C cohort. No v0.8.0 deployment is claimed.
+
+
+### 2026-11-05 — Printer pages final export-cohort integration
+
+- Integrated main 5332e4b after PR 69, retaining its canonical snapshot export and stable expanded-panel browser helper. Final printer-page diff remains scoped to read-only identity/telemetry/history presentation with no migration or historical repricing. Fresh validate/compile checks are mandatory before normal merge. Production deployment remains a separate release operation.
+
+
+### 2026-11-05 — Printer pages integrated with reviewed estimates
+
+- Integrated current main cd8685d, preserving the atomic plan/manual mutation and signed estimate workflow from PR 68. Browser acceptance retains both printer-detail and estimate routes. No schema migration or historical repricing. Final required CI must pass before normal solo-maintainer merge; no deployment is claimed.
+
+
+### 2026-11-05 — Printer-detail candidate updated to current protected main
+
+- **Status.** Prepared the existing [PR 62](https://github.com/khisanthax/klipper-cost-dashboard/pull/62) against main `237ccc88ca2d413a421de633e4569181c7ba195b`. The merge preserves all lifecycle/recovery and governance changes from PRs 61/71. Feature merge, publication and deployment remain pending.
+- **Verification.** Six printer-detail cases passed with one host IANA-data skip; the history pagination regression passed. SQL-only filesystem validation reported zero legacy accesses. Compileall and diff checks passed. Final app/history/monitoring/template changes were inspected against main and introduce no schema migration or historical repricing. Independently read back successful combined [Release Validation 42069345011](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42069345011); this PR still requires its exact updated-head checks.
+- **Governance / production.** The owner-authorized solo-maintainer policy supersedes older human-approval blockers: normal PRs, strict validate/compile checks, resolved threads and protected deletion/force-push remain required. No fabricated review or administrator bypass is used. This candidate made no production contact; the release owner separately controls v0.7.4 publication and deployment. Coordinate feature merging after that release target is stable.
+- **Next.** Commit/push this base update, inspect exact-head CI and merge normally when checks pass and the coordinated release window permits it. Preserve existing printer identities, canceled/unpriced history and rollback evidence.
+
+### 2026-11-05 — Demo printer-card boundary
+
+- **Status.** PR 62 follow-up implemented and tested; not merged, released or deployed.
+- **Changes.** Demo printer cards retain readable identities while hiding detail-page links when the demo route policy denies access. Normal dashboard cards remain keyboard-accessible links.
+- **Verification.** All six printer-detail tests passed with one missing-IANA-data skip on Windows, including rendered normal/demo card assertions. The combined rehearsal will verify the real demo policy and browser workflow; production is unchanged.
+
+### 2026-11-05 — Printer pagination and missing measurement review
+
+- **Status.** Refined milestone C in PR 62.
+- **Changes.** Equal history timestamps now have a stable row-ID order across pages. Missing Moonraker durations and filament readings stay unknown, and live price components are calculated only for available measurements.
+- **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
+- **Release.** Review, merge and deployment are pending.
+### 2026-11-05 — v0.7.4 published and production deployment verified
+
+- **Status:** released and deployed on vaultwarden. Annotated [v0.7.4](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.4) targets `237ccc88ca2d413a421de633e4569181c7ba195b` (normal merged PRs 61/71). Container started **12:26:23 America/New_York**; final post-browser checks passed **12:29:34**. No administrator bypass or fabricated approval. Later estimates/export code is queued for v0.8.0 and is not in this running image.
+- **CI / architectures:** [post-merge validation 42070210473](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42070210473), compile 42070210190, main publication 42070210320, [tag validation/publication 42071334980](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42071334980) attempt 2 and tag compile 42071334608 passed. Includes 240 Linux tests, SQL/browser/installer/SSH/systemd/Docker and seeded v0.7.2/v0.7.3 upgrade/rollback. First tag attempt stalled downloading browser dependencies and was canceled; the same tag/SHA reran all gates. Registry configs independently verify amd64, arm64 and arm/v7 at exact v0.7.4/revision; ARM hardware was not executed.
+- **Live immutable image:** `ghcr.io/khisanthax/klipper-cost-dashboard:v0.7.4@sha256:9e11c14a716a52df6c27fa6245a3d2d584b9484123c63b4905eaf556d779186e`; image ID `sha256:10832fcb1d9a3ba826175797cbad9f282b6d24ac64f3f8d75bcb11aab17a47ac`. OCI labels and pinned reference inspected live. Private override `/home/khisanthax/kcd-v0.7.4.override.yml` differs only by image; environment, credential file and persistent mount unchanged. Host source fast-forwarded only to the v0.7.4 tag with prior local files retained.
+- **Fresh recovery evidence:** coordinated `data/backups/kcd_backup_20261105_120802.tar.gz`, SHA-256 `1f779930679e87c6e68927fc2cae4de93dfd1b2710ba92a4cec8ef57a44d5f6c`, 7,096,334 bytes, 0600. Isolated extraction and exact pinned image under network-none passed readiness/integrity/FK, archived-image HTTP hash and private API authentication. Retained v0.7.3 image/config, rollback tag and offline archive SHA-256 `6e3a97e1d532b98d3b3114f91aca6c19225bf2253d896872fae8d581d2b85bc5` (51,542,690 bytes, 0600); earlier recovery artifacts remain.
+- **Preservation:** five SQL checks passed, schema 0008, integrity ok and zero foreign-key violations. **1,047 jobs**, all business tables, historical prices/original snapshots, printer configuration and **435 archived references** unchanged; **316 objects** matched size/SHA-256. Report cache alone may refresh during GET smoke. Four Moonraker connections/loaded identities passed; actual local Klipper/Moonraker PIDs/activation timestamps matched. No physical G-code, printer restart, recovery replay or recalculation. A broad verification filter initially included an unrelated auto-retrying OctoEverywhere bridge; targeted actual printer-service checks passed without another recreation.
+- **SV07 / browser:** actual GET-only Chromium verified both recovered rows visibly **CANCELED / Unpriced**, ten routes returned 200 without JavaScript exceptions, four identity-verified telemetry connections, no mobile page overflow and visible History checkboxes. No form submitted; unarchived recovery requests blocked. Raw duration/filament and NULL prices remained unchanged after browser smoke.
+- **Evidence / next:** [sanitized deployment and rollback report](docs/v0.7.4-deployment-2026-11-05.md), attached to the release; private snapshots/archives remain on host and private browser traces locally. Continue v0.8.0 under the [solo policy](docs/solo-maintainer-release-policy.md), with its own backup/deployment checks. Public demo exposure still requires approved target/security configuration. Physical-device, screen-reader and long-soak limits remain; no v0.8.0 deployment is claimed.
+
+### 2026-11-05 — Stable real-browser project actions
+
+- Confirmed CI42070581140 timeout from Playwright trace: Delete clicked during Bootstrap expansion, no dialog/POST, server healthy. The browser helper now waits for expanded/non-collapsing state before acting. Retained failure evidence; no product deletion behavior changed. Integrated main cd8685d (reviewed estimates/atomic SQL). Exact-head CI remains required; no new deployment claim.
+
+
 ### 2026-11-05 — Current solo-maintainer integration
 
 - Integrated validated lifecycle and owner-authorized solo policy from main237ccc88. Human review is no longer a blocker; strict validate/compile checks and normal PR merges remain mandatory. This feature is not deployed; production release is coordinated separately. Final CI must pass on this exact updated head.
 
 
+### 2026-11-05 — Project export completion and snapshot validation
+
+- **Status.** Completed the existing [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) candidate on `codex/project-json-export`; not merged, released or deployed.
+- **Changes.** Export now includes recorded overrides, raw/outcome evidence and a separate whitelisted original-price snapshot for assigned jobs. Documented version 1, explicit units, nulls and SQLite numeric precision. Legacy empty project UIDs resolve consistently. No export mutation or unrelated project data is included. Integration with application modes hides the export link in Personal while retaining direct-link compatibility; this is presentation rather than authentication.
+- **Verification.** Three focused tests passed: precision/zero/signed/null provenance, real WAL concurrent-writer snapshot consistency, and the Flask attachment/no-store/404 boundary. The actual Chromium workflow passed with 515 synthetic jobs and a real browser attachment download. Failure screenshot/trace from an incorrect test-unit assertion was retained before correction; the product download passed on rerun.
+- **Production / next.** Production is unchanged. Full Release Validation must pass at this head, followed by the required eligible non-author review and incremental integration. Main currently has no eligible collaborator other than the author; do not bypass its review rules.
+- **Demo integration.** Export navigation respects the isolated demo's explicit route policy. A template regression verifies the unavailable download is hidden; the server's default-deny policy remains authoritative.
+- **Identity follow-up.** Four focused export tests now pass. A canonical numeric project UID takes priority over an unrelated older project's numeric row alias, preventing the requested download from including that legacy project's private data.
+
+### 2026-11-04 — Project export candidate
+
+- **Status.** Implemented the Milestone I project JSON export slice on `codex/project-json-export`. The candidate awaits review and validation before release.
+- **Implementation.** A versioned SQL snapshot exports one project's recorded job costs, manual entries, hypothetical plans and applied pricing snapshots separately. Unknown amounts stay null. The response is an attachment with no-store caching. CSV and dual installations retain their current workflow.
+- **Verification.** The focused SQL fixture passed. It verifies project isolation, unchanged history, null costs and separate projections and snapshots. The disposable dashboard browser workflow exercises the real HTTP download and missing-project response in CI.
+- **Next.** Integrate order and inventory exports after those features are reviewed. Notifications and printable financial reports are separate follow-up work.
 ### 2026-11-05 — Canonical project identity collision repair
 
 - **Status.** Implemented and tested in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68); review, merge, release and deployment remain pending.
@@ -174,6 +243,14 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Production / next action:** production remains v0.7.2; read-only Settings/Diagnostics Playwright checks passed for all four identities. Finish final validations and documentation, then mark PR 59 ready for required review. Retain all current production data, credentials, client files and rollback evidence.
 
 ## New entry template
+
+### 2026-11-04 — Milestone C, individual printer pages
+
+- **Status:** implemented on `codex/printer-detail` from `7892765`. Candidate only. Review, merge, release and deployment are pending.
+- **Changes:** dashboard printer cards open the selected registry identity. The dedicated page uses the shared read-only Moonraker observations for live progress, elapsed time, remaining-time estimates and live cost components. The history reader scopes to the printer and inclusive date range, preserves saved prices, and displays unavailable measurements separately. Date comparison, recorded workload, outcome charts and paginated job history use the same filtered rows.
+- **Verification:** focused SQL, identity and measurement tests passed on Windows. The daylight-saving test requires host IANA timezone data and is skipped when it is unavailable. `python tools/validate_sql_only.py` passed. Playwright coverage exercises keyboard navigation from the dashboard, live progress, comparison, responsive layouts and accessibility. Full-suite and release checks are tracked on the candidate PR.
+- **Production:** read-only SSH confirmed the existing v0.7.3 immutable image index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. The two Mercury instances are verified independently using distinct fixture endpoints and the loaded printer identity checks. The new page has no production deployment verification yet.
+- **Next step:** review the candidate and required release checks. Verify real Mercury 1 and Mercury 2 pages independently after a permitted safe deployment.
 
 ### 2026-11-02 — Final dashboard acceptance passed; ready for review
 
