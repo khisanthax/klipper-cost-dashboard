@@ -20,6 +20,8 @@ Open `http://127.0.0.1:6061/` and start the demo. Use a private browser session 
 
 The server sweeps expired workspaces every minute, with registry leases protecting active requests. Workspace creation has a transactionally enforced limit of 64 registry records by default. Individual workspace storage is capped at 25 MiB by default. Lower these settings to match available capacity. When full, the service returns a retryable 503 before cloning the seed. Use `python -m kcd demo cleanup --dry-run` to inspect due workspaces and `python -m kcd demo validate` to check the registry and current seed.
 
+New workspace creation is limited to five requests per ten minutes per client IP by default. Reset uses a separate per-workspace budget with the same configured limit. A rejected request returns 429 and `Retry-After`; it does not allocate a workspace. Configure the trusted proxy correctly so visitors use their actual source addresses, and account for shared NAT traffic when tuning the limits for an approved target.
+
 Run `python tools/browser_demo_regression.py` after installing the Playwright requirements, Chromium and OpenSSL. The test generates a short-lived local certificate in its private temporary directory and starts a loopback-only TLS proxy and backend. It exercises actual HTTPS desktop and mobile sessions, confirms Secure/HttpOnly/SameSite cookies, HSTS, host enforcement, stripped spoofed proxy headers, project isolation and reset, and checks that printer, installer and export endpoints are denied. It stores screenshots and a trace in `browser-artifacts/demo/`. The browser trusts this test certificate only inside its disposable contexts; this is not a public certificate or deployment.
 
 ## Isolated image acceptance

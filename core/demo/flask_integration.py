@@ -212,7 +212,7 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
 
         if endpoint == "demo_foundation_create":
             validate_same_origin(request, manager.configuration)
-            consume_rate(None, request, manager, "invalid_session")
+            consume_rate(None, request, manager, "lifecycle")
             return None
 
         token = request.cookies.get(manager.configuration.cookie_name, "")

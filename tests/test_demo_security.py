@@ -444,7 +444,24 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
         stranger = self.app.test_client()
         self.assertEqual(stranger.get("/unknown").status_code, 403)
         self.assertEqual(stranger.get("/unknown").status_code, 403)
+        self.assertEqual(stranger.get("/unknown").status_code, 403)
         self.assertEqual(stranger.get("/unknown").status_code, 429)
+
+    def test_workspace_creation_uses_a_separate_peer_scoped_lifecycle_budget(self):
+        self.manager.configuration = replace(
+            self.manager.configuration, rate_lifecycle_limit=2, rate_invalid_session_limit=100,
+        )
+        client = self.app.test_client()
+        self.assertEqual(client.post("/demo/foundation/session").status_code, 201)
+        self.assertEqual(client.post("/demo/foundation/session").status_code, 201)
+        limited = client.post("/demo/foundation/session", headers={"X-Forwarded-For": "198.51.100.20"})
+        self.assertEqual(limited.status_code, 429)
+        self.assertIn("Retry-After", limited.headers)
+        self.assertEqual(self.app.test_client().post(
+            "/demo/foundation/session", environ_overrides={"REMOTE_ADDR": "192.0.2.20"},
+        ).status_code, 201)
+        self.clock.advance(minutes=11)
+        self.assertEqual(client.post("/demo/foundation/session").status_code, 201)
 
     def test_network_boundary_blocks_direct_outbound_use(self):
         with self.assertRaises(DemoNetworkBlocked):

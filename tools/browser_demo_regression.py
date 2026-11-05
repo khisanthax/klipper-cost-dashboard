@@ -31,6 +31,16 @@ def wait_until_ready(server, base_url):
 
 
 def exercise(base_url):
+    def assert_unavailable_controls_hidden(page):
+        expect(page.locator(
+            "a[href^='/printers/'],a[href='/orders'],a[href='/inventory'],"
+            "a[href='/estimates'],a[href$='/export.json']"
+        )).to_have_count(0)
+        expect(page.locator(
+            "input[name='action'][value='clear_live_job'],"
+            "input[name='action'][value='update_application_mode']"
+        )).to_have_count(0)
+
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         with browser.new_context(viewport={"width": 1280, "height": 800}, ignore_https_errors=True) as first, \
@@ -47,6 +57,7 @@ def exercise(base_url):
                     button.focus()
                     button.press("Enter")
                     expect(page.get_by_label("Demo workspace")).to_be_visible()
+                    assert_unavailable_controls_hidden(page)
 
                 cookie = next(cookie for cookie in first.cookies(base_url) if cookie["name"] == "kcd_demo_session")
                 assert cookie["secure"] and cookie["httpOnly"] and cookie["sameSite"] == "Lax"
@@ -67,16 +78,26 @@ def exercise(base_url):
                 for path in ("/orders", "/inventory", "/estimates", "/api/estimates", "/estimates/plan"):
                     assert first.request.post(base_url + path).status == 403, path
                 assert first.request.post(base_url + "/settings/other", form={"action": "update_application_mode", "mode": "business"}).status == 403
+                assert first.request.post(base_url + "/", form={"action": "clear_live_job", "printer_name": "Demo"}).status == 403
                 assert first.request.post(base_url + "/job-cancel", data={"printer_name": "Demo"}).status == 403
 
                 desktop.goto(base_url + "/projects")
+                assert_unavailable_controls_hidden(desktop)
+                sample_pricing = desktop.locator('a[href^="/projects/"][href$="/pricing"]').first.get_attribute("href")
+                assert sample_pricing and first.request.get(base_url + sample_pricing).status == 200
+                assert first.request.get(base_url + "/settings/profiles").status == 200
                 create = desktop.locator("form").filter(has=desktop.locator('input[value="create_project"]'))
                 create.get_by_label("Project name", exact=True).fill("Visitor A test project")
                 create.get_by_role("button", name="Create", exact=True).click()
                 expect(desktop.get_by_text("Visitor A test project", exact=True).first).to_be_visible()
                 mobile.goto(base_url + "/projects")
+                assert_unavailable_controls_hidden(mobile)
                 expect(mobile.get_by_text("Visitor A test project", exact=True)).to_have_count(0)
                 mobile.screenshot(path=str(ARTIFACTS / "visitor-b-mobile.png"), full_page=True)
+
+                desktop.goto(base_url + "/settings/other")
+                expect(desktop.locator('input[value="update_application_mode"]')).to_have_count(0)
+                assert_unavailable_controls_hidden(desktop)
 
                 desktop.on("dialog", lambda dialog: dialog.accept())
                 desktop.get_by_role("button", name="Reset demo").click()
