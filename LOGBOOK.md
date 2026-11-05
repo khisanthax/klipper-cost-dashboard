@@ -20,6 +20,12 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Demo Orders boundary and browser fixture cleanup
+
+- **Status.** PR 66 follow-up implemented and tested on the latest PR 65 stack; not merged, released or deployed.
+- **Changes.** Demo navigation and Projects hide Orders links when the enforced demo policy denies them. Normal Business mode retains Orders. The browser acceptance fixture now closes both direct SQLite readers, preventing a Windows database-handle leak during temporary-directory cleanup.
+- **Verification.** All seven Orders tests passed, including denied-demo link absence, preserved project access and unchanged order records. The combined real Chromium workflow passed all product assertions before exposing the fixture cleanup issue; the corrected fixture requires its final integrated rerun. Production is unchanged.
+
 ### 2026-11-05 — Orders lifecycle and revised mode coverage
 
 - **Status.** Extended the stacked milestone E candidate in PR 66 and integrated the revised Personal mode Projects navigation from PR 65.

@@ -110,6 +110,16 @@ class BusinessOrderTests(unittest.TestCase):
         self.assertIn(b'href="/orders"', self.client.get("/").data)
         self.assertIn(b"Private customer", self.client.get(path).data)
         self.assertEqual(self.orders.get_order(self.project.id), saved)
+        import app
+        processors = app.app.template_context_processors[None]
+        with patch.dict(app.app.template_context_processors, {None: [*processors, lambda: {
+            "kcd_demo_mode": True, "demo_endpoint_available": lambda *_args: False,
+        }]}):
+            self.assertNotIn(b'href="/orders"', self.client.get("/").data)
+            demo_projects = self.client.get("/projects").data
+            self.assertNotIn(b'href="/orders"', demo_projects)
+            self.assertIn(b"Order fixture", demo_projects)
+        self.assertEqual(self.orders.get_order(self.project.id), saved)
 
     def test_reopen_and_draft_deletion_preserve_assigned_jobs(self):
         self._add_job("kept-job", time_cost=1, material_cost=2, total_cost=2)

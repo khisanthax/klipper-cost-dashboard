@@ -136,7 +136,7 @@ def main():
                             assert page.get_by_role('navigation',name='Primary navigation').get_by_role('link',name='Orders',exact=True).count()==(1 if mode=='business' else 0)
                         page.get_by_text('Completed at',exact=False).wait_for()
                         assert page.get_by_label('Customer (optional)').input_value()=='Fixture customer'
-                        with sqlite3.connect(Path(tmp)/'kcd.db') as connection:
+                        with closing(sqlite3.connect(Path(tmp)/'kcd.db')) as connection:
                             order_jobs_before=connection.execute('SELECT * FROM jobs ORDER BY job_uid').fetchall()
                         for status in ('active','draft'):
                             page.get_by_label('Status',exact=True).select_option(status)
@@ -146,7 +146,7 @@ def main():
                         page.once('dialog',lambda dialog:dialog.accept())
                         page.get_by_role('button',name='Delete draft order').click()
                         assert page.get_by_label('Customer (optional)').input_value()==''
-                        with sqlite3.connect(Path(tmp)/'kcd.db') as connection:
+                        with closing(sqlite3.connect(Path(tmp)/'kcd.db')) as connection:
                             assert connection.execute('SELECT * FROM jobs ORDER BY job_uid').fetchall()==order_jobs_before
                         page.goto(base+'/')
                         from dashboard_workflows import exercise

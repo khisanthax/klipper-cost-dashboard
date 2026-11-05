@@ -54,7 +54,7 @@
         <a class="btn btn-outline-secondary" href="/">Back to Dashboard</a>
     </div>
 </div>
-{% if show_orders %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
+{% if show_orders and (not kcd_demo_mode or demo_endpoint_available('orders_page')) %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
 
 {% if error %}
 <div class="alert alert-danger" role="alert">
