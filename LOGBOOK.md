@@ -20,12 +20,24 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Reports restacked after validated inventory integration
+
+- Integrated main 4827fb3 after PR 67, preserving additive 0010/0011, atomic migrations, exact-milligram inventory, combined Orders/inventory backup assertions and stable browser actions. Reports remain read-only over saved history and do not deduct stock or rewrite prices. No additional migration is introduced by Reports. Fresh strict CI is required before normal merge into v0.10.0; deployment is separately coordinated.
+
+
 ### 2026-11-05 — Reports prepared over atomic Orders migration support
 
 - Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.
 
 
 ### 2026-11-05 — Reports prepared over the v0.8.0 feature cohort
+### 2026-11-05 — inventory prepared over atomic Orders migration support
+
+- Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.
+- The 0010-to-0011 fixture now explicitly commits the simulated old installation before invoking migration, matching the new no-implicit-caller-commit contract and a real restart boundary. Original ledger/job preservation assertions remain unchanged.
+
+
+### 2026-11-05 — inventory prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — Orders aligned to verified v0.8.0 handoff
 
 - Integrated main 29d36df after actual v0.8.0 deployment evidence PR 73. Preserved all production records in the log and the unreleased atomic migration/ledger fix from 553e3b7. Migration SQL files/checksums remain unchanged. Final strict CI must prove the complete source and seeded image upgrade/rollback before normal merge into the v0.9.0 cohort. No production 0009 or Orders deployment is claimed.
@@ -69,6 +81,29 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - SQL and compatibility Reports use the same installation timezone and decimal aggregation. The report cache refreshes on job edits. This work reads existing data and requires no migration. See [Monthly print outcomes](docs/report-outcomes.md) for the calculations.
 - The two disposable Python tests passed. They cover monthly timezone boundaries, SQL/CSV parity for recorded statuses, signed and zero costs, missing values, and cache refresh after a status edit. Standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including the monthly outcomes table and completion rate in the mobile layout.
 - [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) contains implementation commit `887451f`. Required CI, review, release, and deployment remain separate gates. Printer utilization, comparisons, report presets, and analytics over business records remain future Milestone F slices.
+### 2026-11-05 — inventory synchronized to current solo-maintainer main
+
+- Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
+- Backported the proved combined-demo fixture correction: navigation tests explicitly model an authenticated workspace when checking that Inventory is hidden while Projects remains available. Public welcome pages intentionally have no workspace navigation. No authorization policy was loosened.
+
+
+### 2026-11-05 — Inventory corrections, estimates and recovery
+
+- **Status.** Additional implementation and acceptance in [PR #67](https://github.com/khisanthax/klipper-cost-dashboard/pull/67); not merged, released or deployed. No production actions.
+- **Changes.** Added explicitly separate job/spool estimates that never deduct stock, linked corrections to a job's measured consumption, stale-form protection, and archival/reactivation with retained audit history. Corrections append only the exact integer-milligram difference and preserve the original deduction and job costs. Historical job deletion preserves its captured identity and does not restore stock automatically. Replayed forms report that no further stock change occurred.
+- **Recovery.** Additive, repeatable migration `0011_inventory_recovery` retains the original `0010` schema and records. Spool archival blocks new assignment, estimates and stock edits until reactivation; hard deletion of audit history is not offered. Coordinated backups include balances, original events, linked corrections, estimates and lifecycle records.
+- **Verification.** Nine targeted inventory tests passed, including concurrent deductions/corrections, multi-spool usage, stale/replayed/invalid input, injected ledger-write rollback, deleted jobs and an original `0010` database upgrade. Nine backup tests passed with one Windows POSIX-permission skip, including exact inventory-table restoration, integrity and foreign keys. SQL-only filesystem validation passed. Real Chromium workflows passed estimate/no-deduction, measured duplicate, linked correction/replay/stale rejection, archive/blocked mutation/reactivation, unchanged historical job and mobile/tablet/200% CSS zoom layouts. Code commit `1a4d918` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42038413627) and Python Compile Check, including the complete Python/browser/axe/installer/SQL-only/Docker/upgrade suite. Screenshots and traces are retained in its browser-regression artifact. This follow-up changes documentation only; exact-head checks remain required.
+- **Remaining work.** Obtain the required code review after final head validation. Physical spool metadata and measured consumption remain independent from mutable pricing profiles; actual stock is never inferred from a pricing estimate or ordinary print event. Estimates use saved SQL job UIDs. Normal live state has no stable job UID before terminal logging, so a future live/planned inventory bridge needs an explicit identity contract; this implementation does not guess from filenames. See [inventory guide](docs/filament-inventory.md).
+- **Integration follow-up.** Inventory navigation now follows `show_advanced` when application modes are combined; standalone G defaults to visible. Personal still retains Projects, and direct Inventory URLs remain available because modes change presentation. An actual base-template render regression covers Personal, Advanced, default and compatibility navigation. All ten local inventory tests passed. Code commit `8986040` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42039318980) and compile, including all browser, installer and Docker checks. This final follow-up records that evidence only.
+- **Demo integration.** The Inventory link also respects the demo's endpoint-availability predicate, hiding the physical-stock surface while its direct routes remain denied by B policy. Normal standalone G short-circuits this predicate and retains its existing navigation. All ten local inventory tests passed, including hidden demo Inventory and retained sample Projects. Code `f168fdb` passed full [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42041190803) and compile. The PR is ready for required review; this final change records validation evidence only. No production changes or deployment.
+
+### 2026-11-04 — Milestone G physical spool inventory
+
+- **Status.** SQL-only implementation candidate on `codex/filament-inventory`. Production remains at the separately verified baseline below. This branch does not change pricing history, jobs or printer clients.
+- **Scope.** Added spool metadata and purchase information, printer assignment, low-stock display, an opening balance, measured corrections and explicitly verified per-job consumption. The integer-milligram journal and balance update commit in one SQLite transaction. An operation key prevents replay of a changed form and a spool/job key prevents duplicate deductions. A terminal job can consume from multiple spools. A historical job deletion preserves the recorded stock event and its captured job identity.
+- **Verification.** Four targeted SQLite tests passed locally, including concurrent retries for a canceled job, rollback of invalid amounts and no inventory access in compatibility mode. The coordinated backup test passed with a spool balance and measured deduction in its isolated restored database, including integrity and foreign-key checks. Existing Release Validation now exercises the Inventory browser flow and responsive layout.
+- **CI and browser.** Fixed an inaccessible printer selector label from the first browser pass. The corrected implementation at `1b5c47a` passed local Chromium mobile spool creation, assignment, measured canceled-job deduction and replay, low-stock display, and unchanged job cost. The full [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41873613169) and Python Compile Check passed, including SQL-only isolation, browser, installer, Docker and upgrade-preservation checks.
+- **Migration and next action.** Migration `0010_filament_inventory` adds tables without rewriting existing history. Review draft [PR #67](https://github.com/khisanthax/klipper-cost-dashboard/pull/67). Automatic and estimated deductions remain outside this slice. See [Filament inventory](docs/filament-inventory.md).
 ### 2026-11-05 — Orders restacked after estimate integrity repairs
 
 - Retained the canonical legacy project identity correction and latest application modes over main cd8685d. Browser acceptance preserves Orders and estimate coverage; no original historical cost is repriced. Migration 0009 remains additive. Exact-head CI and normal solo-maintainer merge remain required; no deployment is claimed.

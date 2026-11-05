@@ -135,6 +135,10 @@
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/recalculate') %}active{% endif %}"
                     href="{{ url_for('recalculate_page') }}">Recalculate</a>
                 {% endif %}
+                {% if inventory_available and show_advanced|default(true) and (not kcd_demo_mode or demo_endpoint_available('inventory_page')) %}
+                <a class="btn btn-sm btn-outline-light {% if request.path == '/inventory' %}active{% endif %}"
+                    href="{{ url_for('inventory_page') }}">Inventory</a>
+                {% endif %}
                 {% if show_orders and (not kcd_demo_mode or demo_endpoint_available('orders_page')) %}
                 <a class="btn btn-sm btn-outline-light {% if request.path == '/orders' %}active{% endif %}"
                     href="{{ url_for('orders_page') }}">Orders</a>
