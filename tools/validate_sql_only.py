@@ -64,6 +64,7 @@ def _detect_changes(before: Dict[str, Tuple[bool, float]]) -> Dict[str, str]:
 
 def _prepare_isolated_sql_state() -> None:
     from core import db
+    from core.application_mode import set_application_mode
 
     with db.connect_db() as conn:
         db.apply_migrations(conn)
@@ -81,6 +82,7 @@ def _prepare_isolated_sql_state() -> None:
             ),
         )
         conn.commit()
+    set_application_mode("business")
 
 
 def _run_validation() -> int:
@@ -100,6 +102,7 @@ def _run_validation() -> int:
                 "/reports",
                 "/projects",
                 "/inventory",
+                "/orders",
                 "/settings/printers",
                 "/settings/other",
                 "/system-events",

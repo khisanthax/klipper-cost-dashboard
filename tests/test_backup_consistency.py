@@ -79,6 +79,16 @@ class BackupConsistencyTests(unittest.TestCase):
                   "filament_consumption_estimates", "filament_spool_lifecycle_events", "filament_spool_archives")
         with closing(self.db_module.connect_db()) as conn:
             inventory_before = {table: [tuple(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY rowid")] for table in tables}
+        with closing(self.db_module.connect_db()) as conn:
+            conn.execute("""
+                INSERT INTO projects (id, project_uid, name, created_at, updated_at)
+                VALUES (1, 'order-project', 'Order project', 'fixture', 'fixture')
+            """)
+            conn.execute("""
+                INSERT INTO business_orders (project_id, status, priority, revenue_cents, expenses_cents, updated_at)
+                VALUES (1, 'active', 'normal', 250, NULL, 'fixture')
+            """)
+            conn.commit()
         with open(os.path.join(self.data_dir, "secret.json"), "w", encoding="utf-8") as handle:
             json.dump({"api_key": "sensitive"}, handle)
         with open(os.path.join(self.backups_dir, "old.tar.gz"), "wb") as handle:
@@ -101,6 +111,7 @@ class BackupConsistencyTests(unittest.TestCase):
         with closing(sqlite3.connect(restored_db)) as conn:
             schema = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
             job = conn.execute("SELECT job_uid, total_cost FROM jobs WHERE job_uid = ?", ("backup-job",)).fetchone()
+            order = conn.execute("SELECT status, revenue_cents, expenses_cents FROM business_orders").fetchone()
             balance = conn.execute("SELECT remaining_mg FROM filament_spools WHERE spool_uid=?", (spool,)).fetchone()[0]
             self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
@@ -108,6 +119,7 @@ class BackupConsistencyTests(unittest.TestCase):
         self.assertEqual(schema, Path(self.db_module._list_migration_files()[-1]).stem)
         self.assertEqual(job, ("backup-job", 4.25))
         self.assertEqual(balance, 885_875)
+        self.assertEqual(order, ("active", 250, None))
 
     def test_archive_permission_hardening_is_applied(self):
         with patch.object(self.backup.os, "chmod", wraps=os.chmod) as chmod:

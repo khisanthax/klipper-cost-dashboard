@@ -155,6 +155,9 @@ class InventoryTests(unittest.TestCase):
                     (event_uid,spool_uid,kind,delta_mg,job_uid,job_filename,reason,recorded_at)
                     VALUES (?,?,'verified_consumption',-10000,'old-job','old.gcode','Original measurement','2026-11-01T01:00:00Z')""", (original, spool))
                 before = tuple(conn.execute("SELECT * FROM filament_stock_events").fetchone())
+                # The old installation's fixture data must be committed before
+                # starting an upgrade; migration code never commits caller work.
+                conn.commit()
                 db.apply_migrations(conn)
                 self.assertEqual(tuple(conn.execute("SELECT * FROM filament_stock_events").fetchone()), before)
             inventory.correct_consumption(spool, uuid4(), original, "12", expected_grams="10", reason="New scale measurement")

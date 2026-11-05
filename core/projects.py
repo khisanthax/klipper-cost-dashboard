@@ -607,7 +607,12 @@ def _delete_project_sql(project_uid: str) -> None:
         if not row:
             return
         project_id = row["id"] if isinstance(row, sqlite3.Row) else row[0]
-        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        try:
+            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        except sqlite3.IntegrityError as exc:
+            if conn.execute("SELECT 1 FROM business_orders WHERE project_id = ?", (project_id,)).fetchone():
+                raise ValueError("This project has an order. Review the order before deleting its project.") from exc
+            raise
         conn.commit()
 
 
