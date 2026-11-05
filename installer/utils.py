@@ -966,6 +966,7 @@ verbose: True
 [gcode_macro _KCD_VARS]
 description: KCD installer variables (auto-generated)
 variable_printer_name: "__PRINTER_NAME__"
+variable_attempt_token: ""
 gcode:
 
 [gcode_macro KCD_JOB_START]
@@ -978,7 +979,9 @@ gcode:
     {% set fname = fname|replace('\\\\', '\\\\\\\\')|replace('\"', '\\\\\"') %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
-    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}
+    {% set attempt_token = printer.toolhead.estimated_print_time|string %}
+    SET_GCODE_VARIABLE MACRO=_KCD_VARS VARIABLE=attempt_token VALUE='"{attempt_token}"'
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament ~ "|" ~ attempt_token %}
     RUN_SHELL_COMMAND CMD=kcd_job_start PARAMS="{params}"
 
 [gcode_macro KCD_JOB_CANCEL]
@@ -989,7 +992,9 @@ gcode:
     {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
     {% set fname = fname|replace('\\\\', '\\\\\\\\')|replace('\"', '\\\\\"') %}
     {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
-    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    {% set filament_mm = printer.print_stats.filament_used|default("") %}
+    {% set attempt_token = printer["gcode_macro _KCD_VARS"].attempt_token|default("", true)|string %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed ~ "|" ~ filament_mm ~ "|" ~ attempt_token %}
     RUN_SHELL_COMMAND CMD=kcd_job_cancel PARAMS="{params}"
 
 [gcode_macro KCD_JOB_PAUSE]
@@ -1059,14 +1064,14 @@ fi
 # Older configs prepend a literal placeholder before Klipper appends PARAMS.
 if [ "${{1:-}}" = '{{params}}' ]; then shift; fi
 PARAMS="${{*:-}}"
-IFS='|' read -r PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT <<< "$PARAMS"
+IFS='|' read -r PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT ATTEMPT_TOKEN <<< "$PARAMS"
 PRINTER_NAME="${{PRINTER_NAME:-}}"
 FILENAME="${{FILENAME:-}}"
 EST_DURATION="${{EST_DURATION:-0}}"
 EST_FILAMENT="${{EST_FILAMENT:-0}}"
 
 
-export PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT
+export PRINTER_NAME FILENAME EST_DURATION EST_FILAMENT ATTEMPT_TOKEN
 
 PYBIN="$(command -v python3 || command -v python || true)"
 if [ -z "$PYBIN" ]; then
@@ -1080,6 +1085,7 @@ def to_float(v):
     try: return float(v)
     except: return 0.0
 data = {{
+    "attempt_token": os.environ.get("ATTEMPT_TOKEN", ""),
     "printer_name": os.environ.get("PRINTER_NAME", ""),
     "filename": os.environ.get("FILENAME", ""),
     "estimated_duration": to_float(os.environ.get("EST_DURATION", "0")),
@@ -1116,13 +1122,13 @@ fi
 # Older configs prepend a literal placeholder before Klipper appends PARAMS.
 if [ "${{1:-}}" = '{{params}}' ]; then shift; fi
 PARAMS="${{*:-}}"
-IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS <<< "$PARAMS"
+IFS='|' read -r PRINTER_NAME FILENAME ELAPSED_SECONDS FILAMENT_MM ATTEMPT_TOKEN <<< "$PARAMS"
 PRINTER_NAME="${{PRINTER_NAME:-}}"
 FILENAME="${{FILENAME:-}}"
 ELAPSED_SECONDS="${{ELAPSED_SECONDS:-0}}"
 
 
-export PRINTER_NAME FILENAME ELAPSED_SECONDS
+export PRINTER_NAME FILENAME ELAPSED_SECONDS FILAMENT_MM ATTEMPT_TOKEN
 
 PYBIN="$(command -v python3 || command -v python || true)"
 if [ -z "$PYBIN" ]; then
@@ -1139,8 +1145,11 @@ data = {{
     "printer_name": os.environ.get("PRINTER_NAME", ""),
     "filename": os.environ.get("FILENAME", ""),
     "event_time": time.time(),
+    "attempt_token": os.environ.get("ATTEMPT_TOKEN", ""),
     "elapsed_seconds": to_float(os.environ.get("ELAPSED_SECONDS", "0")),
 }}
+if os.environ.get("FILAMENT_MM", "").strip():
+    data["filament_mm"] = float(os.environ["FILAMENT_MM"])
 print(json.dumps(data))
 PY
 )
@@ -1666,6 +1675,7 @@ verbose: True
 [gcode_macro _KCD_VARS]
 description: KCD installer variables (auto-generated)
 variable_printer_name: "__PRINTER_NAME__"
+variable_attempt_token: ""
 gcode:
 
 [gcode_macro KCD_JOB_START]
@@ -1678,7 +1688,9 @@ gcode:
     {% set fname = fname|replace('\\\\', '\\\\\\\\')|replace('\"', '\\\\\"') %}
     {% set est_dur = printer.print_stats.estimated_time|default(0)|float %}
     {% set est_filament = printer.print_stats.filament|default(0)|float %}
-    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament %}
+    {% set attempt_token = printer.toolhead.estimated_print_time|string %}
+    SET_GCODE_VARIABLE MACRO=_KCD_VARS VARIABLE=attempt_token VALUE='"{attempt_token}"'
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ est_dur ~ "|" ~ est_filament ~ "|" ~ attempt_token %}
     RUN_SHELL_COMMAND CMD=kcd_job_start PARAMS="{params}"
 
 [gcode_macro KCD_JOB_CANCEL]
@@ -1689,7 +1701,9 @@ gcode:
     {% set fname = printer.print_stats.filename|default("unknown.gcode", true)|string %}
     {% set fname = fname|replace('\\\\', '\\\\\\\\')|replace('\"', '\\\\\"') %}
     {% set elapsed = printer.print_stats.print_duration|default(0)|float %}
-    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed %}
+    {% set filament_mm = printer.print_stats.filament_used|default("") %}
+    {% set attempt_token = printer["gcode_macro _KCD_VARS"].attempt_token|default("", true)|string %}
+    {% set params = printer_name ~ "|" ~ fname ~ "|" ~ elapsed ~ "|" ~ filament_mm ~ "|" ~ attempt_token %}
     RUN_SHELL_COMMAND CMD=kcd_job_cancel PARAMS="{params}"
 
 [gcode_macro KCD_JOB_PAUSE]
