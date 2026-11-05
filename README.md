@@ -318,6 +318,8 @@ KCD is actively developed. Runtime compatibility and upgrade safety matter, but
 APIs and internal formats may continue to evolve. Use GitHub issues for bug reports
 and focused feature proposals.
 
+The owner-authorized [solo-maintainer release policy](docs/solo-maintainer-release-policy.md) requires PRs and strict successful CI with zero human approvals. Inspect final diffs/migrations and merge normally; never fabricate reviews or bypass unrelated protections. Actual deployment state belongs in LOGBOOK and versioned deployment evidence.
+
 Pull requests intended for release must pass the unfiltered **Release Validation**
 workflow, including the full unit suite, compile checks, SQL-only isolation,
 production Docker build, and in-container CLI/tool smoke tests, before merge.
