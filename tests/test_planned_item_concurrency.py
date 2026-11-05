@@ -177,6 +177,22 @@ assert projects.load_manual_jobs()[project.id][0].manual_job_id==manual.manual_j
 assert projects.load_assignments()['historical']==project.id
 """)
 
+    def test_unknown_plan_weight_cannot_become_zero_manual_consumption(self):
+        self.fixture("""
+plan=projects.create_plan_item(project.id,'Unknown weight',60,None)
+try:
+    projects.convert_plan_item_to_manual(project.id,plan.plan_id)
+except ValueError as exc:
+    assert 'reviewed filament grams' in str(exc)
+else:
+    raise AssertionError('Unknown weight must not become zero consumption')
+with closing(db.connect_db()) as conn:
+    assert conn.execute('SELECT count(*) FROM manual_jobs').fetchone()[0]==0
+    assert conn.execute('SELECT est_filament_g FROM planned_items').fetchone()[0] is None
+projects.update_plan_item(plan.plan_id,est_filament_g=0)
+assert projects.convert_plan_item_to_manual(project.id,plan.plan_id).filament_g==0
+""")
+
 
 if __name__ == "__main__":
     unittest.main()
