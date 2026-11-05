@@ -20,11 +20,31 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Stable real-browser project actions
+
+- Confirmed CI42070581140 timeout from Playwright trace: Delete clicked during Bootstrap expansion, no dialog/POST, server healthy. The browser helper now waits for expanded/non-collapsing state before acting. Retained failure evidence; no product deletion behavior changed. Integrated main cd8685d (reviewed estimates/atomic SQL). Exact-head CI remains required; no new deployment claim.
+
+
 ### 2026-11-05 — Current solo-maintainer integration
 
 - Integrated validated lifecycle and owner-authorized solo policy from main237ccc88. Human review is no longer a blocker; strict validate/compile checks and normal PR merges remain mandatory. This feature is not deployed; production release is coordinated separately. Final CI must pass on this exact updated head.
 
 
+### 2026-11-05 — Project export completion and snapshot validation
+
+- **Status.** Completed the existing [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) candidate on `codex/project-json-export`; not merged, released or deployed.
+- **Changes.** Export now includes recorded overrides, raw/outcome evidence and a separate whitelisted original-price snapshot for assigned jobs. Documented version 1, explicit units, nulls and SQLite numeric precision. Legacy empty project UIDs resolve consistently. No export mutation or unrelated project data is included. Integration with application modes hides the export link in Personal while retaining direct-link compatibility; this is presentation rather than authentication.
+- **Verification.** Three focused tests passed: precision/zero/signed/null provenance, real WAL concurrent-writer snapshot consistency, and the Flask attachment/no-store/404 boundary. The actual Chromium workflow passed with 515 synthetic jobs and a real browser attachment download. Failure screenshot/trace from an incorrect test-unit assertion was retained before correction; the product download passed on rerun.
+- **Production / next.** Production is unchanged. Full Release Validation must pass at this head, followed by the required eligible non-author review and incremental integration. Main currently has no eligible collaborator other than the author; do not bypass its review rules.
+- **Demo integration.** Export navigation respects the isolated demo's explicit route policy. A template regression verifies the unavailable download is hidden; the server's default-deny policy remains authoritative.
+- **Identity follow-up.** Four focused export tests now pass. A canonical numeric project UID takes priority over an unrelated older project's numeric row alias, preventing the requested download from including that legacy project's private data.
+
+### 2026-11-04 — Project export candidate
+
+- **Status.** Implemented the Milestone I project JSON export slice on `codex/project-json-export`. The candidate awaits review and validation before release.
+- **Implementation.** A versioned SQL snapshot exports one project's recorded job costs, manual entries, hypothetical plans and applied pricing snapshots separately. Unknown amounts stay null. The response is an attachment with no-store caching. CSV and dual installations retain their current workflow.
+- **Verification.** The focused SQL fixture passed. It verifies project isolation, unchanged history, null costs and separate projections and snapshots. The disposable dashboard browser workflow exercises the real HTTP download and missing-project response in CI.
+- **Next.** Integrate order and inventory exports after those features are reviewed. Notifications and printable financial reports are separate follow-up work.
 ### 2026-11-05 — Canonical project identity collision repair
 
 - **Status.** Implemented and tested in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68); review, merge, release and deployment remain pending.
