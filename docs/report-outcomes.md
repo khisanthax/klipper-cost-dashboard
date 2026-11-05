@@ -1,0 +1,17 @@
+# Monthly print outcomes
+
+Open **Reports** and choose a printer and date range. Every section, including recent prints, follows the same selected printer. End Date includes the whole local day. Monthly Breakdown groups recorded jobs by the installation timezone shown above the table, including daylight-saving boundaries. When the range includes all dates, a job without a usable date appears in an Unknown date row.
+
+The table counts completed, canceled, failed, and unknown outcomes separately. The completion rate divides completed jobs by the sum of completed, canceled, and failed jobs. When every outcome is unknown, the rate reads Unknown.
+
+Classification uses the saved explicit `status`; an old inferred `job_outcome=completed` does not override a saved canceled or failed status. Viewing Reports does not repair old rows. New Moonraker imports give explicit completed/canceled/failed status precedence over consumed time, retain measured duration/filament and leave an explicit unknown or unrecognized status unknown. Only imports without any status retain the legacy duration/estimate inference. The source [Moonraker history contract](https://moonraker.readthedocs.io/en/latest/external_api/history/) distinguishes terminal status from measured print duration.
+
+The monthly table shows known hours, filament length, filament weight and saved time, material and total costs. Decimal aggregation rounds half up only for display. A saved zero contributes to the subtotal; negative saved costs stay signed. Each field counts missing values independently. An entirely unpriced field displays Unpriced; an entirely unknown measurement displays Unknown. A partial subtotal excludes the jobs shown as missing. Saved component costs and saved totals are summed independently, retaining any signed adjustments already present in the saved total. No price is recalculated by viewing Reports.
+
+Weight uses saved job grams when present, otherwise the job's saved grams-per-meter factor or saved material density and input filament diameter. The table distinguishes recorded and estimated weights. It never substitutes a current profile's changed factor for missing historical conversion data. Nozzle diameter is not the input filament diameter. A missing or malformed factor leaves mass unknown while retaining a valid recorded length.
+
+Changes compare the immediately preceding calendar month **within the selected results**. They do not skip an empty month or assume it contained zero prints. Counts show absolute changes and completion rate shows percentage-point changes. A measurement/cost change is available only when both months have complete coverage for that metric; partial known subtotals are not compared as if they were complete. Selected dates may contain partial months, and the current month may still be in progress. Comparisons are not normalized or projected.
+
+SQL, CSV and dual compatibility Reports use the same monthly calculations. SQL reads a consistent historical snapshot. Its cache is scoped by printer, dates and timezone, and a streaming content fingerprint invalidates it after an insertion, deletion, identity edit or historical correction, including corrections preserving `updated_at`. No schema migration is required.
+
+The monthly table reports historical production data. Scheduled availability, utilization, capacity, sales revenue, profit, ROI and forecasts are not inferred from print hours or costs. Those metrics need explicit business/availability records and an agreed denominator; they remain separate roadmap work.

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
+import json
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,6 +21,8 @@ from core.reports import (
     aggregate_by_material,
     aggregate_by_profile,
     compute_monthly_breakdown,
+    compute_recorded_totals,
+    prepare_recorded_recent,
     compute_pause_analytics,
     compute_summary,
     compute_top_printers,
@@ -28,6 +32,7 @@ from core.storage import load_rows_raw, ts_to_local_dt
 
 logger = logging.getLogger(__name__)
 _AUTO_WARNED = False
+_REPORTS_CACHE_KEY = "reports:full:v3"
 
 
 @dataclass(frozen=True)
@@ -80,7 +85,9 @@ def get_reports_data_range(
     quick_range: str,
     backend_override: Optional[str] = None,
     args: Any = None,
+    printer: str = "",
 ) -> Dict[str, Any]:
+    printer = str(printer or (args.get("printer") if args else "") or "").strip()
     if backend_override:
         backend = backend_override
         backend_error = None
@@ -88,11 +95,11 @@ def get_reports_data_range(
         backend, backend_error = _reports_backend()
 
     if backend == "sql":
-        data = _reports_from_sql(start_dt, end_dt)
+        data = _reports_from_sql(start_dt, end_dt, printer)
         data["backend"] = "sql"
         data["error"] = backend_error
     else:
-        data = _reports_from_csv(start_dt, end_dt)
+        data = _reports_from_csv(start_dt, end_dt, printer)
         data["backend"] = "csv"
         data["error"] = data.get("error") or backend_error
 
@@ -101,17 +108,22 @@ def get_reports_data_range(
     data["start_date"] = start_dt.strftime("%Y-%m-%d") if start_dt else ""
     data["end_date"] = end_dt.strftime("%Y-%m-%d") if end_dt else ""
     data["args"] = args
+    data["selected_printer"] = printer
+    data["timezone"] = str(ts_to_local_dt(0).tzinfo)
     return data
 
 
-def _reports_from_csv(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Dict[str, Any]:
-    rows, error = load_rows_raw(CSV_FILE)
+def _reports_from_csv(start_dt: Optional[datetime], end_dt: Optional[datetime], printer: str = "") -> Dict[str, Any]:
+    rows, error = load_rows_raw(CSV_FILE, normalize_status=False)
+    printer_choices = sorted({str(row.get("printer") or "") for row in rows if row.get("printer")})
+    if printer:
+        rows = [row for row in rows if row.get("printer") == printer]
 
     if start_dt or end_dt:
         filtered = []
         for r in rows:
             ts_raw = r.get("timestamp_raw")
-            if not ts_raw:
+            if ts_raw is None:
                 continue
             try:
                 row_dt = ts_to_local_dt(float(ts_raw))
@@ -127,6 +139,7 @@ def _reports_from_csv(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
     monthly = compute_monthly_breakdown(rows)
     top_printers = compute_top_printers(rows, limit=5)
     summary = compute_summary(rows) or {}
+    summary["recorded"] = compute_recorded_totals(monthly)
     summary.setdefault("total_prints", 0)
     summary.setdefault("total_hours", 0.0)
     summary.setdefault("total_meters", 0.0)
@@ -147,30 +160,38 @@ def _reports_from_csv(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
         "material_summary": material_summary,
         "profile_summary": profile_summary,
         "error": error,
+        "printer_choices": printer_choices,
+        "recent_jobs": prepare_recorded_recent(sorted(rows, key=lambda row: row.get("timestamp_raw") or 0, reverse=True)[:10]),
     }
 
 
-def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Dict[str, Any]:
+def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime], printer: str = "") -> Dict[str, Any]:
     with closing(db_module.connect_db()) as conn:
         db_module.apply_migrations(conn)
+        # Fingerprint and every aggregate describe the same historical snapshot
+        # even when a printer finishes during this request.
+        conn.execute("BEGIN")
 
-        where_sql, params = _build_date_filter(start_dt, end_dt)
+        where_sql, params = _build_date_filter(start_dt, end_dt, printer)
 
         cache_ttl = _cache_ttl_seconds()
-        range_key = _range_key(start_dt, end_dt)
+        range_key = _range_key(start_dt, end_dt, printer)
+        printer_choices = [row[0] for row in conn.execute("SELECT name FROM printers ORDER BY name")]
         fingerprint = _reports_jobs_fingerprint(conn, where_sql, params)
         cached = reports_cache.get_cached_payload(
             conn,
-            key="reports:full",
+            key=_REPORTS_CACHE_KEY,
             range_key=range_key,
             fingerprint=fingerprint,
             ttl_seconds=cache_ttl,
         )
         if cached is not None:
+            cached["printer_choices"] = printer_choices
             return cached
 
         summary = _sql_summary(conn, where_sql, params)
         monthly = _sql_monthly_breakdown(conn, where_sql, params)
+        summary["recorded"] = compute_recorded_totals(monthly)
         top_printers = _sql_top_printers(conn, where_sql, params)
         pause_analytics = _sql_pause_analytics(conn, where_sql, params, summary.get("total_prints", 0))
         material_summary = _sql_material_summary(conn, where_sql, params)
@@ -183,13 +204,16 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
             "pause_analytics": pause_analytics,
             "material_summary": material_summary,
             "profile_summary": profile_summary,
+            "printer_choices": printer_choices,
+            "recent_jobs": prepare_recorded_recent(dict(row) for row in conn.execute(
+                f"SELECT j.*,p.name AS printer FROM jobs j JOIN printers p ON p.id=j.printer_id {where_sql} ORDER BY COALESCE(j.ended_at,j.created_at) DESC,j.job_uid LIMIT 10", params)),
         }
 
         if cache_ttl > 0 and fingerprint:
             try:
                 reports_cache.set_cached_payload(
                     conn,
-                    key="reports:full",
+                    key=_REPORTS_CACHE_KEY,
                     range_key=range_key,
                     fingerprint=fingerprint,
                     payload=payload,
@@ -201,7 +225,7 @@ def _reports_from_sql(start_dt: Optional[datetime], end_dt: Optional[datetime]) 
         return payload
 
 
-def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> Tuple[str, list]:
+def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime], printer: str = "") -> Tuple[str, list]:
     where = []
     params: list = []
 
@@ -225,6 +249,9 @@ def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime])
     if end_epoch is not None:
         where.append(f"{ts_expr} <= ?")
         params.append(end_epoch)
+    if printer:
+        where.append("j.printer_id IN (SELECT id FROM printers WHERE name=?)")
+        params.append(printer)
 
     where_sql = ""
     if where:
@@ -232,12 +259,13 @@ def _build_date_filter(start_dt: Optional[datetime], end_dt: Optional[datetime])
     return where_sql, params
 
 
-def _range_key(start_dt: Optional[datetime], end_dt: Optional[datetime]) -> str:
+def _range_key(start_dt: Optional[datetime], end_dt: Optional[datetime], printer: str = "") -> str:
+    tz = ts_to_local_dt(0).tzinfo
     if not start_dt and not end_dt:
-        return "all"
+        return json.dumps(["all", str(tz), printer])
     start = start_dt.isoformat() if start_dt else ""
     end = end_dt.isoformat() if end_dt else ""
-    return f"{start}..{end}"
+    return json.dumps([start, end, str(tz), printer])
 
 
 def _cache_ttl_seconds() -> int:
@@ -249,21 +277,18 @@ def _cache_ttl_seconds() -> int:
 
 
 def _reports_jobs_fingerprint(conn, where_sql: str, params: list) -> str:
-    ts_expr = "CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER)"
-    row = conn.execute(
-        f"""
-        SELECT
-            COALESCE(MAX({ts_expr}), 0) AS max_ts,
-            COUNT(*) AS row_count,
-            COALESCE(MAX(rowid), 0) AS max_rowid
-        FROM jobs j
-        {where_sql}
-        """,
-        params,
-    ).fetchone()
-    if not row:
-        return "0:0:0"
-    return f"{row['max_ts']}:{row['row_count']}:{row['max_rowid']}"
+    # MAX(updated_at) misses edits to an older row when a newer timestamp is
+    # already present, and direct recovery SQL may preserve updated_at. Hash
+    # the saved rows in a streaming pass instead of returning stale finances.
+    digest = hashlib.sha256()
+    for row in conn.execute(f"SELECT j.* FROM jobs j {where_sql} ORDER BY j.job_uid", params):
+        digest.update(json.dumps(tuple(row), separators=(",", ":"), ensure_ascii=True).encode())
+        digest.update(b"\n")
+    for row in conn.execute("SELECT id,name FROM printers ORDER BY id"):
+        digest.update(json.dumps(tuple(row), separators=(",", ":")).encode())
+    for row in conn.execute("SELECT * FROM filament_profiles ORDER BY id"):
+        digest.update(json.dumps(tuple(row), separators=(",", ":")).encode())
+    return digest.hexdigest()
 
 
 def _warn_if_sql_ahead_of_csv(conn) -> None:
@@ -329,27 +354,17 @@ def _sql_monthly_breakdown(conn, where_sql: str, params: list) -> list:
     rows = conn.execute(
         f"""
         SELECT
-            strftime('%Y-%m', COALESCE(j.ended_at, j.created_at), 'localtime') AS label,
-            COUNT(*) AS count,
-            COALESCE(SUM(j.duration_hours), 0) AS hours,
-            COALESCE(SUM(j.total_cost), 0) AS cost
+            CAST(strftime('%s', COALESCE(j.ended_at, j.created_at)) AS INTEGER) AS timestamp_raw,
+            j.status, j.duration_hours, j.filament_meters, j.filament_mm,
+            j.filament_grams, j.filament_weight_kind, j.grams_per_meter,
+            j.filament_density, j.filament_diameter,
+            j.time_cost, j.material_cost, j.total_cost
         FROM jobs j
         {where_sql}
-        GROUP BY label
-        ORDER BY label DESC
         """,
         params,
-    ).fetchall()
-    return [
-        {
-            "label": row["label"],
-            "count": int(row["count"]),
-            "hours": float(row["hours"] or 0.0),
-            "cost": float(row["cost"] or 0.0),
-        }
-        for row in rows
-        if row["label"]
-    ]
+    )
+    return compute_monthly_breakdown(dict(row) for row in rows)
 
 
 def _sql_top_printers(conn, where_sql: str, params: list) -> list:
@@ -394,8 +409,7 @@ def _sql_pause_analytics(conn, where_sql: str, params: list, total_prints: int) 
             COALESCE(SUM(j.runout_count), 0) AS runouts
         FROM jobs j
         JOIN printers p ON j.printer_id = p.id
-        {where_sql}
-        AND COALESCE(j.runout_count, 0) > 0
+        {where_sql + (' AND ' if where_sql else ' WHERE ') + 'COALESCE(j.runout_count, 0) > 0'}
         GROUP BY p.name
         ORDER BY runouts DESC
         """,

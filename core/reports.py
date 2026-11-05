@@ -4,6 +4,9 @@ Reporting utilities for Print Cost Dashboard.
 Merged from report_utils.py + additional reporting functions from app.py.
 """
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from core.filament import conversion
+from core.numeric import NumericValidationError
 from core.config import DEFAULT_TIMEZONE, SETTINGS_FILE, DISPLAY_FILE, HEADERS
 from core.storage import ts_to_local_dt, load_settings, load_display_settings
 from core.printers import get_canonical_printer_names
@@ -31,6 +34,8 @@ def get_date_range_from_params(args):
     
     start_dt = _parse_date(start_str)
     end_dt = _parse_date(end_str)
+    if end_dt:
+        end_dt += timedelta(days=1, microseconds=-1)
     
     range_label = "Custom range"
     
@@ -45,7 +50,7 @@ def get_date_range_from_params(args):
             range_label = "Today"
         elif quick_range == "yesterday":
             start_dt = today - timedelta(days=1)
-            end_dt = today
+            end_dt = today - timedelta(microseconds=1)
             range_label = "Yesterday"
         elif quick_range == "this_week":
             start_dt = today - timedelta(days=today.weekday())
@@ -71,7 +76,7 @@ def get_date_range_from_params(args):
             # First day of last month
             start_dt = end_dt.replace(day=1)
             # Set end_dt to end of that day
-            end_dt = end_dt.replace(hour=23, minute=59, second=59)
+            end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
             range_label = "Last month"
             
     if not start_dt and not end_dt:
@@ -80,40 +85,133 @@ def get_date_range_from_params(args):
     return start_dt, end_dt, range_label, quick_range
 
 
+_RECORDED_OUTCOMES = {
+    "complete": "completed", "completed": "completed", "success": "completed", "succeeded": "completed",
+    "canceled": "canceled", "cancelled": "canceled",
+    "failed": "failed", "error": "failed",
+}
+
+
+def _recorded_number(value):
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return number if number.is_finite() else None
+
+
 def compute_monthly_breakdown(rows):
-    """
-    Aggregate stats by (year, month).
-    Returns list of dicts: {label: "YYYY-MM", count: N, hours: H, cost: C}
-    """
+    """Group recorded outcomes and known values by the configured local calendar."""
     groups = {}
-    for r in rows:
-        ts_raw = r.get("timestamp_raw")
-        if not ts_raw:
-            continue
+    for row in rows:
         try:
-            dt = ts_to_local_dt(float(ts_raw))
-        except Exception:
-            continue
-            
-        key = dt.strftime("%Y-%m")
-        if key not in groups:
-            groups[key] = {"count": 0, "hours": 0.0, "cost": 0.0}
-            
-        groups[key]["count"] += 1
-        groups[key]["hours"] += float(r.get("duration_hours") or 0.0)
-        groups[key]["cost"] += float(r.get("total_cost") or 0.0)
-        
-    # Sort by month descending
-    sorted_keys = sorted(groups.keys(), reverse=True)
-    result = []
-    for k in sorted_keys:
-        d = groups[k]
-        result.append({
-            "label": k,
-            "count": d["count"],
-            "hours": d["hours"],
-            "cost": d["cost"]
+            label = ts_to_local_dt(float(row["timestamp_raw"])).strftime("%Y-%m")
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            label = "Unknown date"
+        month = groups.setdefault(label, {
+            "label": label, "count": 0, "completed": 0, "canceled": 0, "failed": 0,
+            "unknown": 0, "recorded_weights": 0, "estimated_weights": 0,
+            **{field: Decimal(0) for field in ("hours", "meters", "grams", "time_cost", "material_cost", "cost")},
+            **{"missing_" + field: 0 for field in ("hours", "meters", "grams", "time_cost", "material_cost", "cost")},
         })
+        month["count"] += 1
+        outcome = _RECORDED_OUTCOMES.get(str(row.get("status") or "").strip().lower(), "unknown")
+        month[outcome] += 1
+        # Only the job's saved measurement/conversion is evidence. A profile's
+        # current factor can change independently and must not rewrite a report.
+        try:
+            measure = conversion(row)
+        except NumericValidationError:
+            measure = {"grams": None, "meters": None}
+        meters = _recorded_number(row.get("filament_meters"))
+        if meters is None:
+            millimeters = _recorded_number(row.get("filament_mm"))
+            meters = millimeters / 1000 if millimeters is not None else None
+        grams = _recorded_number(row.get("filament_grams"))
+        if grams is None:
+            grams = measure.get("grams")
+        values = {"hours": _recorded_number(row.get("duration_hours")),
+                  "meters": meters, "grams": grams,
+                  "time_cost": _recorded_number(row.get("time_cost")),
+                  "material_cost": _recorded_number(row.get("material_cost")),
+                  "cost": _recorded_number(row.get("total_cost"))}
+        for field, value in values.items():
+            if value is None or (field in ("hours", "meters", "grams") and value < 0):
+                month["missing_" + field] += 1
+            else:
+                month[field] += value
+        if grams is not None and grams >= 0:
+            recorded = row.get("filament_grams") not in (None, "") and row.get("filament_weight_kind") != "estimated"
+            month["recorded_weights" if recorded else "estimated_weights"] += 1
+
+    result = []
+    for label in sorted(groups, key=lambda name: (name != "Unknown date", name), reverse=True):
+        month = groups[label]
+        known = month["count"] - month["unknown"]
+        month["completion_rate"] = 100 * month["completed"] / known if known else None
+        for field in ("hours", "meters", "grams", "time_cost", "material_cost", "cost"):
+            value = month[field]
+            missing = month["missing_" + field] == month["count"]
+            month[field + "_exact"] = None if missing else format(value.normalize(), "f")
+            month[field + "_display"] = None if missing else format(value.quantize(Decimal(".01"), rounding=ROUND_HALF_UP), ".2f")
+            month[field] = None if missing else float(value)
+        result.append(month)
+    by_label = {month["label"]: month for month in result}
+    for month in result:
+        try:
+            previous = (datetime.strptime(month["label"], "%Y-%m") - timedelta(days=1)).strftime("%Y-%m")
+        except ValueError:
+            previous = None
+        prior = by_label.get(previous)
+        month["previous_month"] = previous if prior else None
+        month["count_change"] = month["count"] - prior["count"] if prior else None
+        month["completion_rate_change"] = (month["completion_rate"] - prior["completion_rate"]
+            if prior and month["completion_rate"] is not None and prior["completion_rate"] is not None else None)
+        for field in ("hours", "meters", "grams", "time_cost", "material_cost", "cost"):
+            # Comparing two partial known subtotals can imply a false change.
+            comparable = prior and not month["missing_" + field] and not prior["missing_" + field]
+            change = Decimal(month[field + "_exact"]) - Decimal(prior[field + "_exact"]) if comparable else None
+            month[field + "_change_display"] = format(change.quantize(Decimal(".01"), rounding=ROUND_HALF_UP), "+.2f") if change is not None else None
+    return result
+
+
+def compute_recorded_totals(months):
+    """Exact known subtotals with missing coverage; preserve saved signed costs."""
+    result = {"count": sum(month["count"] for month in months)}
+    for field in ("hours", "meters", "grams", "time_cost", "material_cost", "cost"):
+        value = sum((Decimal(month[field + "_exact"]) for month in months if month[field + "_exact"] is not None), Decimal(0))
+        missing = sum(month["missing_" + field] for month in months)
+        result["missing_" + field] = missing
+        result[field + "_display"] = None if result["count"] and missing == result["count"] else format(value.quantize(Decimal(".01"), rounding=ROUND_HALF_UP), ".2f")
+        result[field] = float(value)
+    return result
+
+
+def prepare_recorded_recent(rows):
+    """Presentation of saved rows without current pricing/profile fallbacks."""
+    result = []
+    for original in rows:
+        row = dict(original)
+        try:
+            measure = conversion(row)
+        except NumericValidationError:
+            measure = {}
+        grams = _recorded_number(row.get("filament_grams"))
+        if grams is None:
+            grams = measure.get("grams")
+        meters = _recorded_number(row.get("filament_meters"))
+        if meters is None:
+            mm = _recorded_number(row.get("filament_mm"))
+            meters = mm / 1000 if mm is not None else None
+        row["_weight_grams"] = float(grams) if grams is not None and grams >= 0 else None
+        row["_length_meters"] = float(meters) if meters is not None and meters >= 0 else None
+        row["_weight_factor"] = str(measure["grams_per_meter"]) if measure.get("grams_per_meter") is not None else None
+        row["_weight_source"] = ("Saved estimated weight" if row.get("filament_weight_kind") == "estimated" else "Recorded weight") if row.get("filament_grams") not in (None, "") and grams is not None else measure.get("conversion_source", "Invalid or missing recorded conversion")
+        row["_price_unit"] = {"per_meter": "$/m", "per_gram": "$/g", "per_kg": "$/kg"}.get(row.get("filament_mode"), "Unknown unit")
+        for field in ("material_cost", "total_cost"):
+            value = _recorded_number(row.get(field))
+            row["_" + field + "_display"] = format(value.quantize(Decimal(".01"), rounding=ROUND_HALF_UP), ".2f") if value is not None else None
+        result.append(row)
     return result
 
 
