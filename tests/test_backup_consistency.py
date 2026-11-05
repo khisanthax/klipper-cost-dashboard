@@ -7,6 +7,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from uuid import uuid4
 from pathlib import Path
 from contextlib import closing
 from unittest.mock import patch
@@ -61,6 +62,23 @@ class BackupConsistencyTests(unittest.TestCase):
 
     def test_archive_restores_consistent_sqlite_state_without_wal_files(self):
         self._seed_sql_state()
+        from core import inventory
+
+        with patch.dict(os.environ, {"KCD_STORAGE_BACKEND": "sql"}):
+            spool, _ = inventory.create_spool(
+                uuid4(), manufacturer="Fixture", material="PLA", color="Blue",
+                net_grams=1000, remaining_grams=900, low_stock_grams=100,
+            )
+            original = uuid4()
+            inventory.record_consumption(spool, original, "backup-job", "12.345", verified=True)
+            inventory.correct_consumption(spool, uuid4(), original, "14.125",
+                                          expected_grams="12.345", reason="Verified scale correction")
+            inventory.record_estimate(spool, uuid4(), "backup-job", "15", "Slicer estimate")
+            inventory.set_spool_archived(spool, uuid4(), archived=True, reason="Stored after print")
+        tables = ("filament_spools", "filament_stock_events", "filament_consumption_corrections",
+                  "filament_consumption_estimates", "filament_spool_lifecycle_events", "filament_spool_archives")
+        with closing(self.db_module.connect_db()) as conn:
+            inventory_before = {table: [tuple(row) for row in conn.execute(f"SELECT * FROM {table} ORDER BY rowid")] for table in tables}
         with closing(self.db_module.connect_db()) as conn:
             conn.execute("""
                 INSERT INTO projects (id, project_uid, name, created_at, updated_at)
@@ -94,9 +112,13 @@ class BackupConsistencyTests(unittest.TestCase):
             schema = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
             job = conn.execute("SELECT job_uid, total_cost FROM jobs WHERE job_uid = ?", ("backup-job",)).fetchone()
             order = conn.execute("SELECT status, revenue_cents, expenses_cents FROM business_orders").fetchone()
+            balance = conn.execute("SELECT remaining_mg FROM filament_spools WHERE spool_uid=?", (spool,)).fetchone()[0]
+            self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
             self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
-        self.assertEqual(schema, "0009_business_orders")
+            self.assertEqual({table: conn.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall() for table in tables}, inventory_before)
+        self.assertEqual(schema, Path(self.db_module._list_migration_files()[-1]).stem)
         self.assertEqual(job, ("backup-job", 4.25))
+        self.assertEqual(balance, 885_875)
         self.assertEqual(order, ("active", 250, None))
 
     def test_archive_permission_hardening_is_applied(self):
