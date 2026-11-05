@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import os
+from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 from threading import Barrier
@@ -198,3 +199,18 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(spools[second]["remaining_mg"], 77_750)
         with closing(db.connect_db()) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM filament_stock_events WHERE reason='Injected failure'").fetchone()[0], 0)
+
+    def test_personal_mode_hides_only_inventory_navigation_and_keeps_default_visibility(self):
+        from flask import Flask, render_template
+        app = Flask(__name__, template_folder=str(Path(__file__).resolve().parents[1] / "templates"))
+        app.jinja_env.globals["url_for"] = lambda endpoint, **_kwargs: "/" + endpoint
+        with app.test_request_context("/"):
+            normal = render_template("base.html", inventory_available=True)
+            personal = render_template("base.html", inventory_available=True, show_advanced=False)
+            advanced = render_template("base.html", inventory_available=True, show_advanced=True)
+            compatibility = render_template("base.html", inventory_available=False, show_advanced=True)
+        self.assertIn('href="/inventory_page"', normal)
+        self.assertIn('href="/inventory_page"', advanced)
+        self.assertNotIn('href="/inventory_page"', personal)
+        self.assertNotIn('href="/inventory_page"', compatibility)
+        self.assertIn('href="/projects_page"', personal)
