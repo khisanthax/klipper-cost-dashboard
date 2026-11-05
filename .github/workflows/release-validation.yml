@@ -45,6 +45,7 @@ jobs:
           python tools/browser_dashboard_audit.py --axe
           python tools/browser_dashboard_audit.py --baseline --history-jobs 500
           python tools/browser_thumbnail_regression.py
+          python tools/browser_demo_regression.py
           python tools/smoke_production.py --installer-acceptance --installer-ssh
           python tools/smoke_production.py --installer-acceptance --compat-backend csv
           python tools/smoke_production.py --installer-acceptance --compat-backend dual
@@ -78,3 +79,4 @@ jobs:
           docker run --rm -e KCD_API_KEY=ci-secret kcd-release-ci python tools/validate_sql_only.py
           docker run --rm kcd-release-ci python tools/smoke_production.py
           python tools/dashboard_docker_upgrade.py --image kcd-release-ci
+          python tools/demo_container_smoke.py kcd-release-ci

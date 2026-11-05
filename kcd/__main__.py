@@ -102,6 +102,50 @@ def _cmd_projects_import_json(args: argparse.Namespace) -> int:
     return 0
 
 
+def _demo_manager():
+    from core.demo import DemoWorkspaceManager, load_demo_configuration
+
+    manager = DemoWorkspaceManager(load_demo_configuration())
+    manager.initialize()
+    return manager
+
+
+def _cmd_demo_list(_args: argparse.Namespace) -> int:
+    manager = _demo_manager()
+    for record in manager.registry.all():
+        print(
+            f"{record.workspace_id[:12]} state={record.state} "
+            f"idle_expires_at={record.idle_expires_at.isoformat()} "
+            f"absolute_expires_at={record.absolute_expires_at.isoformat()}"
+        )
+    return 0
+
+
+def _cmd_demo_cleanup(args: argparse.Namespace) -> int:
+    manager = _demo_manager()
+    selected = manager.cleanup_expired_workspaces(dry_run=bool(args.dry_run))
+    verb = "Would clean" if args.dry_run else "Cleaned"
+    print(f"{verb} {len(selected)} expired workspace(s).")
+    return 0
+
+
+def _cmd_demo_validate(_args: argparse.Namespace) -> int:
+    manager = _demo_manager()
+    manager.validate_seed()
+    errors = 0
+    for record in manager.registry.all():
+        if record.state == "active":
+            try:
+                manager.validate_workspace_path(
+                    manager.configuration.workspaces_root / record.relative_storage_path
+                )
+            except Exception as exc:
+                errors += 1
+                print(f"{record.workspace_id[:12]}: {exc}")
+    print(f"Demo registry validation: {'OK' if not errors else 'FAILED'}")
+    return 0 if not errors else 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Klipper Cost Dashboard utilities")
     sub = parser.add_subparsers(dest="command")
@@ -207,6 +251,16 @@ def main(argv: list[str] | None = None) -> int:
     projects_import_cmd.add_argument("--apply", action="store_true", help="Write imported data into SQL")
     projects_import_cmd.add_argument("--force", action="store_true", help="Alias for --apply")
     projects_import_cmd.set_defaults(func=lambda args: _cmd_projects_import_json(args))
+
+    demo_parser = sub.add_parser("demo", help="Demo workspace lifecycle utilities")
+    demo_sub = demo_parser.add_subparsers(dest="demo_command")
+    demo_list = demo_sub.add_parser("list", help="List demo workspaces")
+    demo_list.set_defaults(func=_cmd_demo_list)
+    demo_cleanup = demo_sub.add_parser("cleanup", help="Clean expired demo workspaces")
+    demo_cleanup.add_argument("--dry-run", action="store_true")
+    demo_cleanup.set_defaults(func=_cmd_demo_cleanup)
+    demo_validate = demo_sub.add_parser("validate", help="Validate seed, registry, and active workspaces")
+    demo_validate.set_defaults(func=_cmd_demo_validate)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "func"):
