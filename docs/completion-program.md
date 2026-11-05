@@ -1,23 +1,24 @@
 # KCD completion and release execution plan
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. v0.7.4, v0.8.0 and v0.9.0 completed verified deployment; the next cohort is inventory/reporting.
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 through v0.10.0 completed verified deployment; the remaining cohort is optional private administration/demo tooling.
 The initial inventory was checked on 2026-11-05 at main `7892765`.
 This plan coordinates existing branches. The unified roadmap remains the product
 roadmap and root LOGBOOK records completed operations and evidence.
 
 ## Verified state
 
-Production is now verified v0.9.0 at immutable index
-`sha256:57613a356037293310430551d11ef2025332873a4d18b2846e3f3e2cc1d28d25`,
-revision `c282f889`, with 1,047 preserved jobs, four connected/identity-verified
-printers, SQL schema `0009_business_orders`, 316 verified objects and 435 archived
-references. Advanced remains the default; Orders are empty and require Business.
-Both SV07 recovered rows visibly show Canceled and Unpriced. See
-[actual deployment and rollback evidence](v0.9.0-deployment-2026-11-05.md).
-PR 58 is superseded/closed; 61/71, 68/69/62 and 65/66 have merged normally and shipped
-in their recorded cohorts. Inventory/reporting 67/70 is merged at d5df3a8 for
-v0.10.0, not deployed in v0.9.0. Remaining cohorts continue through strict CI.
+Production is now verified v0.10.0 at immutable index
+`sha256:dad13e3622dc253b324cf24ff9ca23c8c1d19c6b145ca4fd18efad6883c16822`,
+revision `d5df3a81`, with 1,047 preserved jobs, four connected/identity-verified
+printers, SQL schema `0011_inventory_recovery`, 316 objects and 435 archived
+references. Inventory and Orders remain empty, Advanced remains unchanged.
+Both SV07 recovered rows show Canceled and Unpriced. Actual per-printer monthly
+counts/outcomes and saved cost subtotals matched SQL. See
+[deployment and rollback evidence](v0.10.0-deployment-2026-11-05.md).
+PR 58 is superseded/closed; 61/71, 68/69/62, 65/66 and 67/70 have merged normally
+and shipped in their recorded cohorts. Optional administration/demo remains for
+v0.11.0; shipping optional code does not activate its service or public exposure.
 Existing local test edits and production configuration are retained.
 
 The owner replaced the unavailable-human-review gate on November 5 with the
@@ -46,10 +47,10 @@ map to the inventoried PRs, including the preserved v0.7.2 documentation branch.
 | 4 | 63 · browser installer | Depends on 61. Finish scoped discovery, effective macro inspection and actionable repair diagnostics through the same CLI engine. Keep service and destructive host operations CLI-only. |
 | 5 | 65 · modes | Complete in verified v0.9.0: Advanced default preserved; modes/route/data preservation tested in fixtures and production read-only acceptance. |
 | 6 | 66 · orders | Complete in verified v0.9.0: Business lifecycle/financial boundaries tested in fixtures; production Advanced GET boundary and empty additive schema verified without customer mutations. |
-| 7 | 67 · inventory | SQL migration 0010. Review milligram ledger, exact-once replay, linked corrections, archival, concurrent writes and archive recovery. |
+| 7 | 67 · inventory | Complete in verified v0.10.0: exact milligram ledger/replay/corrections/concurrency/archive recovery tested in fixtures; additive empty 0010/0011 schema and preserved production history verified. |
 | 8 | 68 · estimates | Complete in verified v0.8.0: signed reviewed plans and atomic SQL fixes validated in fixtures; production stateless previews and unchanged history verified. |
 | 9 | 69 · export | Complete in verified v0.8.0: consistent private production export verified against SQL membership/costs/provenance without mutation. |
-| 10 | 70 · reports | Complete date/printer filters, known material/time costs, unavailable measurements and monthly comparisons across SQL/CSV/dual. |
+| 10 | 70 · reports | Complete in verified v0.10.0: SQL/CSV/dual fixtures and real per-printer production counts/outcomes/saved costs verified without historical mutation. |
 | 11 | 64 · demo | Finish isolated TLS/proxy tests, fail-closed host/auth/egress boundaries, expiration and interrupted-workspace recovery. Public exposure requires an approved target and security configuration. |
 
 Orders migration 0009 and inventory migrations 0010/0011 are additive. Migration
