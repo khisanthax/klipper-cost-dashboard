@@ -4304,7 +4304,13 @@ def download_csv():
 
 @app.context_processor
 def application_mode_context():
-    mode = get_application_mode()
+    public_demo = (
+        os.getenv("KCD_RUNTIME_MODE", "normal").strip().lower() == "demo"
+        and not getattr(flask.g, "demo_workspace_session", None)
+    )
+    # Welcome/error pages have no mutable workspace. Do not consult normal
+    # installation storage while rendering their presentation defaults.
+    mode = "advanced" if public_demo else get_application_mode()
     return {
         "application_mode": mode,
         "show_advanced": mode != "personal",
