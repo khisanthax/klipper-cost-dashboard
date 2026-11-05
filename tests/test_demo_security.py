@@ -209,6 +209,39 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             with self.assertRaises(RuntimeConfigurationError):
                 load_demo_configuration()
 
+    def test_new_milestone_surfaces_are_explicitly_denied_before_handlers(self):
+        def unavailable(**_values):
+            self.side_effects += 1
+            socket.getaddrinfo("example.com", 443)
+            subprocess.Popen(["forbidden-installer-helper"])
+            return "unsafe"
+
+        surfaces = (
+            ("/printers/<path:printer_name>", "printer_detail", ("GET",)),
+            ("/orders", "orders_page", ("GET", "POST")),
+            ("/inventory", "inventory_page", ("GET", "POST")),
+            ("/estimates", "estimate_page", ("GET", "POST")),
+            ("/api/estimates", "estimate_page", ("POST",)),
+            ("/estimates/plan", "save_estimate_plan", ("POST",)),
+            ("/projects/<project_uid>/export.json", "export_project", ("GET",)),
+        )
+        for path, endpoint, methods in surfaces:
+            self.app.add_url_rule(path, endpoint, unavailable, methods=methods)
+        client = self.client()
+        headers = {"X-CSRF-Token": self.csrf(client), "Origin": "http://localhost"}
+        with mock.patch("socket.getaddrinfo") as network, mock.patch("subprocess.Popen") as command:
+            for path, endpoint, methods in surfaces:
+                path = path.replace("<path:printer_name>", "Demo").replace("<project_uid>", "sample")
+                for method in methods:
+                    with self.subTest(endpoint=endpoint, method=method):
+                        rule = self.app.extensions["kcd_demo_policy"].classify(endpoint, method)
+                        self.assertEqual(rule.classification, DemoPolicyClass.BLOCKED_DEMO)
+                        self.assertEqual(client.open(path, method=method, headers=headers).status_code, 403)
+            network.assert_not_called()
+            command.assert_not_called()
+        self.assertEqual(self.side_effects, 0)
+        self.assertEqual(self.app.extensions["kcd_demo_policy"].missing_routes(self.app), [("unknown", "GET", "/unknown")])
+
     def test_host_and_trusted_proxy_requirements(self):
         from core.demo.security import DemoSecurityError, validate_transport
         configuration = replace(self.manager.configuration, expect_https=True, trust_proxy=True)
@@ -237,6 +270,7 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
         for _ in range(10):
             payload = {"child": payload}
         self.assertEqual(client.post("/json", json=payload, headers=headers).status_code, 422)
+        self.assertEqual(client.post("/json", json={"rate": 10 ** 500}, headers=headers).status_code, 422)
         data = {f"field-{index}": "x" for index in range(self.manager.configuration.max_list_length + 1)}
         self.assertEqual(client.post("/mutate", data=data, headers=headers).status_code, 422)
 
@@ -532,11 +566,14 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             "with mock.patch.object(target.storage_backend, 'write_job', side_effect=AssertionError('route ran')) as write_job:\n"
             "    printer=client.post('/log-print', json={'printer':'x'}, headers={'X-API-Key':'secret','X-CSRF-Token':csrf_token(raw)})\n"
             "download=client.get('/download-csv?path=../../outside')\n"
+            "new_denied=[client.get(path).status_code for path in ('/printers/Demo','/orders','/inventory','/estimates','/projects/sample/export.json')]\n"
+            "new_denied.extend(client.post(path,headers=headers).status_code for path in ('/orders','/inventory','/estimates','/api/estimates','/estimates/plan'))\n"
+            "mode=client.post('/settings/other',data={'action':'update_application_mode','mode':'business'},headers=headers)\n"
             "safe=client.post('/settings/profiles', data={'action':'add_filament_profile','profile_name':'Phase4','filament_mode':'per_kg','filament_rate':'20','grams_per_meter':'3'}, headers=headers)\n"
             "session=target.app.extensions['kcd_demo_manager'].resolve_workspace(raw)\n"
             "with closing(db_module.connect_db(session.context)) as conn:\n"
             "    count=conn.execute(\"SELECT COUNT(*) FROM filament_profiles WHERE name='Phase4'\").fetchone()[0]\n"
-            "print(json.dumps({'created':created.status_code,'reads':reads,'ui':ui,'blocked':danger.status_code,'blocked_calls':blocked.call_count,'printer':printer.status_code,'printer_calls':write_job.call_count,'download':download.status_code,'safe':safe.status_code,'count':count,'missing':target.app.extensions['kcd_demo_policy'].missing_routes(target.app)}))\n"
+            "print(json.dumps({'created':created.status_code,'reads':reads,'ui':ui,'blocked':danger.status_code,'blocked_calls':blocked.call_count,'printer':printer.status_code,'printer_calls':write_job.call_count,'download':download.status_code,'new_denied':new_denied,'mode':mode.status_code,'safe':safe.status_code,'count':count,'missing':target.app.extensions['kcd_demo_policy'].missing_routes(target.app)}))\n"
         )
         environment = os.environ.copy()
         environment["KCD_API_KEY"] = "fixture-must-not-be-loaded"
@@ -562,6 +599,8 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             "printer": 403,
             "printer_calls": 0,
             "download": 403,
+            "new_denied": [403] * 10,
+            "mode": 403,
             "safe": 302,
             "count": 1,
             "missing": [],

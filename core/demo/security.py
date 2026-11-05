@@ -108,6 +108,16 @@ APPLICATION_ROUTE_POLICIES: Mapping[tuple[str, str], DemoRouteRule] = {
     ("printer_status", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
     ("project_pricing_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
     ("project_pricing_page", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    # Forward-compatible denial for separately reviewed milestone surfaces.
+    ("printer_detail", "GET"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("orders_page", "GET"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("orders_page", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("inventory_page", "GET"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("inventory_page", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("estimate_page", "GET"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("estimate_page", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("save_estimate_plan", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
+    ("export_project", "GET"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),
 }
 
 
@@ -231,7 +241,10 @@ def _validate_scalar(name: str, value, configuration: DemoConfiguration) -> None
     if isinstance(value, bool) or value is None:
         return
     if isinstance(value, (int, float)):
-        numeric = float(value)
+        try:
+            numeric = float(value)
+        except (OverflowError, ValueError) as exc:
+            raise DemoSecurityError(422, "invalid_input", "A numeric value is outside the allowed range.") from exc
         if not math.isfinite(numeric) or abs(numeric) > 1_000_000_000:
             raise DemoSecurityError(422, "invalid_input", "A numeric value is outside the allowed range.")
         if numeric < 0 and NONNEGATIVE_FIELD.search(name):

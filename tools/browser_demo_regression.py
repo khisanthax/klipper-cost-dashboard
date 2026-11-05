@@ -61,8 +61,12 @@ def exercise(base_url):
                 assert any(item["state"] == "printing" for item in observations)
 
                 for path in ("/api/installer/registration", "/download-csv", "/printer-diagnostics",
-                             "/jobs/fake/thumbnail", "/thumbnails/fake"):
+                             "/jobs/fake/thumbnail", "/thumbnails/fake", "/printers/Demo",
+                             "/orders", "/inventory", "/estimates", "/projects/sample/export.json"):
                     assert first.request.get(base_url + path).status == 403, path
+                for path in ("/orders", "/inventory", "/estimates", "/api/estimates", "/estimates/plan"):
+                    assert first.request.post(base_url + path).status == 403, path
+                assert first.request.post(base_url + "/settings/other", form={"action": "update_application_mode", "mode": "business"}).status == 403
                 assert first.request.post(base_url + "/job-cancel", data={"printer_name": "Demo"}).status == 403
 
                 desktop.goto(base_url + "/projects")
