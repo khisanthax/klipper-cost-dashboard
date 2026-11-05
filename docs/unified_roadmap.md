@@ -179,7 +179,7 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.9.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:57613a356037293310430551d11ef2025332873a4d18b2846e3f3e2cc1d28d25`, revision `c282f889`. Modes/Orders are deployed with Advanced default and additive empty 0009 Orders schema; prior printer pages, estimates and export remain verified. Four identities, readiness/integrity, 1,047 jobs and 316 objects are preserved; both SV07 rows remain Canceled/Unpriced. See [actual evidence](v0.9.0-deployment-2026-11-05.md). Later inventory/reporting main is queued for v0.10.0. SQL-only remains canonical; CSV/dual remain compatibility modes and Recalculate remains pricing-only. Read root LOGBOOK for actual outcomes.
+Production v0.10.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:dad13e3622dc253b324cf24ff9ca23c8c1d19c6b145ca4fd18efad6883c16822`, revision `d5df3a81`. Physical inventory and monthly reporting are deployed; additive 0010/0011 schema and empty inventory/Orders preserve Advanced default. All four identities, SQL readiness/integrity, 1,047 jobs, 316 objects and 435 references are preserved; both SV07 rows remain Canceled/Unpriced. Actual per-printer report counts/outcomes/saved costs match SQL. See [evidence](v0.10.0-deployment-2026-11-05.md). Optional administration/demo code remains the next cohort with services off and demo isolated. SQL-only is canonical; CSV/dual remain compatibility modes. Full Recompute remains deferred. Read root LOGBOOK for actual outcomes.
 
 ## Current Active Work
 
@@ -187,7 +187,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ## Next Planned Work
 
-1. Monitor genuine printer events on verified v0.9.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
+1. Monitor genuine printer events on verified v0.10.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
 2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
 3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
