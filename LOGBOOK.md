@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Printer pagination and missing measurement review
+
+- **Status.** Refined milestone C in PR 62.
+- **Changes.** Equal history timestamps now have a stable row-ID order across pages. Missing Moonraker durations and filament readings stay unknown, and live price components are calculated only for available measurements.
+- **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
+- **Release.** Review, merge and deployment are pending.
+
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
 - **Status:** released and deployed on vaultwarden at 10:14:46 America/New_York. Approved implementation PR [59](https://github.com/khisanthax/klipper-cost-dashboard/pull/59) merged at `68b2c8e800c36d9abb8deb10184ad44750d271d7`; annotated tag and [release v0.7.3](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.7.3) point to that commit. This entry supersedes earlier candidate-only deployment status.

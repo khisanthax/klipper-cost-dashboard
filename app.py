@@ -1298,15 +1298,21 @@ def printer_status():
         if stored and (not item['connected'] or item['state'] not in ('printing','paused') or item.get('filename')!=stored.get('filename')):
             item['tracking_warning']='Stored job differs from current Moonraker state. Review tracking; no job was automatically cleared or finalized.'
         if item['connected'] and item['state'] in ('printing','paused'):
+            item.update(grams=None, time_cost=None, material_cost=None, total_cost=None)
             try:
                 cfg=pricing._get_effective_filament_pricing(name)
-                measure=conversion({'filament_mm':item['filament_mm'],'grams_per_meter':cfg['grams_per_meter']})
                 seconds=item['total_seconds'] if pricing._include_paused_time_for_printer(name) else item['print_seconds']
-                item['grams']=float(measure['grams'])
-                item['time_cost']=pricing.compute_live_time_cost(name,seconds)
-                item['material_cost']=float(material_cost(measure,price_spec(cfg['filament_mode'],cfg['filament_rate'])))
-                item['total_cost']=item['time_cost']+item['material_cost']
-                item['conversion_source']=str(cfg['grams_per_meter'])+' g/m; current printer pricing'
+                if seconds is not None:
+                    item['time_cost']=pricing.compute_live_time_cost(name,seconds)
+                if item['filament_mm'] is not None:
+                    measure=conversion({'filament_mm':item['filament_mm'],'grams_per_meter':cfg['grams_per_meter']})
+                    item['grams']=float(measure['grams'])
+                    item['material_cost']=float(material_cost(measure,price_spec(cfg['filament_mode'],cfg['filament_rate'])))
+                    item['conversion_source']=str(cfg['grams_per_meter'])+' g/m; current printer pricing'
+                if item['time_cost'] is not None and item['material_cost'] is not None:
+                    item['total_cost']=item['time_cost']+item['material_cost']
+                else:
+                    item['pricing_error']='Live estimate incomplete; Moonraker measurements are unavailable'
             except (ValueError,RuntimeError,TypeError):
                 item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
     return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}

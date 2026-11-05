@@ -103,6 +103,8 @@ history, and operating trends. The printer's loaded KCD identity must match
 before the page shows live measurements. Elapsed print time comes from Moonraker.
 Remaining time extrapolates active print time from the reported progress and
 is unavailable when Moonraker does not supply enough information.
+Missing elapsed time or filament readings stay unavailable. A reported zero is
+shown as zero. Pagination retains the selected printer, dates and comparison.
 
 History defaults to the last 30 local calendar dates. Choose inclusive start
 and end dates for a range of up to 366 days. Enable **Compare previous period**

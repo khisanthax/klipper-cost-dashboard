@@ -22,7 +22,10 @@ def probe(url):
         if state not in ('standby','printing','paused','complete','cancelled','error'):
             raise ValueError('Unknown printer state')
         def metric(key):
-            value=float(stats.get(key) or 0)
+            raw = stats.get(key)
+            if raw is None or raw == "":
+                return None
+            value = float(raw)
             if not math.isfinite(value) or value<0:raise ValueError('Invalid printer measurement')
             return value
         progress = None

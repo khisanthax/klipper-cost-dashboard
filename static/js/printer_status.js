@@ -22,11 +22,11 @@
         const filename=node.querySelector('[data-live-filename]');
         if(filename&&active)filename.textContent=item.filename;
         const cost=node.querySelector('[data-live-cost]');
-        if(cost){cost.textContent=active&&item.total_cost!=null?'$'+item.total_cost.toFixed(2):item.pricing_error||item.tracking_warning||item.error||'No active print';cost.title='Live estimate includes material and time at current printer pricing; final billing applies the configured minimum hour.';}
+        if(cost){cost.textContent=active&&item.total_cost!=null?'$'+item.total_cost.toFixed(2):item.pricing_error||item.tracking_warning||item.error||(active?'Estimate unavailable':'No active print');cost.title='Live estimate includes material and time at current printer pricing; final billing applies the configured minimum hour.';}
         const filament=node.querySelector('[data-live-filament]');
         if(filament){filament.textContent=active&&item.grams!=null?item.grams.toFixed(2)+' g ('+(item.filament_mm/1000).toFixed(2)+' m)':'—';filament.title=item.conversion_source||'No verified current weight';}
         const elapsed=node.querySelector('[data-live-elapsed]');
-        if(elapsed){elapsed.textContent=active?Math.floor(item.print_seconds/60)+' min active':item.connected?'No active print':'Unverified';}
+        if(elapsed){elapsed.textContent=active?(Number.isFinite(item.print_seconds)?Math.floor(item.print_seconds/60)+' min active':'Elapsed time unavailable'):item.connected?'No active print':'Unverified';}
         const progress=node.querySelector('[data-live-progress]');
         if(progress) {
           const fraction=active&&Number.isFinite(item.progress)?item.progress:null;

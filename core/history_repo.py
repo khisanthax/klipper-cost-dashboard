@@ -323,7 +323,7 @@ def _fetch_sql_rows(conn: sqlite3.Connection, where_sql: str, params: list, limi
         FROM jobs j
         JOIN printers p ON j.printer_id = p.id
         {where_sql}
-        ORDER BY timestamp_epoch DESC
+        ORDER BY timestamp_epoch DESC, j.id DESC
     """
     if limit is not None:
         sql += " LIMIT ?"

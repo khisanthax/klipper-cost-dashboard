@@ -116,6 +116,18 @@ def main():
                         assert page.get_by_role('heading',name='Printing',exact=True).is_visible()
                         assert page.get_by_text('paused.gcode',exact=True).count()==0
                         page.screenshot(path=str(artifacts/'printer-detail-live.png'),full_page=True)
+                        def missing_measurements(route):
+                            route.fulfill(json={'printers':{'Printing':dict(
+                                connected=True,identity_verified=True,state='printing',filename='active.gcode',
+                                print_seconds=None,total_seconds=None,filament_mm=None,progress=None,
+                                grams=None,time_cost=None,material_cost=None,total_cost=None,observed_at=time.time(),
+                            )}})
+                        context.route(base+'/api/printer-status',missing_measurements)
+                        page.evaluate('window.kcdRefreshPrinterStatus()')
+                        page.get_by_text('Elapsed time unavailable',exact=True).wait_for()
+                        assert page.locator('[data-live-cost]').inner_text()=='Estimate unavailable'
+                        assert page.locator('[data-live-time-cost]').inner_text()=='Unavailable'
+                        context.unroute(base+'/api/printer-status',missing_measurements)
                         page.get_by_label('Compare previous period').check()
                         page.get_by_role('button',name='Apply dates').click()
                         assert 'compare=1' in page.url
