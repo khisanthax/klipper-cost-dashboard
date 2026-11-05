@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 
 {% block content %}
+{% macro monthly_value(month, field, unit='', currency=false) -%}
+    {% set value=month[field ~ '_display'] %}
+    {{ ('$' if currency else '') ~ value ~ unit if value is not none else ('Unpriced' if currency else 'Unknown') }}
+    {% if month['missing_' ~ field] %}<span class="small text-muted d-block">{{ month['missing_' ~ field] }} missing</span>{% endif %}
+    {% if month.previous_month %}<span class="small text-muted d-block">{% if month[field ~ '_change_display'] is not none %}{{ ('$' if currency else '') ~ month[field ~ '_change_display'] ~ unit }} vs prior{% else %}Change unavailable{% endif %}</span>{% endif %}
+{%- endmacro %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">Reports</h1>
     <div class="btn-group">
@@ -22,12 +28,14 @@
                 <span class="fw-semibold">{{ summary.total_prints }}</span>
             </div>
             <div class="col-6 col-md-3 mb-3 mb-md-0">
-                <span class="text-muted small">Total Hours</span><br>
-                <span class="fw-semibold">{{ "%.2f"|format(summary.total_hours) }}</span>
+                <span class="text-muted small">Known Hours</span><br>
+                <span class="fw-semibold">{{ summary.recorded.hours_display if summary.recorded.hours_display is not none else 'Unknown' }}</span>
+                {% if summary.recorded.missing_hours %}<span class="small text-muted d-block">{{ summary.recorded.missing_hours }} missing</span>{% endif %}
             </div>
             <div class="col-6 col-md-3 mb-3 mb-md-0">
-                <span class="text-muted small">Total Cost</span><br>
-                <span class="fw-semibold">${{ "%.2f"|format(summary.total_cost) }}</span>
+                <span class="text-muted small">Saved Cost (Known Subtotal)</span><br>
+                <span class="fw-semibold">{{ '$' ~ summary.recorded.cost_display if summary.recorded.cost_display is not none else 'Unpriced' }}</span>
+                {% if summary.recorded.missing_cost %}<span class="small text-muted d-block">{{ summary.recorded.missing_cost }} unpriced</span>{% endif %}
             </div>
             <div class="col-6 col-md-3">
                 <span class="text-muted small">Range</span><br>
@@ -38,7 +46,7 @@
 </div>
 
 <!-- Pause & Runout -->
-<p class="small">Known filament weight: <strong>{{ '%.2f'|format(summary.known_grams|default(0)) }} g</strong>{% if summary.unknown_weights %} · {{ summary.unknown_weights }} jobs have unknown weight{% endif %}. Saved historical costs are retained.</p>
+<p class="small">Known filament weight: <strong>{{ summary.recorded.grams_display ~ ' g' if summary.recorded.grams_display is not none else 'Unknown' }}</strong>{% if summary.recorded.missing_grams %} · {{ summary.recorded.missing_grams }} jobs have unknown weight{% endif %}. Weight uses each job's saved measurements or conversion. Saved historical costs are retained.</p>
 <div class="card mb-4">
     <div class="card-header">
         <h2 class="h5 mb-0">Pause & Runout</h2>
@@ -97,25 +105,33 @@
     </div>
     <div class="card-body">
         <form method="get" class="row g-3 align-items-end">
-            <div class="col-md-3">
-                <label class="form-label">Start Date
-                <input type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm"></label>
+            <div class="col-md-2">
+                <label class="form-label" for="reportStart">Start Date</label>
+                <input id="reportStart" type="date" name="start_date" value="{{ start_date }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label" for="reportEnd">End Date</label>
+                <input id="reportEnd" type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm">
             </div>
             <div class="col-md-3">
-                <label class="form-label">End Date
-                <input type="date" name="end_date" value="{{ end_date }}" class="form-control form-control-sm"></label>
-            </div>
-            <div class="col-md-3">
-                <label class="form-label">Quick Range
-                <select name="quick_range" class="form-select form-select-sm">
+                <label class="form-label" for="reportQuick">Quick Range</label>
+                <select id="reportQuick" name="quick_range" class="form-select form-select-sm">
                     <option value="">(none)</option>
                     <option value="last7" {% if quick_range=='last7' %}selected{% endif %}>Last 7 days</option>
                     <option value="last30" {% if quick_range=='last30' %}selected{% endif %}>Last 30 days</option>
                     <option value="this_month" {% if quick_range=='this_month' %}selected{% endif %}>This month</option>
                     <option value="last_month" {% if quick_range=='last_month' %}selected{% endif %}>Last month</option>
-                </select></label>
+                </select>
             </div>
-            <div class="col-md-3 d-grid">
+            <div class="col-md-3">
+                <label class="form-label" for="reportPrinter">Printer</label>
+                <select id="reportPrinter" name="printer" class="form-select form-select-sm">
+                    <option value="">All printers</option>
+                    {% for name in printer_choices %}<option value="{{ name }}" {% if selected_printer==name %}selected{% endif %}>{{ name }}</option>{% endfor %}
+                    {% if selected_printer and selected_printer not in printer_choices %}<option value="{{ selected_printer }}" selected>{{ selected_printer }} (no records)</option>{% endif %}
+                </select>
+            </div>
+            <div class="col-md-2 d-grid">
                 <button type="submit" class="btn btn-primary btn-sm">Apply</button>
             </div>
         </form>
@@ -129,23 +145,43 @@
     </div>
     <div class="card-body">
         {% if monthly_breakdown %}
+        <p class="text-muted small">Calendar timezone: {{ report_timezone }}. End Date includes the entire day. Completion rate is completed / (completed + canceled + failed); unknown outcomes are excluded. Values are saved known subtotals. Weight is recorded or estimated from the job's saved conversion; missing values are counted. Changes compare the prior calendar month within these selected results; partial months are not normalized. A missing prior month or incomplete metric is not treated as zero.</p>
         <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
             <table class="table table-striped table-hover table-sm mb-0">
+                <caption class="visually-hidden">Monthly print outcomes</caption>
                 <thead class="table-light">
                     <tr>
-                        <th>Month</th>
-                        <th>Prints</th>
-                        <th>Hours</th>
-                        <th>Cost</th>
+                        <th scope="col">Month</th>
+                        <th scope="col">Prints</th>
+                        <th scope="col">Completed</th>
+                        <th scope="col">Canceled</th>
+                        <th scope="col">Failed</th>
+                        <th scope="col">Unknown outcome</th>
+                        <th scope="col">Completion rate</th>
+                        <th scope="col">Known hours</th>
+                        <th scope="col">Filament length</th>
+                        <th scope="col">Filament weight</th>
+                        <th scope="col">Saved time cost</th>
+                        <th scope="col">Saved material cost</th>
+                        <th scope="col">Saved total cost</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for m in monthly_breakdown %}
                     <tr>
-                        <td>{{ m.label }}</td>
-                        <td class="fw-semibold">{{ m.count }}</td>
-                        <td class="fw-semibold">{{ "%.2f"|format(m.hours) }}</td>
-                        <td class="fw-semibold">${{ "%.2f"|format(m.cost) }}</td>
+                        <th scope="row">{{ m.label }}<span class="small text-muted d-block">{{ 'Prior: ' ~ m.previous_month if m.previous_month else 'Prior month unavailable' }}</span></th>
+                        <td class="fw-semibold">{{ m.count }}{% if m.count_change is not none %}<span class="small text-muted d-block">{{ '%+d'|format(m.count_change) }} vs prior</span>{% endif %}</td>
+                        <td>{{ m.completed }}</td>
+                        <td>{{ m.canceled }}</td>
+                        <td>{{ m.failed }}</td>
+                        <td>{{ m.unknown }}</td>
+                        <td>{{ "%.1f%%"|format(m.completion_rate) if m.completion_rate is not none else "Unknown" }}{% if m.completion_rate_change is not none %}<span class="small text-muted d-block">{{ '%+.1f'|format(m.completion_rate_change) }} pp vs prior</span>{% endif %}</td>
+                        <td>{{ monthly_value(m, 'hours') }}</td>
+                        <td>{{ monthly_value(m, 'meters', ' m') }}</td>
+                        <td>{{ monthly_value(m, 'grams', ' g') }}<span class="small text-muted d-block">{{ m.recorded_weights }} recorded / {{ m.estimated_weights }} estimated</span></td>
+                        <td>{{ monthly_value(m, 'time_cost', currency=true) }}</td>
+                        <td>{{ monthly_value(m, 'material_cost', currency=true) }}</td>
+                        <td>{{ monthly_value(m, 'cost', currency=true) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -272,9 +308,9 @@
     <tbody>{% for row in recent_jobs|default([]) %}<tr>
       <td>{% set thumb_url=row._thumb_small %}{% set size='small' %}{% set alt=row.filename %}{% include 'partials/_thumbnail.html' %}</td>
       <td>{{ row.printer }}<br>{{ row.filename }}</td>
-      <td><strong>{{ '%.2f'|format(row._weight_grams) ~ ' g' if row._weight_grams is not none else 'Weight unknown' }}</strong><br>{{ '%.2f'|format(row.filament_meters or 0) }} m<br><small>{{ row._weight_factor if row._weight_factor is not none else '?' }} g/m · {{ row._weight_source }}</small></td>
-      <td>{{ row.filament_rate }} {{ row._price_unit }}<br><small>Saved material: ${{ '%.2f'|format(row.material_cost or 0) }}</small></td>
-      <td>{{ '%.2f'|format(row.total_cost or 0) }}</td>
+      <td><strong>{{ '%.2f'|format(row._weight_grams) ~ ' g' if row._weight_grams is not none else 'Weight unknown' }}</strong><br>{{ '%.2f'|format(row._length_meters) ~ ' m' if row._length_meters is not none else 'Length unknown' }}<br><small>{{ row._weight_factor if row._weight_factor is not none else '?' }} g/m · {{ row._weight_source }}</small></td>
+      <td>{{ row.filament_rate if row.filament_rate not in (none, '') else 'Rate unknown' }} {{ row._price_unit }}<br><small>Saved material: {{ '$' ~ row._material_cost_display if row._material_cost_display is not none else 'Unpriced' }}</small></td>
+      <td>{{ row._total_cost_display if row._total_cost_display is not none else 'Unpriced' }}</td>
     </tr>{% else %}<tr><td colspan="5" class="text-muted">No prints in this range.</td></tr>{% endfor %}</tbody>
   </table></div>
 </div>
