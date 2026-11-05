@@ -2,7 +2,7 @@
 
 Open **Settings → Other → Application Mode**, choose a mode, and save. The setting applies to every browser connected to this installation. An existing installation opens in Advanced unless someone has saved a preference.
 
-- **Personal** shows printer status, print history, basic costs, profiles, and everyday settings. The ordinary menus and dashboard omit Projects, Reports, Recalculate, and advanced table and export controls.
+- **Personal** shows printer status, print history, Projects, basic costs, profiles, and everyday settings. Reports, Recalculate, advanced table controls, and exports belong to Advanced and Business.
 - **Advanced** includes Projects, Reports, charts, Recalculate, CSV export, Pause Accounting, and the additional table settings.
 - **Business** currently includes the Advanced workspace. Order and profitability controls will be added with the business milestone.
 

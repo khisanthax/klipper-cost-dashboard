@@ -65,7 +65,7 @@ class ApplicationModeTests(unittest.TestCase):
                 result = editor.post("/settings/other", data={"action": "update_application_mode", "mode": mode})
                 self.assertEqual(result.status_code, 302)
                 rendered = another_browser.get("/").data
-                self.assertEqual(b'href="/projects"' in rendered, mode != "personal")
+                self.assertIn(b'href="/projects"', rendered)
                 self.assertEqual(b'value="recalc_costs"' in rendered, mode != "personal")
                 self.assertIn(b"paid.gcode", rendered)
                 self.assertEqual(snapshot(), original)

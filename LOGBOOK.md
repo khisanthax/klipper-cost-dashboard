@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Personal mode includes Projects
+
+- **Status.** Updated the milestone D candidate in PR 65 for the owner's revised Personal mode requirement.
+- **Changes.** Projects remains in the ordinary navigation for Personal, Advanced and Business. Reports and Recalculate retain the existing Advanced and Business presentation rules. Settings and the mode guide describe the revised scope.
+- **Verification.** The cross-browser SQL regression and the desktop/tablet/mobile browser workflow require the Projects link in every mode while verifying preserved jobs and assignments. Required CI validates the candidate head.
+- **Release.** Review, merge and deployment are pending.
+
 ### 2026-11-04 — Milestone D application modes
 
 - Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.

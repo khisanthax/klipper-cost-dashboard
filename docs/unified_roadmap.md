@@ -206,7 +206,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 ### Application modes
 
 - Milestone D implements a global, reversible Personal, Advanced, or Business preference on the application-modes branch.
-- Advanced is the default and preserves the existing controls. Personal simplifies navigation and the dashboard. Business includes Advanced pending the order and profitability work in milestone E.
+- Advanced is the default and preserves the existing controls. Personal includes Projects and simplifies the remaining advanced navigation and dashboard controls. Business includes Advanced pending the order and profitability work in milestone E.
 - The preference uses the existing SQL schema and keeps history, project assignments, and prices unchanged. Compatibility installations also support the selector.
 - See [Application modes](application-modes.md) for the operator workflow. See the logbook for validation and release status.
 
