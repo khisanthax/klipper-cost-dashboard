@@ -56,6 +56,12 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification.** Compared the restored pre-change database against production. Unrelated jobs, printer rows, settings, events, projects and thumbnail rows matched. Integrity, foreign keys and all five readiness checks passed. Live status showed four connected and identity-verified printers, SV07 canceled, and the stale warning cleared. Production GET-only Playwright passed ten routes, mobile History checkbox/layout and archived thumbnail retrieval. Local cancellation tests passed (6), reconciliation tests passed (2 plus Linux-only Bash test), and SQL-only isolation passed. PR checks record the full Python, browser, installer and Docker validation.
 - **Prevention and limits.** New configurations omit the literal placeholder and generated scripts tolerate it for already-loaded configurations. The proposed endpoint rejects different filenames and cancellation payloads timestamped before the retained start. Legacy requests without an event timestamp cannot distinguish all delayed same-filename attempts. The recovery command previews by default and requires unique printer, filename, history ID and start-time evidence, a reachable inactive printer and the reviewed digest for application. It does not infer a terminal result on disconnect or automatically finalize any job. The next step is required review of PR 61 and normal release of the app/installer changes. Observe the next genuine SV07 lifecycle event during normal use.
 
+### 2026-11-05 — Demo printer-card boundary
+
+- **Status.** PR 62 follow-up implemented and tested; not merged, released or deployed.
+- **Changes.** Demo printer cards retain readable identities while hiding detail-page links when the demo route policy denies access. Normal dashboard cards remain keyboard-accessible links.
+- **Verification.** All six printer-detail tests passed with one missing-IANA-data skip on Windows, including rendered normal/demo card assertions. The combined rehearsal will verify the real demo policy and browser workflow; production is unchanged.
+
 ### 2026-11-05 — Printer pagination and missing measurement review
 
 - **Status.** Refined milestone C in PR 62.
