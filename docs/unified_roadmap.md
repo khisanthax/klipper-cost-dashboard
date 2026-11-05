@@ -179,7 +179,7 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.8.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:3e00a068e7505ee9753b4aa03faf735876c909f6b8abcd913f99c23b22e5df6d`, revision `b154137b`. Printer pages, reviewed estimates/atomic project mutations and SQL export are deployed; four identities, SQL readiness/integrity, 1,047 jobs and 316 objects are preserved, and both SV07 rows remain Canceled/Unpriced. See [actual evidence](v0.8.0-deployment-2026-11-05.md). Later Modes/Orders code is for v0.9.0 and is not in this image. Phase 6 shipped in v0.4.0; SQL-only remains canonical, CSV/dual remain compatibility modes and Recalculate remains pricing-only. Read root LOGBOOK for current outcomes.
+Production v0.9.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:57613a356037293310430551d11ef2025332873a4d18b2846e3f3e2cc1d28d25`, revision `c282f889`. Modes/Orders are deployed with Advanced default and additive empty 0009 Orders schema; prior printer pages, estimates and export remain verified. Four identities, readiness/integrity, 1,047 jobs and 316 objects are preserved; both SV07 rows remain Canceled/Unpriced. See [actual evidence](v0.9.0-deployment-2026-11-05.md). Later inventory/reporting main is queued for v0.10.0. SQL-only remains canonical; CSV/dual remain compatibility modes and Recalculate remains pricing-only. Read root LOGBOOK for actual outcomes.
 
 ## Current Active Work
 
@@ -187,7 +187,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ## Next Planned Work
 
-1. Monitor genuine printer events on verified v0.8.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
+1. Monitor genuine printer events on verified v0.9.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
 2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
 3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
@@ -210,17 +210,17 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ### Application modes
 
-- status: implemented candidate in PR 65; not merged or deployed
+- status: merged and verified deployed in v0.9.0
 - current requirements:
   - single global mode per KCD instance
   - reversible switching with no data deletion
   - Personal includes everyday history, Projects and basic pricing under the November 5 directive
   - Advanced is the existing-installation default
-  - Business includes Advanced plus the separately reviewed Orders candidate in PR 66
+  - Business includes Advanced plus project-backed Orders from PR 66
   - mode preferences preserve history, pricing, profiles, assignments and identities
   - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
 - See [Application modes](application-modes.md) for the operator workflow and root LOGBOOK for exact validation and deployment status.
-- The stacked PR 66 candidate adds project-backed Orders and profitability on SQL-only installations; switching away from Business preserves saved orders and returns an explicit mode prompt for their direct URL.
+- Merged PR 66 adds project-backed Orders and profitability on SQL-only installations; switching away from Business preserves saved orders and returns an explicit mode prompt for their direct URL.
 
 ### Historical reporting
 
