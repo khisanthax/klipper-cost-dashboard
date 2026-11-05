@@ -52,7 +52,7 @@ def main():
             def log_message(self,*args):pass
             def do_GET(self):
                 if self.path.startswith('/printer/objects/query'):
-                    result={'status':{'gcode_macro _KCD_VARS':{'printer_name':self.server.identity},'print_stats':{'state':self.server.state,'filename':'paused.gcode' if self.server.state=='paused' else 'active.gcode','print_duration':600,'total_duration':660,'filament_used':10000}}}
+                    result={'status':{'gcode_macro _KCD_VARS':{'printer_name':self.server.identity},'print_stats':{'state':self.server.state,'filename':'paused.gcode' if self.server.state=='paused' else 'active.gcode','print_duration':600,'total_duration':660,'filament_used':10000},'display_status':{'progress':0.5}}}
                 elif self.path=='/server/info':result={'klippy_connected':True}
                 else:self.send_response(404);self.end_headers();return
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps({'result':result}).encode())
@@ -80,7 +80,7 @@ def main():
                 failed_requests=[]
                 page.on('requestfailed',lambda request:failed_requests.append({'url':request.url,'failure':request.failure}))
                 results=[]
-                routes=['/','/reports','/projects','/projects/'+project+'/pricing','/orders?project='+project,'/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events','/estimates']
+                routes=['/','/printers/Idle','/reports','/projects','/projects/'+project+'/pricing','/orders?project='+project,'/recalculate','/settings/printers','/printer-diagnostics','/settings/profiles','/settings/pause','/settings/other','/system-events','/estimates']
                 if '--workflows-only' in sys.argv:routes=[]
                 try:
                     sizes=[(1920,1080,1,'large'),(1440,1000,1,'desktop'),(900,900,1,'narrow'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')]
