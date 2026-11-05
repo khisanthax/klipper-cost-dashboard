@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KCD Installer Administration</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
+  body { margin: auto; max-width: 52rem; padding: 1rem; overflow-wrap: anywhere; }
+  section { border: 1px solid GrayText; border-radius: .45rem; padding: 1rem; margin-block: 1rem; }
+  button, select, a { font: inherit; }
+  button, select { padding: .55rem; max-width: 100%; }
+  label { display: block; margin-block-end: .35rem; font-weight: 600; }
+  :focus-visible { outline: 3px solid Highlight; outline-offset: 3px; }
+  .feedback { border-inline-start: .3rem solid Highlight; padding-inline-start: 1rem; }
+</style>
+<main>
+  <h1>KCD Installer Administration</h1>
+  <p>Review and repair clients on the local host or approved SSH targets.</p>
+  <nav aria-label="Administration">
+    <a href="/">Installer</a> · <a href="/clients">Verify Master and registered clients</a>
+  </nav>
+  {% if error %}<p class="feedback" role="alert">{{ error }}</p>{% endif %}
+  {% if backup_name %}<p class="feedback" role="status">Backup created: {{ backup_name }}</p>{% endif %}
+  {% if clients is defined %}
+  <section aria-labelledby="registered">
+    <h2 id="registered">Registered clients</h2>
+    <p>Master storage backend: {{ backend }}</p>
+    {% if backend == 'sql' %}<p>SQL readiness: {{ 'Ready' if ready else 'Not ready' }}</p>{% endif %}
+    <ul>
+      {% for client in clients %}
+      <li>{{ client.name }}{% if client.retired %} (retired){% endif %}</li>
+      {% else %}<li>No registered printers.</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  <section aria-labelledby="select">
+    <h2 id="select">Select a configured printer</h2>
+    <form action="/preview" method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="target">Printer and host</label>
+      <select id="target" name="target" required>
+        {% for id, target in targets.items() %}
+        <option value="{{ id }}">{{ target.name }} · {{ target.ssh_alias or 'local' }} · {{ target.moonraker }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Preview installation or repair</button>
+      <button type="submit" formaction="/inspect">Discover and verify this instance</button>
+    </form>
+  </section>
+  {% if inspection %}
+  <section aria-labelledby="inspection">
+    <h2 id="inspection">Instance verification for {{ selected.name }}</h2>
+    <p>Moonraker {{ inspection.moonraker }} · Port {{ inspection.port }} · {{ 'Klipper connected' if inspection.connected else 'Klipper disconnected' }}</p>
+    <p>Existing KCD identity {{ inspection.printer_name or 'Not installed' }} · Local process {{ 'active' if inspection.active_process else 'not observed from this service' }}</p>
+    <h3>Active configuration files</h3>
+    <ul>{% for file in inspection.active_files %}<li>{{ file }}</li>{% endfor %}</ul>
+    <h3>Other root configuration files</h3>
+    <ul>{% for file in inspection.unused_files %}<li>{{ file }} · outside the active include chain</li>{% else %}<li>None found</li>{% endfor %}</ul>
+    {% for error in inspection.errors %}<p class="feedback">{{ error }}</p>{% endfor %}
+    <h3>Effective macro integration</h3>
+    <ul>{% for macro in inspection.macros %}
+      <li>{{ macro.name }} · {{ macro.file }} · {{ 'effective' if macro.effective else 'shadowed' }}
+        {% if macro.hooks %} · {{ macro.hooks|join(', ') }}{% endif %}
+        {% if macro.possible_duplicates %} · Review possible duplicate {{ macro.possible_duplicates|join(', ') }} hooks{% endif %}
+      </li>
+    {% else %}<li>No active macros found.</li>{% endfor %}</ul>
+  </section>
+  {% endif %}
+  {% if result %}
+  <section aria-labelledby="review">
+    <h2 id="review">{% if ticket %}Review {{ selected.name }}{% else %}Installation verified for {{ selected.name }}{% endif %}</h2>
+    <p>Configuration directory: {{ selected.config_dir }}</p>
+    {% if selected.relocate %}<p>This target permits relocation of the existing identity.</p>{% endif %}
+    {% if selected.reactivate %}<p>This target permits reactivation of a retired identity.</p>{% endif %}
+    {% if ticket %}
+    <ul>
+      {% for change in result.changes %}<li>{{ change }}</li>
+      {% else %}<li>No client file changes are required. Apply will verify registration.</li>{% endfor %}
+    </ul>
+    {% for detail in result.change_details %}
+    <h3>{{ detail.file }}</h3>
+    <ul>{% for action in detail.actions %}<li>{{ action }}</li>{% endfor %}</ul>
+    {% endfor %}
+    <p>Apply requires verified inactive printer state. This preview expires in five minutes.</p>
+    <form action="/apply" method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="ticket" value="{{ ticket }}">
+      <button type="submit">Apply reviewed installation</button>
+    </form>
+    {% else %}
+    <p class="feedback" role="status">The installer confirmed registration and client files.</p>
+    <p>Review the active Klipper event hooks and reload the configuration during an idle window if required.</p>
+    {% if result.backup_files %}
+    <h3>Private configuration backups</h3>
+    <ul>{% for file in result.backup_files %}<li>{{ file }}</li>{% endfor %}</ul>
+    {% endif %}
+    {% endif %}
+  </section>
+  {% endif %}
+  {% if backup_data %}
+  <section aria-labelledby="backup">
+    <h2 id="backup">Local SQL backup</h2>
+    <p>Create a private archive in the backups folder under {{ backup_data }}.</p>
+    <form action="/backup" method="post">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">Create backup</button>
+    </form>
+  </section>
+  {% endif %}
+</main>
+</html>

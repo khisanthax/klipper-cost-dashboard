@@ -37,7 +37,8 @@ def main():
                 result={"/server/info":{"klippy_connected":True},
                         "/machine/system_info":{"system_info":{"network":{"eth0":{"mac_address":"02:01:02:03:04:05"}},"instance_ids":{"moonraker":"moonraker"+str(self.server.server_port)}}},
                         "/server/files/roots":[{"name":"config","path":self.server.config_root}],
-                        "/server/history/list":{"jobs":[],"count":0}}.get(route,{})
+                        "/server/history/list":{"jobs":[],"count":0},
+                        "/printer/objects/query":{"status":{"print_stats":{"state":"standby"}}}}.get(route,{})
                 body=json.dumps({"result":result}).encode()
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(body)
         mock=[]
@@ -81,7 +82,7 @@ def main():
                 exercise(env,base,mock,tmp,browser='--installer-terminal-only' not in sys.argv)
             if '--installer-ssh' in sys.argv or '--installer-ssh-only' in sys.argv:
                 from installer_ssh_fixture import exercise as ssh_exercise
-                ssh_exercise(env,base,mock[0],tmp)
+                ssh_exercise(env,base,mock[0],tmp,browser_admin='--installer-web-ssh' in sys.argv)
             if '--installer-acceptance' in sys.argv or '--installer-ssh-only' in sys.argv or '--installer-terminal-only' in sys.argv:
                 return
             # Model Moonraker replacing a script with mode 0644. Its bash

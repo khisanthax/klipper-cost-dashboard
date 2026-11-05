@@ -20,6 +20,27 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Private administration final packaging over verified v0.10.0
+
+- Integrated actual v0.10.0 deployment handoff main 1a01766. Administration source is unchanged from full-green 2a6a707/Release Validation42087907369; this ancestry/LOG update must pass fresh strict checks before normal merge. No migration, historical pricing rewrite or listener activation is introduced. The separate authenticated allowlisted service remains optional and inactive on the production Master.
+
+
+### 2026-11-05 — Private browser administration final integration gate
+
+- Integrated verified v0.9.0 deployment handoff main 05d21c0. Final administration diff remains scoped to the shared CLI inspection/repair engine, authenticated allowlisted loopback service and real browser/SSH fixtures; no additional schema migration or production listener is introduced. The final exact-head CI is required before normal merge into v0.11.0. Public demo remains isolated by owner decision.
+
+
+### 2026-11-05 — Optional web administration prepared over final reporting cohort
+
+- Integrated main d5df3a8 after validated inventory and Reports merges, retaining read-only historical financial semantics, atomic migrations, thumbnail-delete recovery and all backup constraints. Optional services remain inactive on the production Master; the demo remains isolated by owner choice. No additional schema migration is introduced. Strict CI is required for this exact head before the later service-packaging cohort.
+
+
+### 2026-11-05 — Optional web administration prepared over inventory integration
+
+- Integrated main 4827fb3, preserving stock ledger/backup integrity and all financial/identity protections. Optional services are not activated on the production Master. The owner requested isolated demo code/staging/release packaging only; there is no pending public deployment approval. Strict CI and normal cohort integration remain required before release.
+
+
+### 2026-11-05 — web administration prepared over atomic Orders migration support
 ### 2026-11-05 — v0.10.0 released and production verified
 
 - **Status / scope:** [v0.10.0](https://github.com/khisanthax/klipper-cost-dashboard/releases/tag/v0.10.0) is live at exact tagged `d5df3a81375d190a354cd195435fd808328e795d`, normally merged PRs 67/70 (physical filament inventory, monthly outcomes/content cache/terminal import precedence, thumbnail deletion race). KCD-only replacement **13:49:55→13:49:57 America/New_York**; final post-acceptance preservation check **13:50:23**. Optional administration/demo remains for the next cohort, not enabled here.
@@ -47,6 +68,7 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.
 
 
+### 2026-11-05 — web administration prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — Reports prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — inventory prepared over atomic Orders migration support
 
@@ -76,11 +98,28 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - Integrated b154137 feature baseline (Orders through the updated modes stack), retaining canonical export, stable expanded-panel actions and printer-page telemetry/history. Additive feature browser routes and shared workflows remain tested together. No feature deployment or public exposure is claimed. Strict exact-head CI and cohort tag boundaries govern future normal merges.
 
 
+### 2026-11-05 — web administration synchronized to current solo-maintainer main
 ### 2026-11-05 — Reports synchronized to current solo-maintainer main
 
 - Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
 
 
+### 2026-11-05 — Browser installer workflow completion
+
+- Extended [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63) with scoped local and SSH instance discovery, active include-chain and effective macro verification, possible duplicate hook reporting, precise configuration actions and private backup filenames. The `inspect-client` CLI uses the same inspection implementation.
+- Browser targets remain explicit operator allowlist entries. Inspection reads only the selected configuration root, distinguishes included files from other root alternatives and verifies the exact Moonraker root and port. Repair retains idle-state verification, single-use reviewed revisions and private credential propagation.
+- Added safe diagnostics for authentication, wrong configuration roots, active printers, stale reviews, permissions and partial registration/write failures. Fourteen focused inspection, authorization and shared-engine tests passed locally. The actual Playwright installer passed responsive, keyboard, read-only instance inspection, active-printer rejection, registration and backup/restore verification.
+- CI, required review, release and deployment are recorded separately in the PR checks. Advanced destructive and host-service operations use the existing CLI. Production was untouched by this change.
+- The scoped inspection candidate at `30d71c0` passed [Release Validation 42036598263](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42036598263). Restacked on PR 61 cancellation measurement/transaction commit `c19f04c`; all 14 focused web/inspection/engine tests pass after resolution. Web previews also describe the targeted managed event payload upgrade. The merged head requires its own CI; no deployment is claimed.
+
+### 2026-11-04 — Program baseline and first browser installer slice
+
+- **Status.** Implemented and locally tested the first Milestone A slice in [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63). Stacked on the pending SV07 fix in PR 61 so new clients inherit correct shell argument handling. Candidate remains subject to GitHub review and release validation.
+- **Baseline.** Production independently returned v0.7.3 immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d` and five passing SQL readiness checks. The live database reported 1,041 jobs and four registered printers. The v0.7.3 handoff is merged in PR 60. The two SV07 rows and printer script repair are already in production. The generic lifecycle and Unpriced display changes await required review in PR 61.
+- **Implementation.** Reconciled the November 1 roadmap against the shipped CLI, SQL, project, pricing, dashboard and thumbnail features. Added a standalone loopback browser service using the shared CLI and SSH client workflow. Separate admin credentials, trusted hosts, same-origin form checks, CSRF, single-use expiring previews, fixed targets and verified inactivity protect apply. Existing configuration bytes and registration state bind the preview. A local SQL backup action is opt-in and reuses the established archive engine.
+- **Verification.** Five web boundary tests and six shared engine tests passed locally. The broad Windows suite ran 241 tests with three platform skips and passed SQL-only isolation. Chromium exercised the actual installer and SQL Master with disposable Moonraker, checked 390/768/1440-pixel widths and keyboard activation, rejected an active printer, created the configured client and verified one SQL identity. The browser-created archive restored into isolated SQLite with passing integrity and the expected identity. [Release Validation 41872002089](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41872002089) passed 241 Linux tests, real browser repair over disposable strict-host-key OpenSSH, and the Docker smoke and upgrade checks. Screenshots and traces are available in the run and under `browser-artifacts/web-admin/`.
+- **Remaining A work.** Use existing CLI paths for initial Master bootstrap, open discovery, macro edits, retirement and uninstall. The browser supports configured local and SSH targets, registration, repair, opt-in relocation/reactivation and local SQL backup. Obtain review on PR 61 and the browser candidate before release.
+- **Program handoff.** The [unified roadmap](docs/unified_roadmap.md) links the separate review candidates for all nine milestones and records which slices remain open. Each candidate carries its own committed logbook entry and tests. Full release validation passed for the printer page, modes, stacked Business Orders, report outcomes, inventory, slicer estimate and project export code. The recovered demo application passed its full check. The added isolated non-root image rehearsal has a separate final validation run. None of these candidates has been released or deployed. The next release gate is the required review of PR 61.
 ### 2026-11-05 — Historical Reports metrics, filters and recovery hardening
 
 - **Status:** implemented in [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70), subject to normal CI/review/release. No deployment or production mutation was performed for this work.

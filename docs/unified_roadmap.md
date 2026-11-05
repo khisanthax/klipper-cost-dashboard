@@ -185,6 +185,29 @@ Production v0.10.0 was independently verified on 2026-11-05, pinned to immutable
 
 v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
+The lifecycle repair shipped and was verified in v0.7.4; v0.8.0 and v0.9.0 subsequently shipped their documented feature cohorts. Read root LOGBOOK for exact deployed digests and evidence; main can contain later, undeployed code.
+
+## Completion-program state
+
+The current owner directive and the [completion execution plan](completion-program.md)
+supersede the older November 1 starting inventory. Retain every released storage,
+pricing, identity, installer and thumbnail guarantee while completing the remaining
+code cohorts through strict CI and normal solo-maintainer PR merges.
+
+| Milestone | Current supported scope and actual state |
+| --- | --- |
+| A · Browser administration | Scoped local/SSH discovery and inspection, reviewed registration/repair/relocation, active-include and hook diagnostics, private backups and recoverable errors are implemented in PR 63. The service is separately authenticated and allowlisted. Unbounded discovery, initial Master bootstrap, macro edits and destructive host/lifecycle operations remain deliberately CLI-only. Optional listener activation is not part of the production Master deployment. |
+| B · Interactive demo | PR 64 implements synthetic per-visitor workspaces, simulated activity, reset/expiry/quotas, isolated TLS/browser/container acceptance and default-deny boundaries. The owner explicitly requested isolated code/staging/release packaging only; no public endpoint or pending public-approval blocker belongs to this program. |
+| C · Printer pages | Released in v0.8.0 with known/unknown telemetry, scoped history, outcomes and comparisons. |
+| D/E · Modes and Orders | Released in v0.9.0 with reversible Advanced-default preferences and Business-gated project-backed financial/lifecycle data. |
+| F/G · Reports and stock | Merged and tagged for v0.10.0; deployment evidence remains separate. Includes historical monthly filters/comparisons/coverage, safe outcome inference/cache invalidation and exact-milligram stock/correction/archive ledgers. |
+| H/I · Estimates and project export | Released in v0.8.0: explicit spool units, signed reviewed planned items, atomic project mutations, canonical identity and consistent versioned SQL exports preserving original pricing. |
+
+All final service-packaging code remains subject to its exact-head validation.
+Public demo hosting, Full Recompute and undefined utilization/profit/ROI or optional
+notification/import/printable-export workflows require separately established
+requirements; they are not invented from printing cost or silently claimed complete.
+
 ## Next Planned Work
 
 1. Monitor genuine printer events on verified v0.10.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
