@@ -20,6 +20,42 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Lifecycle merged under solo-maintainer policy
+
+- **Merged:** PR 61 through the normal protected PR workflow at `4ae41b08641234fc7c418321901ca7dc9650d54f`. Required head checks passed; post-merge validation/publication are running. No administrator bypass.
+- **Governance:** ruleset readback confirms zero human approvals, required PRs, strict validate/compile, resolved threads and deletion/force-push protections. Previous human-review blocker statements are superseded.
+- **Integration:** corrected navigation composition and an authenticated-demo fixture; ten inventory tests passed. Combined 376-test Linux/browser/Docker validation is rerunning at `7362a0e`.
+- **Production:** remains verified v0.7.3. v0.7.4 publication, fresh backup, deployment and live Canceled/Unpriced verification remain pending successful post-merge checks. No deployment success is claimed.
+
+
+### 2026-11-05 — Owner-authorized solo-maintainer policy
+
+- **Status.** Applied and independently read back ruleset 11487956: zero required human approvals, last-push/extra approval disabled; required PRs, resolved threads, deletion/force-push protection retained. Added strict required `validate` and `compile` checks. No administrator bypass or fabricated review.
+- **Governance.** This supersedes previous unavailable-reviewer blockers. Updated AGENTS and [release policy](docs/solo-maintainer-release-policy.md). Compile now runs on every PR/push so required checks cannot be skipped by path filters.
+- **Validation / next.** CI is required for this exact governance head; merge validated PRs normally and continue incremental release/deployment. The combined rehearsal's first Linux run caught one template-default test failure out of 376; its correction is being committed and revalidated. No unverified image was deployed. Production remains the verified v0.7.3 baseline; public demo exposure approval remains required.
+
+### 2026-11-05 — Strengthened business-data upgrade and rollback evidence
+
+- **Status.** Implemented in [PR 71](https://github.com/khisanthax/klipper-cost-dashboard/pull/71), awaiting final Linux image validation and required review. No production deployment.
+- **Confirmed validation gap.** The initial upgrade harness compared only five pre-upgrade tables; a later all-table snapshot could have accepted damage to projects or profiles as its new baseline. The fixture now seeds a nonempty project/profile/rate/assignment/manual/planned/original-pricing/project-overlay graph and zero/null-cost jobs before upgrade. It compares every baseline table, schema/index definition and thumbnail object; only additive migration records are exempted.
+- **New-feature rollback.** Where supported, the candidate creates an actual synthetic Order and spool/consumption/adjustment ledger after the migration comparison. The old image must preserve that complete post-seed SQL/schema/object state exactly. Both pinned v0.7.3 and v0.7.2 paths remain mandatory.
+- **Verification.** Four focused tests passed for business-row loss, migration-evidence rewrites, composite row ordering, nonempty new-table rollback, thumbnail damage and index loss; compile/diff checks passed. Baseline seed APIs were exercised against both tagged source trees and new-feature APIs against the combined source. Actual Docker validation remains a Linux CI gate because local Docker is unavailable.
+- **Next.** Run the combined candidate with the strengthened harness; record exact CI and production status before completion. Required eligible external review and public-demo exposure approval remain outstanding gates.
+
+### 2026-11-05 — Completion-program production baseline and rollback validation
+
+- **Status.** Continued implementation and validation across existing PRs; protected main has not been merged and no new release/deployment is claimed. Closed superseded PR 58 with a linked handoff to [PR 71](https://github.com/khisanthax/klipper-cost-dashboard/pull/71), preserving its useful governance and historical evidence.
+- **Production.** Rechecked immutable v0.7.3. At 13:39Z and 13:51Z, SQL integrity, foreign keys and all five readiness checks passed with 1,047 jobs and all four connected loaded identities. Both SV07 import rows remain canceled with null time/material/total costs. All 316 persistent objects matched their SQL sizes and SHA-256 values; 435 archived references remain. See [read-only evidence](docs/completion-program-production-2026-11-05.md). No production state was changed.
+- **Validation tooling.** The image rehearsal now defaults to pinned v0.7.3 and retains an explicit v0.7.2 compatibility run. Both execute upgrade and return to the old image, checking exact core state, archived thumbnail bytes and all post-upgrade SQL tables. Compile/diff checks pass locally; actual Docker execution is delegated to Linux CI because the local Docker engine is unavailable.
+- **Next.** Finish combined candidate regression checks, publish exact branch/CI evidence, obtain the required eligible non-author reviews, then perform incremental release/backups/deployment. Public demo exposure additionally requires approval of a concrete target and security configuration.
+
+### 2026-11-05 — Completion-program inventory and execution plan
+
+- **Status.** Rechecked GitHub and production. Main is `7892765`. PRs 58 and 61–70 remain open and no newer release exists. The required review is still pending.
+- **Production.** Read-only image inspection confirmed v0.7.3 index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. All five SQL health checks passed with schema 0008, 1,047 jobs and four printers.
+- **Plan.** Added [dependency-aware completion and release steps](docs/completion-program.md). Parallel scoped reviews cover the existing feature branches. Updated the current Personal-mode requirement to include Projects. Recovered permanent AGENTS handoff instructions from PR 58.
+- **Review gate.** Main requires an eligible non-author approval, including latest-push approval. The current collaborator inventory lists only the author. An eligible external reviewer is needed for main merges and release. Public demo exposure additionally needs an explicitly approved target and security configuration.
+- **Next.** Complete independent branch fixes, validate each, preserve SV07's existing recovery, supersede stale PR 58 with a linked current handoff and publish test/review results. No production deployment is claimed for these candidates.
 ### 2026-11-05 — Cancellation measurement and transaction regression repair
 
 - **Status:** implemented and locally validated in [PR 61](https://github.com/khisanthax/klipper-cost-dashboard/pull/61); required review, CI and release remain separate gates. No production code or printer configuration was deployed for this follow-up.
