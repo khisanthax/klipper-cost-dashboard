@@ -20,6 +20,12 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Owner-authorized solo-maintainer policy
+
+- **Status.** Applied and independently read back ruleset 11487956: zero required human approvals, last-push/extra approval disabled; required PRs, resolved threads, deletion/force-push protection retained. Added strict required `validate` and `compile` checks. No administrator bypass or fabricated review.
+- **Governance.** This supersedes previous unavailable-reviewer blockers. Updated AGENTS and [release policy](docs/solo-maintainer-release-policy.md). Compile now runs on every PR/push so required checks cannot be skipped by path filters.
+- **Validation / next.** CI is required for this exact governance head; merge validated PRs normally and continue incremental release/deployment. The combined rehearsal's first Linux run caught one template-default test failure out of 376; its correction is being committed and revalidated. No unverified image was deployed. Production remains the verified v0.7.3 baseline; public demo exposure approval remains required.
+
 ### 2026-11-05 — Strengthened business-data upgrade and rollback evidence
 
 - **Status.** Implemented in [PR 71](https://github.com/khisanthax/klipper-cost-dashboard/pull/71), awaiting final Linux image validation and required review. No production deployment.

@@ -15,6 +15,13 @@ Follow repository review requirements. Link the committed logbook in the final
 response. Keep older entries and add dated corrections. Protect credentials,
 private keys, personal information and private backup contents.
 
+Solo-maintainer policy (owner-authorized November 5, 2026): require pull requests
+and successful Release Validation and Python Compile checks, with zero required
+human approvals. Inspect the final diff and migrations, resolve review findings,
+and merge normally when checks pass. Do not fabricate reviews or use administrator
+bypass. Carry validated changes through release and safe deployment autonomously;
+public exposure/security approvals remain separate requirements.
+
 Preserve production safety, historical pricing and printer identities. Use
 disposable services for failure injection and the established recovery workflow
 for authorized production operations.
