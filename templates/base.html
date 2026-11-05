@@ -135,7 +135,7 @@
                 {% if show_advanced %}
                 <a class="btn btn-sm btn-outline-light {% if request.path.startswith('/recalculate') %}active{% endif %}"
                     href="{{ url_for('recalculate_page') }}">Recalculate</a>
-                {% if inventory_available %}
+                {% if inventory_available and show_advanced|default(true) %}
                 <a class="btn btn-sm btn-outline-light {% if request.path == '/inventory' %}active{% endif %}"
                     href="{{ url_for('inventory_page') }}">Inventory</a>
                 {% endif %}
