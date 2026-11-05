@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Combined candidate integration rehearsal
+
+- **Status.** Combined existing PR 61–71 candidates on isolated `resume/completion-integration-rehearsal`, based on main `7892765`. Local targeted tests and actual normal/HTTPS demo browser workflows pass. This is not a protected-main merge, release or production deployment. Complete source heads and an acceptance matrix are recorded in [rehearsal evidence](docs/completion-integration-rehearsal-2026-11-05.md).
+- **Integration.** Preserved all feature browser flows, both demo/web-admin checks and both pinned upgrade/rollback baselines. Resolved Personal Projects, Business Orders and Advanced inventory/export presentation. Explicit demo policies still deny newly integrated surfaces; blocked controls are hidden. Confirmed fixes were committed upstream: stale SQL table rewrites, atomic conversion, reviewed rounding, canonical project/export identity, the public demo Modes storage-context boundary and a Windows SQLite fixture-handle leak.
+- **Verification.** Combined local suites passed for identities (2), modes (3), plan concurrency/rollback (6), export (4), Orders (7), printer detail (6, one IANA skip), Reports (8, one IANA skip), importer outcomes (6), thumbnail archive (12), backup (9, one Windows POSIX skip), upgrade assertions (4), and preliminary combined demo security (21). Actual 100-job dashboard workflows and desktop/mobile HTTPS demo acceptance passed. SQL-only isolation, compileall and diff checks passed. Final full-head Linux Release Validation remains required for image/SSH/systemd and seeded v0.7.3/v0.7.2 rollback execution; local Docker is unavailable.
+- **Production / next.** This rehearsal performed no live production action. The separate November 5 read-only v0.7.3 evidence remains authoritative. Publish the resume branch for exact-head CI, inspect its results and obtain required eligible non-author review before integrating main or deploying. No review rule or public-demo exposure gate is bypassed.
+
 ### 2026-11-05 — Browser installer workflow completion
 
 - Extended [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63) with scoped local and SSH instance discovery, active include-chain and effective macro verification, possible duplicate hook reporting, precise configuration actions and private backup filenames. The `inspect-client` CLI uses the same inspection implementation.
