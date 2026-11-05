@@ -2,6 +2,11 @@
 
 ## Purpose
 
+The [completion execution plan](completion-program.md) records the November 5
+inventory, branch dependencies, release sequence and externally imposed gates.
+Personal mode includes Projects under the current owner directive. Full
+Recompute remains deferred.
+
 This document is the single source of truth for Klipper Cost Dashboard roadmap planning. It captures:
 
 - project history
@@ -180,7 +185,7 @@ Production v0.7.3 was independently reverified on 2026-11-04, pinned to immutabl
 
 v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
-The v0.7.3 deployment handoff merged in PR 60. The two matched SV07 history rows and on-printer script repairs were applied to production. The general lifecycle fix and Unpriced presentation await review in PR 61. A released v0.7.4 has not been verified.
+The v0.7.3 deployment handoff merged in PR 60. The two matched SV07 history rows and on-printer script repairs were applied to production. PR 61 lifecycle and Unpriced presentation are merged. The v0.7.4 tag/release is published; production deployment verification is tracked separately in LOGBOOK.
 
 ## Approved development sequence
 
@@ -195,10 +200,13 @@ The November 1 proposal's v0.5.1 baseline is historical. Preserve the released C
 | E | Business orders and profitability | [PR 66](https://github.com/khisanthax/klipper-cost-dashboard/pull/66) adds SQL project-backed order metadata, revenue, expenses and unknown-aware profitability. The stack on PR 65 passed validation with Business-only access and preservation across mode changes. |
 | F | Analytics and reporting | [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) adds monthly outcomes and recorded-cost subtotals with missing-data counts. Broader comparisons, business analytics, utilization and presets remain work. |
 | G | Filament inventory | [PR 67](https://github.com/khisanthax/klipper-cost-dashboard/pull/67) adds SQL physical spools, printer assignment and idempotent, verified stock movements. Further reporting and inventory convenience remain work. |
-| H | Slicer estimates | [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) adds bounded metadata import and explicit-unit browser and JSON estimates. Direct promotion of a reviewed what-if result into the existing planned-item workflow remains work. |
+| H | Slicer estimates | [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) adds bounded metadata import and explicit-unit browser and JSON estimates. Reviewed estimate promotion and atomic project mutations merged through PR 68. |
 | I | Notifications and exports | [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) adds a versioned SQL project JSON snapshot. Order, inventory and printable exports and optional notification delivery remain work. |
 
 These PRs are separate review candidates. Rebase and validate each against current main before release. Review the stacked Business Orders after Modes, reconcile overlapping reporting and Projects changes, and retest the demo route policy with integrated features. Retain previous rollback images and coordinated archives.
+1. Preserve the two SV07 cancellations already recovered on November 4; the November 5 read-only check confirms canceled outcomes and null costs. Complete PR 61 review and the v0.7.4 release process without replaying that recovery.
+2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
+3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
 ## Deferred Feature Track
 
@@ -219,13 +227,15 @@ These PRs are separate review candidates. Rebase and validate each against curre
 
 ### Modes
 
-- status: approved for milestone D after the installer, demo and printer detail work
-- frozen constraints summary:
+- status: implemented candidate in PR 65; not merged or deployed
+- current requirements:
   - single global mode per KCD instance
   - reversible switching with no data deletion
-  - personal mode hides Projects
-  - business mode reveals optional profit-aware/business framing
-  - backend/schema/storage remain identical across modes
+  - Personal includes everyday history, Projects and basic pricing under the November 5 directive
+  - Advanced is the existing-installation default
+  - Business includes Advanced plus the separately reviewed Orders candidate in PR 66
+  - mode preferences preserve history, pricing, profiles, assignments and identities
+  - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
 
 ## Current Risks / Contradictions
 

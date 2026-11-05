@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — web administration synchronized to current solo-maintainer main
+
+- Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
+
+
 ### 2026-11-05 — Browser installer workflow completion
 
 - Extended [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63) with scoped local and SSH instance discovery, active include-chain and effective macro verification, possible duplicate hook reporting, precise configuration actions and private backup filenames. The `inspect-client` CLI uses the same inspection implementation.
@@ -36,6 +41,69 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification.** Five web boundary tests and six shared engine tests passed locally. The broad Windows suite ran 241 tests with three platform skips and passed SQL-only isolation. Chromium exercised the actual installer and SQL Master with disposable Moonraker, checked 390/768/1440-pixel widths and keyboard activation, rejected an active printer, created the configured client and verified one SQL identity. The browser-created archive restored into isolated SQLite with passing integrity and the expected identity. [Release Validation 41872002089](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41872002089) passed 241 Linux tests, real browser repair over disposable strict-host-key OpenSSH, and the Docker smoke and upgrade checks. Screenshots and traces are available in the run and under `browser-artifacts/web-admin/`.
 - **Remaining A work.** Use existing CLI paths for initial Master bootstrap, open discovery, macro edits, retirement and uninstall. The browser supports configured local and SSH targets, registration, repair, opt-in relocation/reactivation and local SQL backup. Obtain review on PR 61 and the browser candidate before release.
 - **Program handoff.** The [unified roadmap](docs/unified_roadmap.md) links the separate review candidates for all nine milestones and records which slices remain open. Each candidate carries its own committed logbook entry and tests. Full release validation passed for the printer page, modes, stacked Business Orders, report outcomes, inventory, slicer estimate and project export code. The recovered demo application passed its full check. The added isolated non-root image rehearsal has a separate final validation run. None of these candidates has been released or deployed. The next release gate is the required review of PR 61.
+### 2026-11-05 — Current solo-maintainer integration
+
+- Integrated validated lifecycle and owner-authorized solo policy from main237ccc88. Human review is no longer a blocker; strict validate/compile checks and normal PR merges remain mandatory. This feature is not deployed; production release is coordinated separately. Final CI must pass on this exact updated head.
+
+
+### 2026-11-05 — Canonical project identity collision repair
+
+- **Status.** Implemented and tested in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68); review, merge, release and deployment remain pending.
+- **Changes.** SQL project resolution now prefers the canonical UID over a matching display name or legacy numeric alias. Name fallback remains available only when no canonical match exists. This prevents a colliding project name from redirecting planned items or manual work into another project.
+- **Verification.** Two real SQLite tests passed for earlier-name/later-UID collisions, explicit numeric UIDs and legacy numeric/name fallback. All six planned-item concurrency/rollback tests and SQL-only filesystem validation passed. Historical job data and costs are unchanged.
+- **Production / next.** No production action. Run final CI and the combined candidate rehearsal, then obtain required non-author review through the established workflow.
+
+### 2026-11-05 — Reviewed estimates and concurrent project mutation repair
+
+- **Status.** Completed the existing [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) implementation on `codex/slicer-estimates`; not merged, released or deployed.
+- **Changes.** Added primary spool-price/net-weight inputs and explicit units. Complete SQL previews can become planned items through a signed, 15-minute review with replay protection. The saved override equals the displayed component sum, including half-cent rounding; raw assumptions remain in notes. Missing weight remains unknown. Bounded parsing now handles multi-day durations and rejects ambiguous partial measurements. Failed inserts roll back with a retryable error.
+- **Confirmed concurrency repair.** Real overlapping edits could erase newly created plans or converted manual work because SQL CRUD rewrote entire tables from stale snapshots. Plan/manual mutations now target individual rows; conversion commits the manual row and plan marker atomically. SQL cleanup no longer treats inconsistent read snapshots as deletion evidence. Compatibility storage behavior is retained. Conversion now rejects unknown gram weight rather than inventing zero consumption; explicit zero remains valid.
+- **Verification.** Seven estimate, five real-SQL concurrency/rollback and nineteen component tests passed; SQL-only isolation passed. The local real Chromium estimate/save/replay workflow passed before the final concurrency change. CI now also covers the estimate route in all six layouts and captures desktop/tablet/mobile/200% CSS-zoom reviewed previews. Full final-head validation remains required.
+- **Production / next.** No production changes. Complete final CI and required non-author review, then integrate incrementally through the established release process. The unavailable eligible reviewer currently blocks main merging and deployment.
+- **Demo integration.** The calculator entry respects the isolated demo's explicit route policy; unavailable upload/plan controls are not advertised. Normal installations retain the workflow. Template rendering regression covers this boundary; server enforcement remains the demo service's responsibility.
+
+### 2026-11-04 — Slicer estimate candidate
+
+- **Status.** Implemented the independent Milestone H what-if slice in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68). Production remains at the verified v0.7.3 baseline.
+- **Changes.** Reused planned-item pricing for a browser and JSON estimate interface. Bounded G-code head and tail sampling, limited uploads to 16 MiB and ignored executable lines. Explicit grams or verified grams-per-meter conversion determines material weight. Missing material remains unknown. Saved profiles and explicit prices provide separate what-if scenarios without writing actual history.
+- **Verification.** Four focused Python tests passed for metadata, length conversion, profile pricing, zero hourly rate, missing values and invalid input. The local isolated Chromium workflow passed keyboard submission, mobile estimate layout, cost output and JSON unknown handling. Initial Linux CI found overflow in the Projects heading with the new link. The link moved to a separate line and CI is rerunning. The existing G-code planned-item workflow remains available under Projects.
+- **Next.** Finish candidate checks and review. Direct promotion of the reviewed what-if result to a planned item remains follow-up work. No estimate initiates physical printing.
+### 2026-11-05 — Lifecycle merged under solo-maintainer policy
+
+- **Merged:** PR 61 through the normal protected PR workflow at `4ae41b08641234fc7c418321901ca7dc9650d54f`. Required head checks passed; post-merge validation/publication are running. No administrator bypass.
+- **Governance:** ruleset readback confirms zero human approvals, required PRs, strict validate/compile, resolved threads and deletion/force-push protections. Previous human-review blocker statements are superseded.
+- **Integration:** corrected navigation composition and an authenticated-demo fixture; ten inventory tests passed. Combined 376-test Linux/browser/Docker validation is rerunning at `7362a0e`.
+- **Production:** remains verified v0.7.3. v0.7.4 publication, fresh backup, deployment and live Canceled/Unpriced verification remain pending successful post-merge checks. No deployment success is claimed.
+
+
+### 2026-11-05 — Owner-authorized solo-maintainer policy
+
+- **Status.** Applied and independently read back ruleset 11487956: zero required human approvals, last-push/extra approval disabled; required PRs, resolved threads, deletion/force-push protection retained. Added strict required `validate` and `compile` checks. No administrator bypass or fabricated review.
+- **Governance.** This supersedes previous unavailable-reviewer blockers. Updated AGENTS and [release policy](docs/solo-maintainer-release-policy.md). Compile now runs on every PR/push so required checks cannot be skipped by path filters.
+- **Validation / next.** CI is required for this exact governance head; merge validated PRs normally and continue incremental release/deployment. The combined rehearsal's first Linux run caught one template-default test failure out of 376; its correction is being committed and revalidated. No unverified image was deployed. Production remains the verified v0.7.3 baseline; public demo exposure approval remains required.
+
+### 2026-11-05 — Strengthened business-data upgrade and rollback evidence
+
+- **Status.** Implemented in [PR 71](https://github.com/khisanthax/klipper-cost-dashboard/pull/71), awaiting final Linux image validation and required review. No production deployment.
+- **Confirmed validation gap.** The initial upgrade harness compared only five pre-upgrade tables; a later all-table snapshot could have accepted damage to projects or profiles as its new baseline. The fixture now seeds a nonempty project/profile/rate/assignment/manual/planned/original-pricing/project-overlay graph and zero/null-cost jobs before upgrade. It compares every baseline table, schema/index definition and thumbnail object; only additive migration records are exempted.
+- **New-feature rollback.** Where supported, the candidate creates an actual synthetic Order and spool/consumption/adjustment ledger after the migration comparison. The old image must preserve that complete post-seed SQL/schema/object state exactly. Both pinned v0.7.3 and v0.7.2 paths remain mandatory.
+- **Verification.** Four focused tests passed for business-row loss, migration-evidence rewrites, composite row ordering, nonempty new-table rollback, thumbnail damage and index loss; compile/diff checks passed. Baseline seed APIs were exercised against both tagged source trees and new-feature APIs against the combined source. Actual Docker validation remains a Linux CI gate because local Docker is unavailable.
+- **Next.** Run the combined candidate with the strengthened harness; record exact CI and production status before completion. Required eligible external review and public-demo exposure approval remain outstanding gates.
+
+### 2026-11-05 — Completion-program production baseline and rollback validation
+
+- **Status.** Continued implementation and validation across existing PRs; protected main has not been merged and no new release/deployment is claimed. Closed superseded PR 58 with a linked handoff to [PR 71](https://github.com/khisanthax/klipper-cost-dashboard/pull/71), preserving its useful governance and historical evidence.
+- **Production.** Rechecked immutable v0.7.3. At 13:39Z and 13:51Z, SQL integrity, foreign keys and all five readiness checks passed with 1,047 jobs and all four connected loaded identities. Both SV07 import rows remain canceled with null time/material/total costs. All 316 persistent objects matched their SQL sizes and SHA-256 values; 435 archived references remain. See [read-only evidence](docs/completion-program-production-2026-11-05.md). No production state was changed.
+- **Validation tooling.** The image rehearsal now defaults to pinned v0.7.3 and retains an explicit v0.7.2 compatibility run. Both execute upgrade and return to the old image, checking exact core state, archived thumbnail bytes and all post-upgrade SQL tables. Compile/diff checks pass locally; actual Docker execution is delegated to Linux CI because the local Docker engine is unavailable.
+- **Next.** Finish combined candidate regression checks, publish exact branch/CI evidence, obtain the required eligible non-author reviews, then perform incremental release/backups/deployment. Public demo exposure additionally requires approval of a concrete target and security configuration.
+
+### 2026-11-05 — Completion-program inventory and execution plan
+
+- **Status.** Rechecked GitHub and production. Main is `7892765`. PRs 58 and 61–70 remain open and no newer release exists. The required review is still pending.
+- **Production.** Read-only image inspection confirmed v0.7.3 index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. All five SQL health checks passed with schema 0008, 1,047 jobs and four printers.
+- **Plan.** Added [dependency-aware completion and release steps](docs/completion-program.md). Parallel scoped reviews cover the existing feature branches. Updated the current Personal-mode requirement to include Projects. Recovered permanent AGENTS handoff instructions from PR 58.
+- **Review gate.** Main requires an eligible non-author approval, including latest-push approval. The current collaborator inventory lists only the author. An eligible external reviewer is needed for main merges and release. Public demo exposure additionally needs an explicitly approved target and security configuration.
+- **Next.** Complete independent branch fixes, validate each, preserve SV07's existing recovery, supersede stale PR 58 with a linked current handoff and publish test/review results. No production deployment is claimed for these candidates.
 ### 2026-11-05 — Cancellation measurement and transaction regression repair
 
 - **Status:** implemented and locally validated in [PR 61](https://github.com/khisanthax/klipper-cost-dashboard/pull/61); required review, CI and release remain separate gates. No production code or printer configuration was deployed for this follow-up.

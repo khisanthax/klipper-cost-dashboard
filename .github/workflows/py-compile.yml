@@ -2,13 +2,7 @@ name: Python Compile Check
 
 on:
   push:
-    paths:
-      - "core/**.py"
-      - ".github/workflows/py-compile.yml"
   pull_request:
-    paths:
-      - "core/**.py"
-      - ".github/workflows/py-compile.yml"
 
 jobs:
   compile:
