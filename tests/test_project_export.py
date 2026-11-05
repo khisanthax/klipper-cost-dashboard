@@ -94,6 +94,8 @@ assert 'Download project JSON' in client.get('/projects').get_data(as_text=True)
 mode_context['show_advanced']=False
 assert 'Download project JSON' not in client.get('/projects').get_data(as_text=True)
 assert client.get('/projects/'+project.id+'/export.json').status_code==200
+mode_context.update(show_advanced=True,kcd_demo_mode=True,demo_endpoint_available=lambda endpoint:False)
+assert 'Download project JSON' not in client.get('/projects').get_data(as_text=True)
 """
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(

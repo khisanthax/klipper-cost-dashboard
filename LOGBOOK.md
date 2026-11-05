@@ -26,6 +26,7 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Changes.** Export now includes recorded overrides, raw/outcome evidence and a separate whitelisted original-price snapshot for assigned jobs. Documented version 1, explicit units, nulls and SQLite numeric precision. Legacy empty project UIDs resolve consistently. No export mutation or unrelated project data is included. Integration with application modes hides the export link in Personal while retaining direct-link compatibility; this is presentation rather than authentication.
 - **Verification.** Three focused tests passed: precision/zero/signed/null provenance, real WAL concurrent-writer snapshot consistency, and the Flask attachment/no-store/404 boundary. The actual Chromium workflow passed with 515 synthetic jobs and a real browser attachment download. Failure screenshot/trace from an incorrect test-unit assertion was retained before correction; the product download passed on rerun.
 - **Production / next.** Production is unchanged. Full Release Validation must pass at this head, followed by the required eligible non-author review and incremental integration. Main currently has no eligible collaborator other than the author; do not bypass its review rules.
+- **Demo integration.** Export navigation respects the isolated demo's explicit route policy. A template regression verifies the unavailable download is hidden; the server's default-deny policy remains authoritative.
 
 ### 2026-11-04 — Project export candidate
 
