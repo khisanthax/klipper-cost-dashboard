@@ -83,9 +83,15 @@ def install_workspace_runtime(app: Flask) -> DemoWorkspaceManager | None:
 
         @app.context_processor
         def _demo_template_context():
+            def endpoint_available(endpoint, method="GET", action=""):
+                return policy.classify(endpoint, method, action).classification not in {
+                    DemoPolicyClass.BLOCKED_DEMO, DemoPolicyClass.OPERATOR_ONLY,
+                }
+
             return {
                 "kcd_demo_mode": True,
                 "kcd_demo_has_session": bool(getattr(g, "demo_workspace_session", None)),
+                "demo_endpoint_available": endpoint_available,
             }
 
         @app.get("/demo/", endpoint="demo_welcome")
