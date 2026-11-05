@@ -220,6 +220,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
   - mode preferences preserve history, pricing, profiles, assignments and identities
   - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
 - See [Application modes](application-modes.md) for the operator workflow and root LOGBOOK for exact validation and deployment status.
+- The stacked PR 66 candidate adds project-backed Orders and profitability on SQL-only installations; switching away from Business preserves saved orders and returns an explicit mode prompt for their direct URL.
 
 ## Current Risks / Contradictions
 

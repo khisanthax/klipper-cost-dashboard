@@ -111,7 +111,24 @@ def _check_external_id_duplicates(conn: sqlite3.Connection) -> None:
         )
 
 
+def _execute_migration_statements(conn: sqlite3.Connection, sql: str) -> None:
+    """Execute trusted migration SQL without executescript's implicit commit."""
+    pending = ""
+    for char in sql:
+        pending += char
+        if char == ";" and sqlite3.complete_statement(pending):
+            conn.execute(pending)
+            pending = ""
+    if pending.strip():
+        conn.execute(pending)
+
+
 def apply_migrations(conn: sqlite3.Connection) -> list[str]:
+    """Atomically commit each pending schema change and its migration ledger row.
+
+    Pending migrations require a connection outside caller-owned transactions.
+    SQL migration files must not manage their own transactions.
+    """
     _ensure_schema_migrations(conn)
     applied = {
         row["version"]: row["checksum"]
@@ -127,21 +144,37 @@ def apply_migrations(conn: sqlite3.Connection) -> list[str]:
         if version in applied:
             applied_versions.append(version)
             continue
-        logger.info("Applying migration %s", version)
-        if version == "0003_printers_external_id":
-            if not _column_exists(conn, "printers", "external_id"):
-                conn.execute("ALTER TABLE printers ADD COLUMN external_id TEXT NULL")
-            _check_external_id_duplicates(conn)
-            conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_printers_external_id ON printers(external_id)"
+        if conn.in_transaction:
+            raise sqlite3.ProgrammingError(
+                "Pending migrations require a connection outside an existing transaction; "
+                "commit or roll back caller work explicitly before retrying."
             )
-        else:
-            conn.executescript(sql)
-        conn.execute(
-            "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
-            (version, _utc_now_iso(), checksum),
-        )
-        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Another initializer may have applied this version while this
+            # connection waited for the SQLite writer lock.
+            existing = conn.execute(
+                "SELECT version FROM schema_migrations WHERE version=?", (version,),
+            ).fetchone()
+            if existing is None:
+                logger.info("Applying migration %s", version)
+                if version == "0003_printers_external_id":
+                    if not _column_exists(conn, "printers", "external_id"):
+                        conn.execute("ALTER TABLE printers ADD COLUMN external_id TEXT NULL")
+                    _check_external_id_duplicates(conn)
+                    conn.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS idx_printers_external_id ON printers(external_id)"
+                    )
+                else:
+                    _execute_migration_statements(conn, sql)
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
+                    (version, _utc_now_iso(), checksum),
+                )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
         applied_versions.append(version)
     return applied_versions
 
