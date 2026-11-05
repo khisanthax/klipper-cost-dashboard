@@ -1,7 +1,38 @@
 import unittest
+from unittest.mock import patch
 
 
 class ImportInferenceTests(unittest.TestCase):
+    def test_explicit_terminal_status_precedes_positive_print_time(self):
+        from core.import_moonraker import _infer_outcome
+        for status, expected in (("canceled", "cancelled"), ("cancelled", "cancelled"),
+                                 ("failed", "failed"), ("error", "failed"), ("completed", "completed")):
+            with self.subTest(status=status):
+                self.assertEqual(_infer_outcome({"status": status}, 60, 100), expected)
+        self.assertEqual(_infer_outcome({"result": "cancelled"}, 60, 100), "cancelled")
+        self.assertEqual(_infer_outcome({"status": "completed"}, 0, 100), "completed")
+
+    def test_explicit_unknown_is_not_inferred_completed_but_legacy_time_is_supported(self):
+        from core.import_moonraker import _infer_outcome
+        for status in ("unknown", "in_progress", "printing", "future-status"):
+            self.assertEqual(_infer_outcome({"status": status}, 60, 100), "unknown")
+        self.assertEqual(_infer_outcome({}, 60, 100), "completed")
+
+    def test_terminal_status_fix_keeps_measured_time_and_filament(self):
+        from core import import_moonraker
+        for status in ("cancelled", "failed", "unknown", "completed"):
+            job={"job_id": "one", "filename": "same.gcode", "status": status,
+                 "start_time": 1700000000, "end_time": 1700000900,
+                 "print_duration": 60.5, "estimated_time": 1000, "filament_used": 12.5}
+            with patch.object(import_moonraker, "compute_costs", return_value={"time_cost": 0, "material_cost": None, "total_cost": None}) as cost:
+                row=import_moonraker._build_row_from_history_job("One", job)
+            self.assertEqual(row["status"], status)
+            self.assertEqual(row["duration_seconds"], 60.5)
+            self.assertEqual(row["filament_mm"], 12.5)
+            self.assertEqual(row["time_cost"], 0)
+            self.assertIsNone(row["total_cost"])
+            cost.assert_called_once_with("One", 60.5, 12.5)
+
     def test_cancelled_duration_prefers_elapsed_and_caps_to_estimate(self):
         from core.import_moonraker import infer_cancelled_effective_duration_seconds
 

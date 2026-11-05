@@ -231,8 +231,8 @@ These PRs are separate review candidates. Rebase and validate each against curre
 
 ### Historical reporting
 
-- Milestone F's first implementation adds monthly outcomes, completion rate, and counts of missing duration and cost values. SQL and compatibility Reports use the same installation timezone and aggregation.
-- See [Monthly print outcomes](report-outcomes.md) for table definitions. Utilization, comparisons, presets, and business analytics remain future slices.
+- Milestone F's historical Reports implementation adds monthly completed/canceled/failed/unknown outcomes, completion rate, hours, filament length/weight, saved time/material/total cost components, adjacent-calendar-month changes and missing-value coverage. Printer and inclusive local-date filters apply to every section. SQL/CSV/dual use the same decimal calculations; SQL caches invalidate after historical edits.
+- See [Monthly print outcomes](report-outcomes.md) for definitions and the distinction between saved measurements, estimated mass and unknown information. Utilization, availability, capacity, presets and business analytics require separate explicit data/denominator contracts; they are not inferred from print hours or advertised as implemented.
 
 ## Current Risks / Contradictions
 

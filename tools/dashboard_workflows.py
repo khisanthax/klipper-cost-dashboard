@@ -60,6 +60,8 @@ def exercise(page,context,base,project,data,artifacts):
     assert outcomes.get_by_role("columnheader", name="Completion rate").is_visible()
     assert outcomes.get_by_role("cell", name="100.0%", exact=True).first.is_visible()
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    from report_workflows import exercise_reports
+    exercise_reports(page, base, data, artifacts)
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(base+'/')
     page.keyboard.press('Tab');assert page.get_by_role('link',name='Skip to main content').evaluate('(e)=>document.activeElement===e')
