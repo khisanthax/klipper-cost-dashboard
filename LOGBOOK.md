@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Printer pages integrated with reviewed estimates
+
+- Integrated current main cd8685d, preserving the atomic plan/manual mutation and signed estimate workflow from PR 68. Browser acceptance retains both printer-detail and estimate routes. No schema migration or historical repricing. Final required CI must pass before normal solo-maintainer merge; no deployment is claimed.
+
+
 ### 2026-11-05 — Printer-detail candidate updated to current protected main
 
 - **Status.** Prepared the existing [PR 62](https://github.com/khisanthax/klipper-cost-dashboard/pull/62) against main `237ccc88ca2d413a421de633e4569181c7ba195b`. The merge preserves all lifecycle/recovery and governance changes from PRs 61/71. Feature merge, publication and deployment remain pending.
@@ -40,6 +45,33 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Verification.** Added pagination tests spanning multiple pages with identical timestamps, invalid/out-of-range page values, preserved dates and comparisons, missing telemetry and explicit zero measurements. Existing date, saved-price and identity checks remain required.
 - **Release.** Review, merge and deployment are pending.
 
+### 2026-11-05 — Current solo-maintainer integration
+
+- Integrated validated lifecycle and owner-authorized solo policy from main237ccc88. Human review is no longer a blocker; strict validate/compile checks and normal PR merges remain mandatory. This feature is not deployed; production release is coordinated separately. Final CI must pass on this exact updated head.
+
+
+### 2026-11-05 — Canonical project identity collision repair
+
+- **Status.** Implemented and tested in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68); review, merge, release and deployment remain pending.
+- **Changes.** SQL project resolution now prefers the canonical UID over a matching display name or legacy numeric alias. Name fallback remains available only when no canonical match exists. This prevents a colliding project name from redirecting planned items or manual work into another project.
+- **Verification.** Two real SQLite tests passed for earlier-name/later-UID collisions, explicit numeric UIDs and legacy numeric/name fallback. All six planned-item concurrency/rollback tests and SQL-only filesystem validation passed. Historical job data and costs are unchanged.
+- **Production / next.** No production action. Run final CI and the combined candidate rehearsal, then obtain required non-author review through the established workflow.
+
+### 2026-11-05 — Reviewed estimates and concurrent project mutation repair
+
+- **Status.** Completed the existing [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) implementation on `codex/slicer-estimates`; not merged, released or deployed.
+- **Changes.** Added primary spool-price/net-weight inputs and explicit units. Complete SQL previews can become planned items through a signed, 15-minute review with replay protection. The saved override equals the displayed component sum, including half-cent rounding; raw assumptions remain in notes. Missing weight remains unknown. Bounded parsing now handles multi-day durations and rejects ambiguous partial measurements. Failed inserts roll back with a retryable error.
+- **Confirmed concurrency repair.** Real overlapping edits could erase newly created plans or converted manual work because SQL CRUD rewrote entire tables from stale snapshots. Plan/manual mutations now target individual rows; conversion commits the manual row and plan marker atomically. SQL cleanup no longer treats inconsistent read snapshots as deletion evidence. Compatibility storage behavior is retained. Conversion now rejects unknown gram weight rather than inventing zero consumption; explicit zero remains valid.
+- **Verification.** Seven estimate, five real-SQL concurrency/rollback and nineteen component tests passed; SQL-only isolation passed. The local real Chromium estimate/save/replay workflow passed before the final concurrency change. CI now also covers the estimate route in all six layouts and captures desktop/tablet/mobile/200% CSS-zoom reviewed previews. Full final-head validation remains required.
+- **Production / next.** No production changes. Complete final CI and required non-author review, then integrate incrementally through the established release process. The unavailable eligible reviewer currently blocks main merging and deployment.
+- **Demo integration.** The calculator entry respects the isolated demo's explicit route policy; unavailable upload/plan controls are not advertised. Normal installations retain the workflow. Template rendering regression covers this boundary; server enforcement remains the demo service's responsibility.
+
+### 2026-11-04 — Slicer estimate candidate
+
+- **Status.** Implemented the independent Milestone H what-if slice in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68). Production remains at the verified v0.7.3 baseline.
+- **Changes.** Reused planned-item pricing for a browser and JSON estimate interface. Bounded G-code head and tail sampling, limited uploads to 16 MiB and ignored executable lines. Explicit grams or verified grams-per-meter conversion determines material weight. Missing material remains unknown. Saved profiles and explicit prices provide separate what-if scenarios without writing actual history.
+- **Verification.** Four focused Python tests passed for metadata, length conversion, profile pricing, zero hourly rate, missing values and invalid input. The local isolated Chromium workflow passed keyboard submission, mobile estimate layout, cost output and JSON unknown handling. Initial Linux CI found overflow in the Projects heading with the new link. The link moved to a separate line and CI is rerunning. The existing G-code planned-item workflow remains available under Projects.
+- **Next.** Finish candidate checks and review. Direct promotion of the reviewed what-if result to a planned item remains follow-up work. No estimate initiates physical printing.
 ### 2026-11-05 — Lifecycle merged under solo-maintainer policy
 
 - **Merged:** PR 61 through the normal protected PR workflow at `4ae41b08641234fc7c418321901ca7dc9650d54f`. Required head checks passed; post-merge validation/publication are running. No administrator bypass.

@@ -347,17 +347,16 @@ class ProjectComponentInputValidationTests(unittest.TestCase):
             with self.subTest(backend=backend), mock.patch.dict(
                 os.environ, {"KCD_STORAGE_BACKEND": backend}
             ), ExitStack() as stack:
-                stack.enter_context(mock.patch.object(projects, "load_projects", return_value={"p1": self.project}))
-                load_manual = stack.enter_context(
-                    mock.patch.object(
-                        projects,
-                        "load_manual_jobs",
-                        side_effect=[{}, {"p1": [self.manual]}],
-                    )
-                )
                 if backend == "sql":
-                    persist = stack.enter_context(mock.patch.object(projects, "_save_manual_jobs_sql"))
+                    tmp = stack.enter_context(tempfile.TemporaryDirectory())
+                    stack.enter_context(mock.patch.object(db_module, "_db_path", return_value=os.path.join(tmp, "manual.sqlite")))
+                    with db_module.connect_db() as conn:
+                        db_module.apply_migrations(conn)
+                        conn.execute("INSERT INTO projects (project_uid,name,created_at,updated_at) VALUES ('p1','Inputs','now','now')")
+                        conn.execute("INSERT INTO manual_jobs (manual_job_id,project_id,title,hours,created_at,updated_at) VALUES ('m1',1,'Manual',1,'now','now')")
                 else:
+                    stack.enter_context(mock.patch.object(projects, "load_projects", return_value={"p1": self.project}))
+                    stack.enter_context(mock.patch.object(projects, "load_manual_jobs", side_effect=[{}, {"p1": [self.manual]}]))
                     persist = stack.enter_context(mock.patch.object(projects, "_write_json"))
 
                 created = projects.create_manual_job(
@@ -381,8 +380,18 @@ class ProjectComponentInputValidationTests(unittest.TestCase):
                 self.assertEqual(updated.hours, 2.5)
                 self.assertEqual(updated.filament_g, 125.5)
                 self.assertIsNone(updated.cost_override)
-                self.assertEqual(load_manual.call_count, 2)
-                self.assertEqual(persist.call_count, 2)
+                if backend == "sql":
+                    with db_module.connect_db() as conn:
+                        saved_create = conn.execute("SELECT * FROM manual_jobs WHERE manual_job_id=?", (created.manual_job_id,)).fetchone()
+                        saved_update = conn.execute("SELECT * FROM manual_jobs WHERE manual_job_id='m1'").fetchone()
+                    self.assertEqual(saved_create["hours"], 1.5)
+                    self.assertEqual(saved_create["filament_g"], 0)
+                    self.assertEqual(saved_create["cost_override"], 0)
+                    self.assertEqual(saved_update["hours"], 2.5)
+                    self.assertEqual(saved_update["filament_g"], 125.5)
+                    self.assertIsNone(saved_update["cost_override"])
+                else:
+                    self.assertEqual(persist.call_count, 2)
 
 
 class ProjectCostComponentViewTests(unittest.TestCase):
