@@ -109,6 +109,7 @@ def assign_spool(spool_uid, printer_id):
     uid = _identifier(spool_uid)
     with closing(_connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
+        _active_spool(conn, uid)
         if printer_id and not conn.execute("SELECT 1 FROM printers WHERE id=?", (printer_id,)).fetchone():
             raise ValueError("Select a registered printer.")
         result = conn.execute("UPDATE filament_spools SET printer_id=? WHERE spool_uid=?", (printer_id or None, uid))
@@ -137,6 +138,135 @@ def adjust_stock(spool_uid, operation_uid, delta_grams, reason):
     )
 
 
+def _active_spool(conn, spool_uid):
+    row = conn.execute(
+        """SELECT a.archived_at FROM filament_spools s
+           LEFT JOIN filament_spool_archives a USING (spool_uid) WHERE s.spool_uid=?""", (spool_uid,),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Spool not found.")
+    if row["archived_at"]:
+        raise ValueError("Reactivate this archived spool before changing its stock or assignment.")
+
+
+def _change_balance(conn, spool_uid, delta):
+    result = conn.execute(
+        """UPDATE filament_spools SET remaining_mg=remaining_mg+?
+           WHERE spool_uid=? AND remaining_mg+? BETWEEN 0 AND net_mg""",
+        (delta, spool_uid, delta),
+    )
+    if result.rowcount != 1:
+        raise ValueError("The change would put the spool balance outside 0–net weight.")
+
+
+def correct_consumption(spool_uid, operation_uid, original_event_uid, grams, *, expected_grams, reason):
+    """Replace the measured total by appending a linked, balance-safe correction."""
+    spool_uid, operation_uid, original = map(_identifier, (spool_uid, operation_uid, original_event_uid))
+    measured = _amount(grams, 1000, "Corrected consumption")
+    expected = _amount(expected_grams, 1000, "Previous measured consumption")
+    reason = _text(reason, "Correction reason", required=True)
+    with closing(_connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        replay = conn.execute(
+            """SELECT e.spool_uid, c.original_event_uid, c.previous_measured_mg, c.measured_mg, e.reason
+               FROM filament_stock_events e LEFT JOIN filament_consumption_corrections c USING (event_uid)
+               WHERE e.event_uid=?""", (operation_uid,),
+        ).fetchone()
+        if replay is not None:
+            if tuple(replay) != (spool_uid, original, expected, measured, reason):
+                raise InventoryConflict("This correction operation already recorded different details.")
+            return False
+        _active_spool(conn, spool_uid)
+        initial = conn.execute(
+            """SELECT delta_mg FROM filament_stock_events
+               WHERE event_uid=? AND spool_uid=? AND kind='verified_consumption'""",
+            (original, spool_uid),
+        ).fetchone()
+        if initial is None:
+            raise ValueError("Select a verified consumption record from this spool.")
+        corrections = conn.execute(
+            """SELECT COALESCE(SUM(e.delta_mg), 0) FROM filament_consumption_corrections c
+               JOIN filament_stock_events e USING (event_uid) WHERE c.original_event_uid=?""", (original,),
+        ).fetchone()[0]
+        current = -initial["delta_mg"] - corrections
+        if current != expected:
+            raise InventoryConflict("Consumption changed since this form was opened. Refresh and review it again.")
+        if current == measured:
+            return False
+        delta = current - measured
+        _change_balance(conn, spool_uid, delta)
+        conn.execute(
+            """INSERT INTO filament_stock_events (event_uid, spool_uid, kind, delta_mg, reason, recorded_at)
+               VALUES (?, ?, 'adjustment', ?, ?, ?)""",
+            (operation_uid, spool_uid, delta, reason, db._utc_now_iso()),
+        )
+        conn.execute(
+            "INSERT INTO filament_consumption_corrections VALUES (?, ?, ?, ?)",
+            (operation_uid, original, current, measured),
+        )
+    return True
+
+
+def record_estimate(spool_uid, operation_uid, job_uid, grams, source):
+    """Retain an explicitly labelled estimate; never update physical balance."""
+    spool_uid, operation_uid = map(_identifier, (spool_uid, operation_uid))
+    job_uid = _text(job_uid, "Job UID", required=True)
+    estimated = _amount(grams, 1000, "Estimated consumption")
+    source = _text(source, "Estimate source", required=True)
+    with closing(_connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        replay = conn.execute(
+            "SELECT spool_uid, job_uid, estimated_mg, source FROM filament_consumption_estimates WHERE operation_uid=?",
+            (operation_uid,),
+        ).fetchone()
+        if replay is not None:
+            if tuple(replay) != (spool_uid, job_uid, estimated, source):
+                raise InventoryConflict("This estimate operation already recorded different details.")
+            return False
+        _active_spool(conn, spool_uid)
+        job = conn.execute("SELECT filename FROM jobs WHERE job_uid=?", (job_uid,)).fetchone()
+        if job is None:
+            raise ValueError("Select an existing history or tracked job.")
+        conn.execute(
+            "INSERT INTO filament_consumption_estimates VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (operation_uid, spool_uid, job_uid, job["filename"], estimated, source, db._utc_now_iso()),
+        )
+    return True
+
+
+def set_spool_archived(spool_uid, operation_uid, *, archived, reason):
+    spool_uid, operation_uid = map(_identifier, (spool_uid, operation_uid))
+    if type(archived) is not bool:
+        raise ValueError("Choose archive or reactivate explicitly.")
+    reason = _text(reason, "Archive or reactivation reason", required=True)
+    with closing(_connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        replay = conn.execute(
+            "SELECT spool_uid, archived, reason FROM filament_spool_lifecycle_events WHERE operation_uid=?", (operation_uid,),
+        ).fetchone()
+        if replay is not None:
+            if tuple(replay) != (spool_uid, int(archived), reason):
+                raise InventoryConflict("This archive operation already recorded different details.")
+            return False
+        spool = conn.execute(
+            """SELECT a.archived_at FROM filament_spools s
+               LEFT JOIN filament_spool_archives a USING (spool_uid) WHERE s.spool_uid=?""", (spool_uid,),
+        ).fetchone()
+        if spool is None:
+            raise ValueError("Spool not found.")
+        if bool(spool["archived_at"]) == archived:
+            return False
+        now = db._utc_now_iso()
+        conn.execute(
+            """INSERT INTO filament_spool_archives VALUES (?, ?, ?)
+               ON CONFLICT(spool_uid) DO UPDATE SET archived_at=excluded.archived_at, reason=excluded.reason""",
+            (spool_uid, now if archived else None, reason),
+        )
+        conn.execute("INSERT INTO filament_spool_lifecycle_events VALUES (?, ?, ?, ?, ?)",
+                     (operation_uid, spool_uid, int(archived), reason, now))
+    return True
+
+
 def _record_event(spool_uid, operation_uid, kind, delta, reason, job_uid):
     spool_uid = _identifier(spool_uid)
     operation_uid = _identifier(operation_uid)
@@ -151,6 +281,7 @@ def _record_event(spool_uid, operation_uid, kind, delta, reason, job_uid):
             if tuple(event) != expected:
                 raise InventoryConflict("This operation already recorded different details.")
             return False
+        _active_spool(conn, spool_uid)
         filename = None
         if job_uid is not None:
             previous = conn.execute(
@@ -159,19 +290,13 @@ def _record_event(spool_uid, operation_uid, kind, delta, reason, job_uid):
             ).fetchone()
             if previous is not None:
                 if previous["delta_mg"] != delta:
-                    raise InventoryConflict("This job already used this spool. Record a measured adjustment to correct it.")
+                    raise InventoryConflict("This job already used this spool. Use its linked consumption correction to change it.")
                 return False
             job = conn.execute("SELECT filename, status FROM jobs WHERE job_uid=?", (job_uid,)).fetchone()
             if job is None or job["status"].lower() not in {"completed", "failed", "canceled", "cancelled"}:
                 raise ValueError("Select a completed, failed or canceled history job.")
             filename = job["filename"]
-        result = conn.execute(
-            """UPDATE filament_spools SET remaining_mg=remaining_mg+?
-               WHERE spool_uid=? AND remaining_mg+? BETWEEN 0 AND net_mg""",
-            (delta, spool_uid, delta),
-        )
-        if result.rowcount != 1:
-            raise ValueError("Spool not found or the change would put its balance outside 0–net weight.")
+        _change_balance(conn, spool_uid, delta)
         conn.execute(
             """INSERT INTO filament_stock_events (
                  event_uid, spool_uid, kind, delta_mg, job_uid, job_filename, reason, recorded_at
@@ -184,14 +309,37 @@ def _record_event(spool_uid, operation_uid, kind, delta, reason, job_uid):
 def inventory_view():
     with closing(_connect()) as conn:
         spools = [dict(row) for row in conn.execute(
-            """SELECT s.*, p.name AS printer_name FROM filament_spools s
-               LEFT JOIN printers p ON p.id=s.printer_id ORDER BY s.created_at DESC, s.spool_uid"""
+            """SELECT s.*, p.name AS printer_name, a.archived_at, a.reason AS archive_reason FROM filament_spools s
+               LEFT JOIN printers p ON p.id=s.printer_id LEFT JOIN filament_spool_archives a USING (spool_uid)
+               ORDER BY s.created_at DESC, s.spool_uid"""
         )]
         printers = [dict(row) for row in conn.execute("SELECT id, name FROM printers ORDER BY name")]
         events = [dict(row) for row in conn.execute(
-            """SELECT e.*, s.material, s.color FROM filament_stock_events e
-               JOIN filament_spools s USING (spool_uid) ORDER BY e.recorded_at DESC LIMIT 100"""
+            """SELECT e.*, s.material, s.color, c.original_event_uid,
+                      original.job_uid AS corrected_job_uid, original.job_filename AS corrected_job_filename
+               FROM filament_stock_events e JOIN filament_spools s USING (spool_uid)
+               LEFT JOIN filament_consumption_corrections c USING (event_uid)
+               LEFT JOIN filament_stock_events original ON original.event_uid=c.original_event_uid
+               ORDER BY e.recorded_at DESC, e.rowid DESC LIMIT 100"""
         )]
+        for spool in spools:
+            spool["consumptions"] = [dict(row) for row in conn.execute(
+                """SELECT original.event_uid, original.job_uid, original.job_filename,
+                          -original.delta_mg - COALESCE(SUM(e.delta_mg), 0) AS measured_mg
+                   FROM filament_stock_events original
+                   LEFT JOIN filament_consumption_corrections c ON c.original_event_uid=original.event_uid
+                   LEFT JOIN filament_stock_events e ON e.event_uid=c.event_uid
+                   WHERE original.spool_uid=? AND original.kind='verified_consumption'
+                   GROUP BY original.event_uid ORDER BY original.recorded_at DESC LIMIT 100""", (spool["spool_uid"],),
+            )]
+            spool["estimates"] = [dict(row) for row in conn.execute(
+                """SELECT estimate.* FROM filament_consumption_estimates estimate
+                   WHERE spool_uid=? AND NOT EXISTS (
+                       SELECT 1 FROM filament_consumption_estimates newer
+                       WHERE newer.spool_uid=estimate.spool_uid AND newer.job_uid=estimate.job_uid
+                       AND newer.rowid > estimate.rowid)
+                   ORDER BY recorded_at DESC, rowid DESC LIMIT 100""", (spool["spool_uid"],),
+            )]
         jobs = [dict(row) for row in conn.execute(
             """SELECT j.job_uid, j.filename, j.status, p.name AS printer_name
                FROM jobs j JOIN printers p ON p.id=j.printer_id
