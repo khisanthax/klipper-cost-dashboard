@@ -24,7 +24,7 @@ import uuid
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.config import DATA_DIR
@@ -325,9 +325,15 @@ def _resolve_project_db_id(conn: sqlite3.Connection, project_uid: str) -> Option
     if not project_uid:
         return None
     row = conn.execute(
-        "SELECT id FROM projects WHERE project_uid = ? OR name = ?",
+        """SELECT id FROM projects
+           WHERE COALESCE(NULLIF(project_uid,''),CAST(id AS TEXT))=?
+           ORDER BY CASE WHEN project_uid=? THEN 0 ELSE 1 END LIMIT 1""",
         (project_uid, project_uid),
     ).fetchone()
+    if row is None:
+        # Compatibility imports may still identify a project by its display
+        # name. Never let that fallback shadow a canonical historical key.
+        row = conn.execute("SELECT id FROM projects WHERE name=? ORDER BY id LIMIT 1", (project_uid,)).fetchone()
     if not row:
         return None
     if isinstance(row, sqlite3.Row):
@@ -987,10 +993,29 @@ def create_manual_job(
         notes=str(notes or ""),
     )
 
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            project_db_id = _resolve_project_db_id(conn, pid)
+            if project_db_id is None:
+                raise ValueError("Project not found")
+            _insert_manual_job_sql(conn, project_db_id, mj)
+        return mj
     jobs_by_project = load_manual_jobs()
     jobs_by_project.setdefault(pid, []).append(mj)
     _save_manual_jobs(jobs_by_project)
     return mj
+
+
+def _insert_manual_job_sql(conn: sqlite3.Connection, project_db_id: int, job: ManualJob) -> None:
+    conn.execute(
+        """INSERT INTO manual_jobs
+           (manual_job_id,project_id,title,hours,filament_g,cost_override,notes,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (job.manual_job_id, project_db_id, job.title, job.hours, job.filament_g,
+         job.cost_override, job.notes, job.created_at, job.updated_at),
+    )
 
 
 def update_manual_job(
@@ -1023,6 +1048,28 @@ def update_manual_job(
         nonnegative=True,
     )
 
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """SELECT mj.*, p.project_uid FROM manual_jobs mj
+                   JOIN projects p ON p.id=mj.project_id WHERE mj.manual_job_id=?""", (mid,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Manual job not found")
+            updated = ManualJob(
+                manual_job_id=mid, project_id=str(row["project_uid"] or row["project_id"]),
+                title=title, hours=hours_f, filament_g=filament_f, cost_override=override_f,
+                created_at=row["created_at"], updated_at=_iso_now(), notes=str(notes or ""),
+            )
+            conn.execute(
+                """UPDATE manual_jobs SET title=?,hours=?,filament_g=?,cost_override=?,notes=?,updated_at=?
+                   WHERE manual_job_id=?""",
+                (updated.title, updated.hours, updated.filament_g, updated.cost_override,
+                 updated.notes, updated.updated_at, mid),
+            )
+        return updated
     jobs_by_project = load_manual_jobs()
     for pid, jobs in jobs_by_project.items():
         for idx, j in enumerate(jobs):
@@ -1048,6 +1095,11 @@ def update_manual_job(
 def delete_manual_job(manual_job_id: str) -> None:
     mid = str(manual_job_id or "").strip()
     if not mid:
+        return
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("DELETE FROM manual_jobs WHERE manual_job_id=?", (mid,))
         return
     jobs_by_project = load_manual_jobs()
     changed = False
@@ -1247,6 +1299,8 @@ def create_plan_item(
     source: str = "",
     notes: str = "",
     est_cost_override: Optional[float] = None,
+    *,
+    plan_id: Optional[str] = None,
 ) -> PlannedItem:
     pid = str(project_id or "").strip()
     if not pid:
@@ -1288,7 +1342,7 @@ def create_plan_item(
     else:
         est_cost = override_value
     item = PlannedItem(
-        plan_id=uuid.uuid4().hex,
+        plan_id=plan_id or uuid.uuid4().hex,
         project_id=pid,
         filename=filename,
         created_at=_iso_now(),
@@ -1302,10 +1356,91 @@ def create_plan_item(
         converted_to_manual_job_id=None,
     )
 
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            project_db_id = _resolve_project_db_id(conn, pid)
+            if project_db_id is None:
+                raise ValueError("Project not found")
+            expected = (
+                project_db_id, item.filename, item.est_time_s, item.est_filament_g,
+                item.est_cost, int(item.est_cost_is_override), item.source, item.notes,
+            )
+            existing = conn.execute(
+                """SELECT project_id,filename,est_time_s,est_filament_g,est_cost,
+                          est_cost_is_override,source,notes,created_at,status,converted_to_manual_job_id
+                   FROM planned_items WHERE plan_id=?""", (item.plan_id,),
+            ).fetchone()
+            if existing:
+                if tuple(existing)[:8] != expected:
+                    raise ValueError("This reviewed estimate was already saved to a different plan")
+                return replace(
+                    item, created_at=existing["created_at"], status=existing["status"],
+                    converted_to_manual_job_id=existing["converted_to_manual_job_id"],
+                )
+            conn.execute(
+                """INSERT INTO planned_items
+                   (plan_id,project_id,filename,est_time_s,est_filament_g,est_cost,
+                    est_cost_is_override,source,notes,created_at,updated_at,status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,'active')""",
+                (item.plan_id, *expected[:6], item.source, item.notes, item.created_at, item.created_at),
+            )
+        return item
+    if plan_id is not None:
+        raise ValueError("Reviewed estimate promotion requires SQL-only storage")
     plans = load_plans()
     plans.setdefault(pid, []).append(item)
     _save_plans(plans)
     return item
+
+
+def _plan_sql_row(conn: sqlite3.Connection, plan_id: str):
+    return conn.execute(
+        """SELECT pi.*, p.project_uid, p.name AS project_name, p.hourly_rate_override,
+                  p.filament_cost_per_kg_override, p.labor_only
+           FROM planned_items pi JOIN projects p ON p.id=pi.project_id WHERE pi.plan_id=?""",
+        (plan_id,),
+    ).fetchone()
+
+
+def _plan_from_sql_row(row) -> PlannedItem:
+    return PlannedItem(
+        plan_id=row["plan_id"], project_id=str(row["project_uid"] or row["project_id"]),
+        filename=row["filename"], created_at=row["created_at"], est_time_s=row["est_time_s"],
+        est_filament_g=row["est_filament_g"], est_cost=row["est_cost"],
+        est_cost_is_override=bool(row["est_cost_is_override"]), status=row["status"],
+        source=row["source"] or "", notes=row["notes"] or "",
+        converted_to_manual_job_id=row["converted_to_manual_job_id"] or None,
+    )
+
+
+def _edited_plan_item(
+    item: PlannedItem, project: Optional[Project], *, filename=None, est_time_s=None,
+    est_filament_g=None, est_cost=None, source=None, notes=None,
+) -> PlannedItem:
+    time_s = item.est_time_s
+    if est_time_s is not None and str(est_time_s).strip() != "":
+        time_s = int(finite_float(est_time_s, label="Estimated time", positive=True))
+    if time_s <= 0:
+        raise ValueError("Estimated time must be greater than 0")
+    filament_g = item.est_filament_g if est_filament_g is None else finite_float(
+        est_filament_g, label="Estimated filament grams", nonnegative=True,
+    )
+    hourly_rate, filament_cost_per_kg, labor_only = _project_pricing(project)
+    cost_is_override = est_cost is not None and str(est_cost).strip() != ""
+    cost = finite_float(est_cost, label="Estimated total cost override", nonnegative=True) if cost_is_override else (
+        compute_planned_item_cost_from_pricing(
+            est_time_s=time_s, est_filament_g=filament_g, hourly_rate=hourly_rate,
+            filament_cost_per_kg=filament_cost_per_kg, labor_only=labor_only,
+        )
+    )
+    return replace(
+        item, filename=item.filename if filename is None else str(filename or "").strip() or item.filename,
+        est_time_s=time_s, est_filament_g=filament_g, est_cost=cost,
+        est_cost_is_override=cost_is_override,
+        source=item.source if source is None else str(source or "").strip(),
+        notes=item.notes if notes is None else str(notes or ""),
+    )
 
 
 def update_plan_item(
@@ -1328,68 +1463,39 @@ def update_plan_item(
     if not pid:
         raise ValueError("plan_id is required")
 
+    changes = dict(filename=filename, est_time_s=est_time_s, est_filament_g=est_filament_g,
+                   est_cost=est_cost, source=source, notes=notes)
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            row = _plan_sql_row(conn, pid)
+            if row is None:
+                raise ValueError("Planned item not found")
+            item = _plan_from_sql_row(row)
+            project = Project(
+                id=item.project_id, name=row["project_name"],
+                hourly_rate_override=_opt_nonneg_float(row["hourly_rate_override"]),
+                filament_cost_per_kg_override=_opt_nonneg_float(row["filament_cost_per_kg_override"]),
+                labor_only=bool(row["labor_only"]),
+            )
+            updated = _edited_plan_item(item, project, **changes)
+            conn.execute(
+                """UPDATE planned_items SET filename=?,est_time_s=?,est_filament_g=?,est_cost=?,
+                          est_cost_is_override=?,source=?,notes=?,updated_at=? WHERE plan_id=?""",
+                (updated.filename, updated.est_time_s, updated.est_filament_g, updated.est_cost,
+                 int(updated.est_cost_is_override), updated.source, updated.notes, _iso_now(), pid),
+            )
+        return updated
     plans = load_plans()
     for proj_id, items in plans.items():
         for idx, it in enumerate(items):
             if it.plan_id != pid:
                 continue
 
-            new_filename = it.filename if filename is None else str(filename or "").strip() or it.filename
-
-            time_s = it.est_time_s
-            if est_time_s is not None and str(est_time_s).strip() != "":
-                time_s = int(finite_float(est_time_s, label="Estimated time", positive=True))
-            if time_s <= 0:
-                raise ValueError("Estimated time must be greater than 0")
-
-            filament_g = est_filament_g
-            if filament_g is None:
-                filament_g = it.est_filament_g
-            else:
-                filament_g = finite_float(
-                    filament_g,
-                    label="Estimated filament grams",
-                    nonnegative=True,
-                )
-
             projects_map = load_projects()
             project = projects_map.get(it.project_id)
-            hourly_rate, filament_cost_per_kg, labor_only = _project_pricing(project)
-
-            if est_cost is None or str(est_cost).strip() == "":
-                cost = compute_planned_item_cost_from_pricing(
-                    est_time_s=time_s,
-                    est_filament_g=filament_g,
-                    hourly_rate=hourly_rate,
-                    filament_cost_per_kg=filament_cost_per_kg,
-                    labor_only=labor_only,
-                )
-                cost_is_override = False
-            else:
-                cost = finite_float(
-                    est_cost,
-                    label="Estimated total cost override",
-                    nonnegative=True,
-                )
-                cost_is_override = True
-
-            new_source = it.source if source is None else str(source or "").strip()
-            new_notes = it.notes if notes is None else str(notes or "")
-
-            updated = PlannedItem(
-                plan_id=it.plan_id,
-                project_id=it.project_id,
-                filename=new_filename,
-                created_at=it.created_at,
-                est_time_s=time_s,
-                est_filament_g=filament_g,
-                est_cost=cost,
-                est_cost_is_override=cost_is_override,
-                status=it.status,
-                source=new_source,
-                notes=new_notes,
-                converted_to_manual_job_id=it.converted_to_manual_job_id,
-            )
+            updated = _edited_plan_item(it, project, **changes)
             items[idx] = updated
             _save_plans(plans)
             return updated
@@ -1404,6 +1510,11 @@ def set_plan_status(plan_id: str, status: str) -> None:
     status = str(status or "").strip().lower()
     if status not in ("active", "fulfilled"):
         status = "active"
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("UPDATE planned_items SET status=?,updated_at=? WHERE plan_id=?", (status, _iso_now(), pid))
+        return
     plans = load_plans()
     changed = False
     for proj_id, items in plans.items():
@@ -1437,6 +1548,19 @@ def _set_plan_converted(plan_id: str, manual_job_id: str) -> None:
     if not manual_job_id:
         return
 
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT converted_to_manual_job_id FROM planned_items WHERE plan_id=?", (pid,)).fetchone()
+            if row is not None:
+                if row[0] and row[0] != manual_job_id:
+                    raise ValueError("This planned item was already converted to a manual job.")
+                conn.execute(
+                    """UPDATE planned_items SET status='fulfilled',converted_to_manual_job_id=?,updated_at=?
+                       WHERE plan_id=?""", (manual_job_id, _iso_now(), pid),
+                )
+        return
     plans = load_plans()
     changed = False
     for proj_id, items in plans.items():
@@ -1468,7 +1592,7 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
 
     - Creates a manual job with hours derived from est_time_s.
     - Uses planned filename as the title.
-    - Copies filament grams if present.
+    - Requires reviewed filament grams; missing weight must not become zero.
     - Does not force cost_override (manual cost remains time-based unless overridden by user).
     - Marks the planned item as fulfilled and stores converted_to_manual_job_id.
 
@@ -1482,6 +1606,31 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
     if not plan_id:
         raise ValueError("Planned item is required")
 
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("BEGIN IMMEDIATE")
+            row = _plan_sql_row(conn, plan_id)
+            if row is None or str(row["project_uid"] or row["project_id"]) != pid:
+                raise ValueError("Planned item not found")
+            plan = _plan_from_sql_row(row)
+            if plan.converted_to_manual_job_id:
+                raise ValueError("This planned item was already converted to a manual job.")
+            if plan.est_filament_g is None:
+                raise ValueError("Enter reviewed filament grams on the planned item before converting it to manual work.")
+            now = _iso_now()
+            mj = ManualJob(
+                manual_job_id=uuid.uuid4().hex, project_id=pid, title=plan.filename,
+                hours=finite_float(float(plan.est_time_s or 0) / 3600.0, label="Hours", positive=True),
+                filament_g=finite_float(plan.est_filament_g, label="Filament grams", nonnegative=True),
+                created_at=now, updated_at=now, notes=f"Converted from planned item {plan.plan_id}",
+            )
+            _insert_manual_job_sql(conn, row["project_id"], mj)
+            conn.execute(
+                """UPDATE planned_items SET status='fulfilled',converted_to_manual_job_id=?,updated_at=?
+                   WHERE plan_id=?""", (mj.manual_job_id, now, plan_id),
+            )
+        return mj
     projects_map = load_projects()
     if pid not in projects_map:
         raise ValueError("Project not found")
@@ -1496,6 +1645,8 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
         raise ValueError("Planned item not found")
     if plan.converted_to_manual_job_id:
         raise ValueError("This planned item was already converted to a manual job.")
+    if plan.est_filament_g is None:
+        raise ValueError("Enter reviewed filament grams on the planned item before converting it to manual work.")
 
     hours = float(plan.est_time_s or 0) / 3600.0
     title = plan.filename
@@ -1517,6 +1668,11 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
 def delete_plan_item(plan_id: str) -> None:
     pid = str(plan_id or "").strip()
     if not pid:
+        return
+    if _is_sql_only():
+        with closing(db_module.connect_db()) as conn, conn:
+            db_module.apply_migrations(conn)
+            conn.execute("DELETE FROM planned_items WHERE plan_id=?", (pid,))
         return
     plans = load_plans()
     changed = False
@@ -1941,6 +2097,10 @@ def recalculate() -> Tuple[Dict[str, Project], Dict[str, str]]:
     """
     projects = load_projects()
     assignments = load_assignments()
+    if _is_sql_only():
+        # Foreign keys already enforce membership. Separate read snapshots are
+        # unsuitable evidence for deleting newly committed project data.
+        return projects, assignments
     valid_ids = set(projects.keys())
     cleaned = {k: v for k, v in assignments.items() if v in valid_ids}
     if cleaned != assignments:
@@ -1958,6 +2118,8 @@ def recalculate_all() -> Tuple[Dict[str, Project], Dict[str, str], Dict[str, Lis
     """
     projects, assignments = recalculate()
     jobs_by_project = load_manual_jobs()
+    if _is_sql_only():
+        return projects, assignments, jobs_by_project, load_plans()
     valid_ids = set(projects.keys())
     cleaned_jobs = {pid: jobs for pid, jobs in jobs_by_project.items() if pid in valid_ids}
     if cleaned_jobs != jobs_by_project:
