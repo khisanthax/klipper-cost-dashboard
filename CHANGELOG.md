@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.11.0 - 2026-11-05
+
+- Ship separate opt-in browser administration using exact target allowlists, private credentials, active-configuration inspection, reviewed expiring previews, inactive guards and the shared CLI registration/repair engine. Keep advanced host/service/macro operations CLI-only.
+- Ship isolated synthetic demo workspaces with bounded sessions/resources, reset/expiration/recovery, simulation and fail-closed printer/host/auth/egress boundaries. Disposable TLS/proxy/browser/container acceptance passed.
+- Optional services remain disabled in production; the owner chose to keep demo isolated. No public endpoint or extra port is activated by this release.
+- No new migration or historical repricing. [Verified deployment, retained v0.10.0 rollback and complete workstream matrix](docs/v0.11.0-deployment-2026-11-05.md).
+
 ## v0.10.0 - 2026-11-05
 
 - Add physical spool inventory with exact milligram accounting, explicit verified consumption, idempotent replay, linked corrections, manual adjustment reasons, archival and recovery. Estimated consumption does not silently deduct physical stock or rewrite historical costs.

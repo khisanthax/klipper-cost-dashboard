@@ -1,14 +1,21 @@
 # KCD completion-program acceptance record
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes human-review blockers. Required PRs and strict CI remain enforced. Current production is verified v0.10.0 at d5df3a81; see its [actual evidence](v0.10.0-deployment-2026-11-05.md). Earlier v0.7.4 evidence remains the historical lifecycle deployment record.
-This record distinguishes candidate validation from production deployment.
-The read-only production baseline below was v0.7.3; subsequent actual deployment
-outcomes belong in LOGBOOK and release evidence. PRs 61, 71, 68 and 69 have merged;
-v0.7.4 publication is distinct from deployment. The [execution plan](completion-program.md) defines dependencies and
-the incremental release procedure.
+**Current outcome:** Every existing source PR is resolved through normal protected
+merges under the [solo-maintainer policy](solo-maintainer-release-policy.md).
+Production is independently verified v0.11.0 at 23977013; its
+[actual deployment and complete matrix](v0.11.0-deployment-2026-11-05.md) records
+image, backup, rollback, live checks and intentional optional-service boundaries.
+Required PRs and strict CI remain enforced with zero human approvals.
 
-## Candidate results
+The initial candidate table and combined rehearsal below are **historical**:
+they preceded the serial final integrations and releases. Their passing fixtures
+do not substitute for the later exact-head CI or actual production evidence.
+The original read-only baseline was v0.7.3; verified deployments subsequently
+completed v0.7.4, v0.8.0, v0.9.0, v0.10.0 and v0.11.0. Demo remains isolated by
+explicit owner choice; optional administration/demo services are inactive.
+
+## Initial candidate results (historical)
 
 | PR | Workstream | Verified implementation and regression scope | Result / evidence |
 | --- | --- | --- | --- |
@@ -38,7 +45,25 @@ combined screenshots were also inspected for readable mobile and 200% CSS-zoom
 estimate previews. Private production snapshots/credentials are not release or
 CI artifacts.
 
-## Combined integration rehearsal
+## Final integrated release acceptance
+
+| Cohort | Exact source | Final release CI | Actual outcome |
+| --- | --- | --- | --- |
+| v0.7.4 lifecycle/governance 61/71 | 237ccc88 | [42071334980](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42071334980) | [Verified deployment/rollback](v0.7.4-deployment-2026-11-05.md); both SV07 rows Canceled/Unpriced |
+| v0.8.0 estimates/export/printers 68/69/62 | b154137b | [42080058742](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42080058742) | [Verified live pages/stateless estimate/private export/dry-runs](v0.8.0-deployment-2026-11-05.md) |
+| v0.9.0 modes/Orders 65/66 | c282f889 | [42084641768](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42084641768) | [Verified additive 0009, preserved Advanced/Business guard](v0.9.0-deployment-2026-11-05.md) |
+| v0.10.0 inventory/reports 67/70 | d5df3a81 | [42087043445](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42087043445) | [Verified 0010/11, live report SQL comparisons, empty inventory](v0.10.0-deployment-2026-11-05.md) |
+| v0.11.0 optional administration/demo 63/64 | 23977013 | [42092424249](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42092424249) | [382 tests, isolated staging and verified normal Master deployment](v0.11.0-deployment-2026-11-05.md); services inactive, no new listener/public demo |
+
+All cohorts retained the original 1,047 existing jobs, 316 objects and 435 archived references
+through coordinated fresh backups, isolated restores and image rollback checks.
+Production Orders/inventory writes, historical recalculation, physical G-code and
+printer restarts were not performed merely for acceptance. Synthetic CI artifacts
+and private real-browser/dry-run evidence are distinguished in each release report.
+
+The final safe-window wait also included two naturally completed prints, matched to Moonraker history 00017B/00038C and normal KCD events without correction. The refreshed final baseline is **1,049 jobs, 317 objects and 436 archived references**; all original 1,047 historical rows remained unchanged. Legacy missing SQL start timestamps were left unknown, with printer/filename/unique end-time evidence used for those two matches. The earlier deferral report remains a historical snapshot, superseded by verified deployment.
+
+## Combined integration rehearsal (historical)
 
 A separate `resume/completion-integration-rehearsal` branch combines candidates
 without merging protected main. Mechanical overlaps retain every scoped browser
@@ -58,7 +83,7 @@ do not restore an older backup over newer jobs or remove protected project links
 to make an old action succeed. Orders use `ON DELETE RESTRICT`, preserving their
 project associations even when the older image lacks the Orders interface.
 
-## Production and external gates
+## Production and operational boundaries
 
 The [read-only baseline](completion-program-production-2026-11-05.md) passed SQL
 integrity, all five readiness checks, four loaded printer identities, preservation
@@ -70,11 +95,12 @@ KCD after verified backup/restore; history, configuration and objects remained u
 | Operation | Status | Required next condition |
 | --- | --- | --- |
 | Required main review policy | Updated | Zero human approvals; inspect final diff/migrations, resolve findings and require strict validate/compile checks |
-| Main integration / release / production deployment | Incremental | Lifecycle/governance shipped in v0.7.4; 68/69/62 shipped v0.8.0; Modes/Orders 65/66 are verified deployed v0.9.0 at c282f889. Inventory/reporting67/70 is verified deployed v0.10.0 at d5df3a81; optional administration/demo remains isolated for the next cohort |
-| Public demo exposure | Not performed | Explicit approval of a concrete endpoint and security configuration, followed by target-specific TLS/egress/capacity verification |
+| Main integration / release / production deployment | Complete | Every source PR resolved; verified v0.7.4 through v0.11.0 deployment evidence above. Optional administration/demo code shipped; separate services remain inactive |
+| Public demo exposure | Kept isolated by owner decision | No public endpoint or production demo mode included; any future exposure is a separate target-specific security/operational decision |
+| Optional administration service | Intentionally inactive | Private targets/strong separate credential/least privilege/loopback forwarding and idle-window preview needed for later activation |
 | Physical Pi fresh installation / real power failure / native toolbar zoom / assistive-technology certification | Not tested here | Separate physical/environment validation; automated viewport/CSS zoom and axe results do not establish these |
 | Utilization / profit / ROI without defined availability or revenue data | Not implemented by inference | Approved semantics and valid source data; cost alone is insufficient |
 
-The running v0.10.0 digest and checks are recorded in its linked actual evidence.
+The running v0.11.0 digest and checks are recorded in its linked actual evidence.
 Existing v0.7.3 and earlier rollback evidence remains intact. A passing candidate does not replace
 the repository's required CI or final engineering inspection.

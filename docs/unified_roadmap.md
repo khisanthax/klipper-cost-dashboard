@@ -179,39 +179,39 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.10.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:dad13e3622dc253b324cf24ff9ca23c8c1d19c6b145ca4fd18efad6883c16822`, revision `d5df3a81`. Physical inventory and monthly reporting are deployed; additive 0010/0011 schema and empty inventory/Orders preserve Advanced default. All four identities, SQL readiness/integrity, 1,047 jobs, 316 objects and 435 references are preserved; both SV07 rows remain Canceled/Unpriced. Actual per-printer report counts/outcomes/saved costs match SQL. See [evidence](v0.10.0-deployment-2026-11-05.md). Optional administration/demo code remains the next cohort with services off and demo isolated. SQL-only is canonical; CSV/dual remain compatibility modes. Full Recompute remains deferred. Read root LOGBOOK for actual outcomes.
+Production v0.11.0 was independently verified on 2026-11-05 at immutable index `sha256:9f851f76cb2be97216f557721a09ec6e3c2d7fc3a684bd2dc4e7c0d2c5eedebf`, exact 23977013. All existing source PRs are resolved through verified serial releases; optional administration/demo code shipped with separate services inactive and demo isolated by owner choice. Normal Master runtime, ports/config, all four identities, SQL readiness/integrity, 1,049 jobs, 317 objects and 436 references retained (original 1,047 historical rows unchanged; two naturally completed prints during the safe-window wait); both SV07 rows remain Canceled/Unpriced. See [actual deployment and full workstream matrix](v0.11.0-deployment-2026-11-05.md). SQL-only remains canonical, CSV/dual compatibility retained, Full Recompute and undefined denominator-dependent analytics deferred. Root LOGBOOK is the authoritative actual-outcome handoff.
 
 ## Current Active Work
 
 v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
-The lifecycle repair shipped and was verified in v0.7.4; v0.8.0 and v0.9.0 subsequently shipped their documented feature cohorts. Read root LOGBOOK for exact deployed digests and evidence; main can contain later, undeployed code.
+The coordinated source program completed verified releases v0.7.4 through v0.11.0. Read root LOGBOOK for exact deployed digests and evidence; documentation merges may follow the immutable deployed source tag. Optional administration/demo code is shipped, with its separate services intentionally inactive.
 
 ## Completion-program state
 
 The current owner directive and the [completion execution plan](completion-program.md)
 supersede the older November 1 starting inventory. Retain every released storage,
-pricing, identity, installer and thumbnail guarantee while completing the remaining
-code cohorts through strict CI and normal solo-maintainer PR merges.
+pricing, identity, installer and thumbnail guarantee. All source cohorts completed
+strict CI, normal solo-maintainer merges and their documented release acceptance.
 
 | Milestone | Current supported scope and actual state |
 | --- | --- |
-| A · Browser administration | Scoped local/SSH discovery and inspection, reviewed registration/repair/relocation, active-include and hook diagnostics, private backups and recoverable errors are implemented in PR 63. The service is separately authenticated and allowlisted. Unbounded discovery, initial Master bootstrap, macro edits and destructive host/lifecycle operations remain deliberately CLI-only. Optional listener activation is not part of the production Master deployment. |
-| B · Interactive demo | PR 64 implements synthetic per-visitor workspaces, simulated activity, reset/expiry/quotas, isolated TLS/browser/container acceptance and default-deny boundaries. The owner explicitly requested isolated code/staging/release packaging only; no public endpoint or pending public-approval blocker belongs to this program. |
+| A · Browser administration | PR 63 shipped in v0.11.0 after real browser/local/SSH acceptance: scoped discovery/inspection, reviewed registration/repair/relocation, active-hook diagnostics, private backups and recoverable errors. The separately authenticated/allowlisted listener remains off; advanced host/macro/destructive operations remain CLI-only. |
+| B · Interactive demo | PR 64 shipped in v0.11.0 with synthetic per-visitor workspaces, simulation, reset/expiry/quotas and isolated TLS/browser/container/default-deny acceptance. Owner chose isolated code/staging/release packaging only; no public endpoint or production demo mode, and no pending public-approval blocker. |
 | C · Printer pages | Released in v0.8.0 with known/unknown telemetry, scoped history, outcomes and comparisons. |
 | D/E · Modes and Orders | Released in v0.9.0 with reversible Advanced-default preferences and Business-gated project-backed financial/lifecycle data. |
 | F/G · Reports and stock | Released and production-verified in v0.10.0; exact deployment evidence remains in LOGBOOK. Includes historical monthly filters/comparisons/coverage, safe outcome inference/cache invalidation and exact-milligram stock/correction/archive ledgers. |
 | H/I · Estimates and project export | Released in v0.8.0: explicit spool units, signed reviewed planned items, atomic project mutations, canonical identity and consistent versioned SQL exports preserving original pricing. |
 
-All final service-packaging code remains subject to its exact-head validation.
+Final service-packaging exact-head validation and normal Master deployment passed.
 Public demo hosting, Full Recompute and undefined utilization/profit/ROI or optional
 notification/import/printable-export workflows require separately established
 requirements; they are not invented from printing cost or silently claimed complete.
 
 ## Next Planned Work
 
-1. Monitor genuine printer events on verified v0.10.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
-2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
+1. Monitor genuine printer events on verified v0.11.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
+2. Retain the [completed execution plan](completion-program.md), acceptance matrix and recovery evidence. PRs 61–70 are resolved, with PR 58's useful historical handoff preserved through governance PR 71. Scope any future operational activation or feature work explicitly.
 3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
 ## Deferred Feature Track
