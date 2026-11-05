@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Canonical project identity collision repair
+
+- **Status.** Implemented and tested in [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68); review, merge, release and deployment remain pending.
+- **Changes.** SQL project resolution now prefers the canonical UID over a matching display name or legacy numeric alias. Name fallback remains available only when no canonical match exists. This prevents a colliding project name from redirecting planned items or manual work into another project.
+- **Verification.** Two real SQLite tests passed for earlier-name/later-UID collisions, explicit numeric UIDs and legacy numeric/name fallback. All six planned-item concurrency/rollback tests and SQL-only filesystem validation passed. Historical job data and costs are unchanged.
+- **Production / next.** No production action. Run final CI and the combined candidate rehearsal, then obtain required non-author review through the established workflow.
+
 ### 2026-11-05 — Reviewed estimates and concurrent project mutation repair
 
 - **Status.** Completed the existing [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) implementation on `codex/slicer-estimates`; not merged, released or deployed.
