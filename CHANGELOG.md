@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.0 - 2026-11-05
+
+- Add individual registered-printer pages with verified telemetry, missing-value handling, recorded-cost history, date comparisons and stable pagination.
+- Add spool-price/explicit-unit pre-print estimates and signed, previewed promotion to planned items without changing history; preserve rounded reviewed totals and raw assumptions.
+- Make SQL plan/manual create/edit/delete/conversion targeted and transactional so overlapping work cannot erase unrelated data; preserve unknown weights and canonical project identity.
+- Add consistent, versioned SQL project JSON export with separate recorded/original/adjusted/manual/planned values, explicit units and private project isolation.
+- [Verified production deployment/rollback evidence](docs/v0.8.0-deployment-2026-11-05.md), including fresh restored-data checks and actual read-only printer/estimate/export/installer acceptance.
+
 ## v0.7.4 - 2026-11-05
 
 - Correct Klipper argument delivery and targeted managed cancel payloads, preserving custom macros and legacy client compatibility.
