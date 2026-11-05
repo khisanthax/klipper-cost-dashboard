@@ -42,3 +42,5 @@ The test creates a private temporary volume and generates a synthetic seed from 
 - Rerun the browser and isolation suites, including concurrent users, HTTPS session headers, expiry, reset and blocked real-printer/administration routes. A public hostname and hosting target require a separate decision.
 
 This recipe prepares local staging. Public TLS, network isolation and host capacity still require validation on the selected target.
+
+New application surfaces remain denied until separately reviewed for demo use. Integrated templates should hide unavailable controls with `not kcd_demo_mode or demo_endpoint_available(endpoint, method, action)`. The helper uses the same default-deny policy as request handling; it does not grant access or replace the server boundary. Existing sample Projects, profiles and pricing retain their permitted actions.

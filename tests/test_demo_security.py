@@ -16,7 +16,7 @@ import threading
 import unittest
 from unittest import mock
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, render_template_string, request
 
 from core import db as db_module
 from core.demo.flask_integration import install_workspace_runtime
@@ -241,6 +241,24 @@ class DemoSecurityBoundaryTests(unittest.TestCase):
             command.assert_not_called()
         self.assertEqual(self.side_effects, 0)
         self.assertEqual(self.app.extensions["kcd_demo_policy"].missing_routes(self.app), [("unknown", "GET", "/unknown")])
+
+    def test_template_availability_uses_the_same_endpoint_method_and_action_policy(self):
+        @self.app.get("/availability")
+        def availability():
+            return render_template_string(
+                "{% if demo_endpoint_available('safe') %}Workspace{% endif %}"
+                "{% if demo_endpoint_available('inventory_page') %}Inventory{% endif %}"
+                "{% if demo_endpoint_available('unknown') %}Unknown{% endif %}"
+                "{% if demo_endpoint_available('settings_other_page','POST','update_application_mode') %}Mode{% endif %}"
+                "{% if demo_endpoint_available('projects_page','POST','create_project') %}Sample project{% endif %}"
+                "{% if demo_endpoint_available('settings_profiles_page','POST','add_filament_profile') %}Sample profile{% endif %}"
+                "{% if demo_endpoint_available('recalculate_run','POST') %}Sample pricing{% endif %}"
+            )
+
+        self.app.extensions["kcd_demo_policy"].register("availability", "GET", DemoPolicyClass.WORKSPACE_READ)
+        response = self.client().get("/availability")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(as_text=True), "WorkspaceSample projectSample profileSample pricing")
 
     def test_host_and_trusted_proxy_requirements(self):
         from core.demo.security import DemoSecurityError, validate_transport
