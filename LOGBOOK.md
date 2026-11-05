@@ -85,6 +85,19 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Changes.** Reused planned-item pricing for a browser and JSON estimate interface. Bounded G-code head and tail sampling, limited uploads to 16 MiB and ignored executable lines. Explicit grams or verified grams-per-meter conversion determines material weight. Missing material remains unknown. Saved profiles and explicit prices provide separate what-if scenarios without writing actual history.
 - **Verification.** Four focused Python tests passed for metadata, length conversion, profile pricing, zero hourly rate, missing values and invalid input. The local isolated Chromium workflow passed keyboard submission, mobile estimate layout, cost output and JSON unknown handling. Initial Linux CI found overflow in the Projects heading with the new link. The link moved to a separate line and CI is rerunning. The existing G-code planned-item workflow remains available under Projects.
 - **Next.** Finish candidate checks and review. Direct promotion of the reviewed what-if result to a planned item remains follow-up work. No estimate initiates physical printing.
+### 2026-11-05 — Project export completion and snapshot validation
+
+- **Status.** Completed the existing [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) candidate on `codex/project-json-export`; not merged, released or deployed.
+- **Changes.** Export now includes recorded overrides, raw/outcome evidence and a separate whitelisted original-price snapshot for assigned jobs. Documented version 1, explicit units, nulls and SQLite numeric precision. Legacy empty project UIDs resolve consistently. No export mutation or unrelated project data is included.
+- **Verification.** Three focused tests passed: precision/zero/signed/null provenance, real WAL concurrent-writer snapshot consistency, and the Flask attachment/no-store/404 boundary. The actual Chromium workflow passed with 515 synthetic jobs and a real browser attachment download. Failure screenshot/trace from an incorrect test-unit assertion was retained before correction; the product download passed on rerun.
+- **Production / next.** Production is unchanged. Full Release Validation must pass at this head, followed by the required eligible non-author review and incremental integration. Main currently has no eligible collaborator other than the author; do not bypass its review rules.
+
+### 2026-11-04 — Project export candidate
+
+- **Status.** Implemented the Milestone I project JSON export slice on `codex/project-json-export`. The candidate awaits review and validation before release.
+- **Implementation.** A versioned SQL snapshot exports one project's recorded job costs, manual entries, hypothetical plans and applied pricing snapshots separately. Unknown amounts stay null. The response is an attachment with no-store caching. CSV and dual installations retain their current workflow.
+- **Verification.** The focused SQL fixture passed. It verifies project isolation, unchanged history, null costs and separate projections and snapshots. The disposable dashboard browser workflow exercises the real HTTP download and missing-project response in CI.
+- **Next.** Integrate order and inventory exports after those features are reviewed. Notifications and printable financial reports are separate follow-up work.
 
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
