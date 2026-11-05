@@ -15,6 +15,16 @@ from core.registration import register_printer
 
 
 class ReportOutcomeTests(unittest.TestCase):
+    def test_explicit_terminal_status_overrides_stale_job_outcome_without_cost_changes(self):
+        rows=[{"timestamp_raw": 1700000000, "status": "canceled", "job_outcome": "completed", "total_cost": None},
+              {"timestamp_raw": 1700000000, "status": "failed", "job_outcome": "completed", "total_cost": 0}]
+        original=[dict(row) for row in rows]
+        month=reports.compute_monthly_breakdown(rows)[0]
+        self.assertEqual((month["completed"], month["canceled"], month["failed"]), (0, 1, 1))
+        self.assertEqual(month["cost_display"], "0.00")
+        self.assertEqual(month["missing_cost"], 1)
+        self.assertEqual(rows, original)
+
     def test_recent_rows_preserve_unpriced_cost_and_saved_estimated_weight(self):
         row = {"printer": "One", "filament_grams": "12.5", "filament_weight_kind": "estimated",
                "filament_meters": "4", "grams_per_meter": None, "filament_profile_id": "changed-profile",
@@ -134,7 +144,7 @@ class ReportOutcomeTests(unittest.TestCase):
             self.assertEqual(report()["cost_display"], "3.75")
 
     def test_printer_and_dates_filter_all_reports_with_sql_csv_and_dual_parity(self):
-        fixture = [{"job_uid": f"row-{n}", "printer": name, "filename": "same.gcode", "status": status,
+        fixture = [{"job_uid": f"row-{n}", "printer": name, "filename": "same.gcode", "status": status, "job_outcome": "completed",
                     "timestamp": datetime(2026, 10, day, 20, tzinfo=timezone.utc).timestamp(),
                     "duration_hours": 1, "filament_meters": 5, "grams_per_meter": 3,
                     "time_cost": 0, "material_cost": 1.25, "total_cost": 1.25}
@@ -145,6 +155,7 @@ class ReportOutcomeTests(unittest.TestCase):
             with closing(db.connect_db()) as conn, conn:
                 for row in fixture:
                     db.upsert_job(conn, row)
+                before = [tuple(row) for row in conn.execute("SELECT * FROM jobs ORDER BY job_uid")]
             path=Path(tmp)/"history.csv"
             with path.open("w", encoding="utf-8", newline="") as stream:
                 writer=csv.DictWriter(stream, fieldnames=HEADERS); writer.writeheader(); writer.writerows(fixture)
@@ -155,7 +166,10 @@ class ReportOutcomeTests(unittest.TestCase):
             self.assertEqual(sql["top_printers"][0]["name"], "One")
             self.assertEqual([row["printer"] for row in sql["recent_jobs"]], ["One"])
             self.assertEqual(reports_repo.get_reports_data(dict(args, printer="Two"))["monthly_breakdown"][0]["canceled"], 1)
+            self.assertEqual(reports_repo.get_reports_data(dict(args, start_date="2026-10-03", end_date="2026-10-03"))["monthly_breakdown"][0]["failed"], 1)
             self.assertEqual(reports_repo.get_reports_data(dict(args, printer="missing"))["monthly_breakdown"], [])
+            with closing(db.connect_db()) as conn:
+                self.assertEqual([tuple(row) for row in conn.execute("SELECT * FROM jobs ORDER BY job_uid")], before)
             for mode in ("csv", "dual"):
                 with patch.dict(os.environ, {"KCD_STORAGE_BACKEND": mode, "KCD_REPORTS_BACKEND": "csv"}), patch.object(reports_repo, "CSV_FILE", str(path)):
                     result=reports_repo.get_reports_data(args)

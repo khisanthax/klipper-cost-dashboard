@@ -98,16 +98,21 @@ def compute_import_id(printer_name: str, job: Dict[str, Any]) -> str:
 
 
 def _infer_outcome(job: Dict[str, Any], print_time: float, estimated_time: float) -> str:
-    if print_time > 0:
-        return "completed"
-
-    # Moonraker may include a status string; be conservative.
+    # Consumed time proves work occurred, not that the print completed.
+    # Prefer Moonraker's explicit terminal status, including zero-time jobs.
     status = str(_get_first(job, ("status", "result")) or "").strip().lower()
     if status in ("failed", "error"):
         return "failed"
     if status in ("cancelled", "canceled"):
         return "cancelled"
+    if status in ("completed", "complete", "success", "succeeded"):
+        return "completed"
+    if status:
+        return "unknown"
 
+    # Preserve the documented legacy inference only when no status was supplied.
+    if print_time > 0:
+        return "completed"
     if estimated_time > 0:
         return "cancelled"
     return "unknown"
@@ -208,7 +213,9 @@ def _build_row_from_history_job(printer_name: str, job: Dict[str, Any], *, cance
 
     outcome = _infer_outcome(job, print_time=print_time, estimated_time=estimated_time)
 
-    if outcome == "completed":
+    if print_time > 0 or outcome == "completed":
+        # Keep measured consumption for terminal and unknown partial attempts;
+        # changing status precedence must not replace it with an estimate.
         duration_effective = print_time
         filament_effective = filament_raw
     else:
