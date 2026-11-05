@@ -208,7 +208,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
   - Adjustment is signed and reconciles persisted or explicit totals without inventing a labor/material split.
   - actual tracked/manual totals remain separate from active planned-item projections.
 
-### Modes
+### Application modes
 
 - status: implemented candidate in PR 65; not merged or deployed
 - current requirements:
@@ -219,6 +219,7 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
   - Business includes Advanced plus the separately reviewed Orders candidate in PR 66
   - mode preferences preserve history, pricing, profiles, assignments and identities
   - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
+- See [Application modes](application-modes.md) for the operator workflow and root LOGBOOK for exact validation and deployment status.
 
 ## Current Risks / Contradictions
 

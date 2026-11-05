@@ -20,6 +20,42 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Modes prepared over the v0.8.0 feature cohort
+
+- Integrated main b154137 after printer pages, estimates and export, preserving unknown measurements, signed pricing, canonical identities and stable browser actions. No mode switch changes history, profiles or projects. No new migration. Strict CI remains required; main merge waits for the v0.8.0 tag boundary and production remains separately verified in its deployment evidence.
+
+
+### 2026-11-05 — Modes integrated with reviewed estimates
+
+- Integrated main cd8685d and retained the complete signed estimate/atomic project mutation behavior. Modes preserve all stored prices, projects and plans. No schema migration or deployment. Exact-head CI and normal solo-maintainer merge remain required.
+
+
+### 2026-11-05 — Modes candidate updated to current protected main
+
+- **Status.** Prepared existing [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) against main `237ccc88ca2d413a421de633e4569181c7ba195b`. Preserved the merged lifecycle/recovery and solo-maintainer governance. Personal continues to include Projects; the isolated demo still avoids mutable storage on public pages. Not merged, released or deployed.
+- **Verification.** All three mode tests passed for CSV/dual persistence, SQL multi-browser switching with unchanged history/assignments, hidden denied demo controls and public-demo default presentation without a storage read. SQL-only isolation reported zero legacy accesses. Compileall passed. Inspected the final mode-only app/storage/template diff: SQL settings use one atomic upsert and no migration or history-price mutation is introduced.
+- **Governance / next.** Normal protected PR merge now requires strict validate/compile checks and resolved threads with zero human approvals under the owner-authorized policy. Older unavailable-reviewer blockers are superseded. Complete exact-head CI and coordinate merging after the release owner's v0.7.4 tag is locked. Production release/deployment is owned separately; this candidate made no production contact.
+
+### 2026-11-05 — Demo application-mode boundary
+
+- **Status.** PR 65 follow-up implemented and tested; not merged, released or deployed.
+- **Changes.** The public-demo presentation now explains that application-mode changes are unavailable when its route/action policy denies them. Normal installations retain the complete reversible selector and Personal Projects navigation.
+- **Verification.** Both application-mode tests passed, including rendered demo form absence and unchanged SQL history and assignments. The combined rehearsal will exercise the actual demo policy; production is unchanged.
+- **Combined runtime correction.** HTTPS rehearsal found that public demo welcome pages have no bound workspace. Mode presentation now uses the default on those pages without opening mutable storage; scoped sessions still read their own setting. The added no-storage context regression passes. No global SQL fallback was introduced.
+
+### 2026-11-05 — Personal mode includes Projects
+
+- **Status.** Updated the milestone D candidate in PR 65 for the owner's revised Personal mode requirement.
+- **Changes.** Projects remains in the ordinary navigation for Personal, Advanced and Business. Reports and Recalculate retain the existing Advanced and Business presentation rules. Settings and the mode guide describe the revised scope.
+- **Verification.** The cross-browser SQL regression and the desktop/tablet/mobile browser workflow require the Projects link in every mode while verifying preserved jobs and assignments. Required CI validates the candidate head.
+- **Release.** Review, merge and deployment are pending.
+
+### 2026-11-04 — Milestone D application modes
+
+- Implemented a global mode selector under Settings → Other on `codex/application-modes`. Existing installations default to Advanced. Personal simplifies the dashboard, navigation, and ordinary settings. Business retains the Advanced workspace while Milestone E supplies business features.
+- Switching preserves the existing SQL schema, printer identities, stored prices, history, projects, and assignments. Existing direct links continue working. SQL-only stores the choice in `user_settings`. CSV and dual store it in the backed-up data directory. The [operator guide](docs/application-modes.md) documents how to switch.
+- The two targeted Python tests passed with disposable data, including switches between all three modes across two clients, invalid input, compatibility persistence, SQL history and assignment equality, and filesystem isolation. The standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including phone keyboard, tablet, and desktop switches with equal SQL history after each.
+- [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) contains implementation commit `295698f`. Required CI, review, release, and deployment remain separate gates. Milestone E supplies order and profitability controls in Business mode.
 ### 2026-11-05 — Printer pages aligned to verified v0.7.4 handoff
 
 - Integrated main 1cdaf7e after verified v0.7.4 deployment evidence PR 72. This update changes ancestry/documentation only; the scoped printer-page code at d8f05d5 passed full Release Validation42073549728 and compile. Fresh strict CI is required for this head before normal merge into the v0.8.0 H/I/C cohort. No v0.8.0 deployment is claimed.
