@@ -36,6 +36,10 @@ def exercise(base_url):
             "a[href^='/printers/'],a[href='/orders'],a[href='/inventory'],"
             "a[href='/estimates'],a[href$='/export.json']"
         )).to_have_count(0)
+        expect(page.locator(
+            "input[name='action'][value='clear_live_job'],"
+            "input[name='action'][value='update_application_mode']"
+        )).to_have_count(0)
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -74,6 +78,7 @@ def exercise(base_url):
                 for path in ("/orders", "/inventory", "/estimates", "/api/estimates", "/estimates/plan"):
                     assert first.request.post(base_url + path).status == 403, path
                 assert first.request.post(base_url + "/settings/other", form={"action": "update_application_mode", "mode": "business"}).status == 403
+                assert first.request.post(base_url + "/", form={"action": "clear_live_job", "printer_name": "Demo"}).status == 403
                 assert first.request.post(base_url + "/job-cancel", data={"printer_name": "Demo"}).status == 403
 
                 desktop.goto(base_url + "/projects")

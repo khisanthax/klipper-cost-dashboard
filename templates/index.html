@@ -261,7 +261,7 @@
                                 </span>
                             </h3>
                             <div class="d-flex align-items-center gap-2">
-                                {% if ps.status != 'idle' %}
+                                {% if ps.status != 'idle' and (not kcd_demo_mode or demo_endpoint_available('index', 'POST', 'clear_live_job')) %}
                                 <form method="post" class="mb-0">
                                     <input type="hidden" name="action" value="clear_live_job">
                                     <input type="hidden" name="printer_name" value="{{ printer_name }}">
@@ -383,6 +383,7 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if not kcd_demo_mode or demo_endpoint_available('index', 'POST', 'clear_live_job') %}
                             <form method="post" style="display:inline;">
                                 <input type="hidden" name="action" value="clear_live_job">
                                 <input type="hidden" name="printer_name" value="{{ job.printer_name }}">
@@ -392,6 +393,7 @@
                                     Clear
                                 </button>
                             </form>
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
