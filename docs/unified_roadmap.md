@@ -210,6 +210,11 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 - The preference uses the existing SQL schema and keeps history, project assignments, and prices unchanged. Compatibility installations also support the selector.
 - See [Application modes](application-modes.md) for the operator workflow. See the logbook for validation and release status.
 
+### Historical reporting
+
+- Milestone F's first implementation adds monthly outcomes, completion rate, and counts of missing duration and cost values. SQL and compatibility Reports use the same installation timezone and aggregation.
+- See [Monthly print outcomes](report-outcomes.md) for table definitions. Utilization, comparisons, presets, and business analytics remain future slices.
+
 ## Current Risks / Contradictions
 
 - No normal-path SQL-only dependency on legacy runtime files is currently known; focused coverage is representative rather than exhaustive.

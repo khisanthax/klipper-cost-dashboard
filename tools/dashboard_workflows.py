@@ -54,6 +54,13 @@ def exercise(page,context,base,project,data,artifacts):
     assert abs(states['Printing']['total_cost']-(2.5+600/3600))<1e-8
     assert states['Paused']['time_cost']==states['Printing']['time_cost']
     assert live_before==query("SELECT value_json FROM user_settings WHERE key='live_jobs'")
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(base + "/reports")
+    outcomes = page.get_by_role("table", name="Monthly print outcomes")
+    assert outcomes.get_by_role("columnheader", name="Completion rate").is_visible()
+    assert outcomes.get_by_role("cell", name="100.0%", exact=True).first.is_visible()
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(base+'/')
     page.keyboard.press('Tab');assert page.get_by_role('link',name='Skip to main content').evaluate('(e)=>document.activeElement===e')
     page.set_viewport_size({'width':390,'height':844})

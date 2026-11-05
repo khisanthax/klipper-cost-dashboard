@@ -129,23 +129,41 @@
     </div>
     <div class="card-body">
         {% if monthly_breakdown %}
+        <p class="text-muted small">Months follow the installation timezone. Completion rate uses jobs with a known outcome. Hours and cost use saved values, with missing records counted separately.</p>
         <div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
             <table class="table table-striped table-hover table-sm mb-0">
+                <caption class="visually-hidden">Monthly print outcomes</caption>
                 <thead class="table-light">
                     <tr>
-                        <th>Month</th>
-                        <th>Prints</th>
-                        <th>Hours</th>
-                        <th>Cost</th>
+                        <th scope="col">Month</th>
+                        <th scope="col">Prints</th>
+                        <th scope="col">Completed</th>
+                        <th scope="col">Canceled</th>
+                        <th scope="col">Failed</th>
+                        <th scope="col">Unknown outcome</th>
+                        <th scope="col">Completion rate</th>
+                        <th scope="col">Known hours</th>
+                        <th scope="col">Saved cost</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for m in monthly_breakdown %}
                     <tr>
-                        <td>{{ m.label }}</td>
+                        <th scope="row">{{ m.label }}</th>
                         <td class="fw-semibold">{{ m.count }}</td>
-                        <td class="fw-semibold">{{ "%.2f"|format(m.hours) }}</td>
-                        <td class="fw-semibold">${{ "%.2f"|format(m.cost) }}</td>
+                        <td>{{ m.completed }}</td>
+                        <td>{{ m.canceled }}</td>
+                        <td>{{ m.failed }}</td>
+                        <td>{{ m.unknown }}</td>
+                        <td>{{ "%.1f%%"|format(m.completion_rate) if m.completion_rate is not none else "Unknown" }}</td>
+                        <td>
+                            {{ m.hours_display if m.hours_display is not none else "Unknown" }}
+                            {% if m.missing_hours %}<span class="small text-muted d-block">{{ m.missing_hours }} missing</span>{% endif %}
+                        </td>
+                        <td>
+                            {{ "$" ~ m.cost_display if m.cost_display is not none else "Unpriced" }}
+                            {% if m.missing_cost %}<span class="small text-muted d-block">{{ m.missing_cost }} unpriced</span>{% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>

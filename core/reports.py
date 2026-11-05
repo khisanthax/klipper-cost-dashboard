@@ -4,6 +4,7 @@ Reporting utilities for Print Cost Dashboard.
 Merged from report_utils.py + additional reporting functions from app.py.
 """
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from core.config import DEFAULT_TIMEZONE, SETTINGS_FILE, DISPLAY_FILE, HEADERS
 from core.storage import ts_to_local_dt, load_settings, load_display_settings
 from core.printers import get_canonical_printer_names
@@ -80,40 +81,58 @@ def get_date_range_from_params(args):
     return start_dt, end_dt, range_label, quick_range
 
 
+_RECORDED_OUTCOMES = {
+    "complete": "completed", "completed": "completed", "success": "completed", "succeeded": "completed",
+    "canceled": "canceled", "cancelled": "canceled",
+    "failed": "failed", "error": "failed",
+}
+
+
+def _recorded_number(value):
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        return None
+    return number if number.is_finite() else None
+
+
 def compute_monthly_breakdown(rows):
-    """
-    Aggregate stats by (year, month).
-    Returns list of dicts: {label: "YYYY-MM", count: N, hours: H, cost: C}
-    """
+    """Group recorded outcomes and known values by the configured local calendar."""
     groups = {}
-    for r in rows:
-        ts_raw = r.get("timestamp_raw")
-        if not ts_raw:
-            continue
+    for row in rows:
         try:
-            dt = ts_to_local_dt(float(ts_raw))
-        except Exception:
-            continue
-            
-        key = dt.strftime("%Y-%m")
-        if key not in groups:
-            groups[key] = {"count": 0, "hours": 0.0, "cost": 0.0}
-            
-        groups[key]["count"] += 1
-        groups[key]["hours"] += float(r.get("duration_hours") or 0.0)
-        groups[key]["cost"] += float(r.get("total_cost") or 0.0)
-        
-    # Sort by month descending
-    sorted_keys = sorted(groups.keys(), reverse=True)
-    result = []
-    for k in sorted_keys:
-        d = groups[k]
-        result.append({
-            "label": k,
-            "count": d["count"],
-            "hours": d["hours"],
-            "cost": d["cost"]
+            label = ts_to_local_dt(float(row["timestamp_raw"])).strftime("%Y-%m")
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            label = "Unknown date"
+        month = groups.setdefault(label, {
+            "label": label, "count": 0, "completed": 0, "canceled": 0, "failed": 0,
+            "unknown": 0, "hours": Decimal(0), "cost": Decimal(0), "missing_hours": 0, "missing_cost": 0,
         })
+        month["count"] += 1
+        outcome = _RECORDED_OUTCOMES.get(str(row.get("status") or "").strip().lower(), "unknown")
+        month[outcome] += 1
+        hours = _recorded_number(row.get("duration_hours"))
+        cost = _recorded_number(row.get("total_cost"))
+        if hours is None or hours < 0:
+            month["missing_hours"] += 1
+        else:
+            month["hours"] += hours
+        if cost is None:
+            month["missing_cost"] += 1
+        else:
+            month["cost"] += cost
+
+    result = []
+    for label in sorted(groups, key=lambda name: (name != "Unknown date", name), reverse=True):
+        month = groups[label]
+        known = month["count"] - month["unknown"]
+        month["completion_rate"] = 100 * month["completed"] / known if known else None
+        for field in ("hours", "cost"):
+            value = month[field]
+            missing = month["missing_" + field] == month["count"]
+            month[field + "_display"] = None if missing else format(value, ".2f")
+            month[field] = None if missing else float(value)
+        result.append(month)
     return result
 
 
