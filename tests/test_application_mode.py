@@ -71,6 +71,15 @@ class ApplicationModeTests(unittest.TestCase):
                 self.assertEqual(snapshot(), original)
 
             self.assertIn(b"Spool holders", another_browser.get("/projects").data)
+            self.assertIn(b'value="update_application_mode"', another_browser.get("/settings/other").data)
+            processors = app.app.template_context_processors[None]
+            with patch.dict(app.app.template_context_processors, {None: [*processors, lambda: {
+                "kcd_demo_mode": True, "demo_endpoint_available": lambda *_args: False,
+            }]}):
+                demo_html = another_browser.get("/settings/other").data
+            self.assertNotIn(b'value="update_application_mode"', demo_html)
+            self.assertIn(b"Application mode changes are unavailable in this demo.", demo_html)
+            self.assertEqual(snapshot(), original)
             invalid = editor.post(
                 "/settings/other",
                 data={"action": "update_application_mode", "mode": "unsupported"},
