@@ -56,6 +56,8 @@
 </div>
 {% if show_orders %}<a class="btn btn-outline-primary mb-3" href="{{ url_for('orders_page') }}">Business orders</a>{% endif %}
 
+<p class="mb-3"><a href="{{ url_for('estimate_page') }}">Calculate a pre-print estimate</a></p>
+
 {% if error %}
 <div class="alert alert-danger" role="alert">
     {{ error }}
