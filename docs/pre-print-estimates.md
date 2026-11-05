@@ -7,6 +7,7 @@ Enter a machine rate per hour and choose a saved material profile or enter a spo
 Try different input rates to compare scenarios. An estimate does not create actual History or change saved prices. In SQL-only mode, a complete preview offers **Save reviewed estimate as planned item**. Choose the destination project and title. This explicitly saves the displayed total as the plan's cost override, rounds duration up to whole seconds, and retains raw components, units and assumptions in its notes. Project component pricing can differ; its signed adjustment reconciles to the reviewed total. The review expires after 15 minutes. Repeating the same save is idempotent; changing its destination or values requires a fresh review. A database failure rolls back the insert and permits retry. Incomplete estimates cannot be saved through this action.
 
 The existing project G-code upload remains available and uses that project's pricing settings rather than the calculator's reviewed override.
+Converting an older plan to manual work requires a reviewed gram weight; unknown weight cannot silently become zero consumption. Explicit zero remains valid.
 
 For JSON clients, send `POST /api/estimates` with these explicit units.
 

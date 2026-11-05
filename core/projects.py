@@ -1581,7 +1581,7 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
 
     - Creates a manual job with hours derived from est_time_s.
     - Uses planned filename as the title.
-    - Copies filament grams if present.
+    - Requires reviewed filament grams; missing weight must not become zero.
     - Does not force cost_override (manual cost remains time-based unless overridden by user).
     - Marks the planned item as fulfilled and stores converted_to_manual_job_id.
 
@@ -1605,11 +1605,13 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
             plan = _plan_from_sql_row(row)
             if plan.converted_to_manual_job_id:
                 raise ValueError("This planned item was already converted to a manual job.")
+            if plan.est_filament_g is None:
+                raise ValueError("Enter reviewed filament grams on the planned item before converting it to manual work.")
             now = _iso_now()
             mj = ManualJob(
                 manual_job_id=uuid.uuid4().hex, project_id=pid, title=plan.filename,
                 hours=finite_float(float(plan.est_time_s or 0) / 3600.0, label="Hours", positive=True),
-                filament_g=optional_finite_float(plan.est_filament_g, label="Filament grams", nonnegative=True) or 0.0,
+                filament_g=finite_float(plan.est_filament_g, label="Filament grams", nonnegative=True),
                 created_at=now, updated_at=now, notes=f"Converted from planned item {plan.plan_id}",
             )
             _insert_manual_job_sql(conn, row["project_id"], mj)
@@ -1632,6 +1634,8 @@ def convert_plan_item_to_manual(project_id: str, plan_id: str) -> ManualJob:
         raise ValueError("Planned item not found")
     if plan.converted_to_manual_job_id:
         raise ValueError("This planned item was already converted to a manual job.")
+    if plan.est_filament_g is None:
+        raise ValueError("Enter reviewed filament grams on the planned item before converting it to manual work.")
 
     hours = float(plan.est_time_s or 0) / 3600.0
     title = plan.filename
