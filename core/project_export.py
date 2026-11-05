@@ -8,7 +8,8 @@ def project_document(conn, project_uid):
         """SELECT id, COALESCE(NULLIF(project_uid,''), CAST(id AS TEXT)) AS uid, name, notes, status,
                   hourly_rate_override, filament_cost_per_kg_override, labor_only,
                   filament_price_json, created_at, updated_at
-           FROM projects WHERE COALESCE(NULLIF(project_uid,''), CAST(id AS TEXT))=?""", (project_uid,),
+           FROM projects WHERE COALESCE(NULLIF(project_uid,''), CAST(id AS TEXT))=?
+           ORDER BY CASE WHEN project_uid=? THEN 0 ELSE 1 END LIMIT 1""", (project_uid, project_uid),
     ).fetchone()
     if project is None:
         return None
