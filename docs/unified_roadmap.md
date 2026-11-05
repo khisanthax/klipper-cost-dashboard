@@ -222,6 +222,11 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 - See [Application modes](application-modes.md) for the operator workflow and root LOGBOOK for exact validation and deployment status.
 - The stacked PR 66 candidate adds project-backed Orders and profitability on SQL-only installations; switching away from Business preserves saved orders and returns an explicit mode prompt for their direct URL.
 
+### Historical reporting
+
+- Milestone F's historical Reports implementation adds monthly completed/canceled/failed/unknown outcomes, completion rate, hours, filament length/weight, saved time/material/total cost components, adjacent-calendar-month changes and missing-value coverage. Printer and inclusive local-date filters apply to every section. SQL/CSV/dual use the same decimal calculations; SQL caches invalidate after historical edits.
+- See [Monthly print outcomes](report-outcomes.md) for definitions and the distinction between saved measurements, estimated mass and unknown information. Utilization, availability, capacity, presets and business analytics require separate explicit data/denominator contracts; they are not inferred from print hours or advertised as implemented.
+
 ## Current Risks / Contradictions
 
 - No normal-path SQL-only dependency on legacy runtime files is currently known; focused coverage is representative rather than exhaustive.

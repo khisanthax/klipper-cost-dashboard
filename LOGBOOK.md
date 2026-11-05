@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Optional isolated demo prepared over final reporting cohort
+
+- Integrated main d5df3a8 after validated inventory and Reports merges, retaining read-only historical financial semantics, atomic migrations, thumbnail-delete recovery and all backup constraints. Optional services remain inactive on the production Master; the demo remains isolated by owner choice. No additional schema migration is introduced. Strict CI is required for this exact head before the later service-packaging cohort.
+
+
 ### 2026-11-05 — Optional isolated demo prepared over inventory integration
 
 - Integrated main 4827fb3, preserving stock ledger/backup integrity and all financial/identity protections. Optional services are not activated on the production Master. The owner requested isolated demo code/staging/release packaging only; there is no pending public deployment approval. Strict CI and normal cohort integration remain required before release.
@@ -31,11 +36,18 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - Updated the staging runbook to distinguish this delivered scope from its retained future public-security checklist. Existing isolated TLS, workspace separation, network-none/non-root/read-only container and default-deny tests remain required. No public or production setting was changed.
 
 ### 2026-11-05 — demo prepared over atomic Orders migration support
+### 2026-11-05 — Reports restacked after validated inventory integration
+
+- Integrated main 4827fb3 after PR 67, preserving additive 0010/0011, atomic migrations, exact-milligram inventory, combined Orders/inventory backup assertions and stable browser actions. Reports remain read-only over saved history and do not deduct stock or rewrite prices. No additional migration is introduced by Reports. Fresh strict CI is required before normal merge into v0.10.0; deployment is separately coordinated.
+
+
+### 2026-11-05 — Reports prepared over atomic Orders migration support
 
 - Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.
 
 
 ### 2026-11-05 — demo prepared over the v0.8.0 feature cohort
+### 2026-11-05 — Reports prepared over the v0.8.0 feature cohort
 ### 2026-11-05 — inventory prepared over atomic Orders migration support
 
 - Integrated main c282f889 (Modes, Orders and atomic migration/ledger commits) while preserving every feature workflow. No migration file/checksum was rewritten. Feature merge waits for the v0.9.0 tag boundary, exact-head CI and final diff inspection. No later feature deployment or public exposure is claimed.
@@ -90,6 +102,28 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - **Validation completed.** The corrected implementation at `fdf4e55` passed [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41872012533) and Python Compile Check. Release Validation ran the complete Python, Playwright, SQL-only, installer, image smoke and upgrade-preservation checks. This validation used disposable synthetic state.
 - **Deployment preparation.** Added the same reproducible isolated image launch to the staging runbook and Release Validation. It uses a synthetic seed and private scratch mount, read-only image, non-root UID, no network or published port, and no production resources. The local Docker Desktop engine was unavailable. Linux [Release Validation](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/41874133115) passed the isolated image rehearsal at `ec65a0d`, along with Python, browser, installer, SQL-only, image and upgrade checks. That implementation also drops any inherited printer-client API key from demo startup.
 - **Next action.** Review the candidate, then exercise the deployment-level network boundary, TLS, capacity and cleanup against an approved isolated staging target. See [demo staging](docs/demo/demo-staging.md).
+### 2026-11-05 — Reports synchronized to current solo-maintainer main
+
+- Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.
+
+
+### 2026-11-05 — Historical Reports metrics, filters and recovery hardening
+
+- **Status:** implemented in [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70), subject to normal CI/review/release. No deployment or production mutation was performed for this work.
+- **Reports:** completed the approved monthly historical metrics: outcomes, completion rate, saved hours, filament length/weight and saved time/material/total costs. Weight uses saved job grams or saved per-job conversion, not a changed current profile. Decimal totals preserve zero and signed values and distinguish missing coverage. Adjacent-month changes are explicit, exclude incomparable partial metrics and never invent an empty month's zero. Printer and inclusive local End Date filters cover summaries, groups and recent rows. Recent prints no longer receive the History compatibility reader's current-price fallback and show missing saved costs as Unpriced.
+- **Correctness / cache:** SQL Reports use one consistent snapshot; content fingerprints and printer/date/timezone cache keys detect insertion, deletion, identity edits and historical corrections even when `updated_at` is preserved. CSV and dual parity tests use the same saved-value calculations. Accessible form labels and keyboard-scrolling monthly tables support responsive layouts.
+- **Confirmed related defect:** the actual browser test exposed thumbnail recovery finishing after a job was deleted. Replaced the reference check-then-write with one atomic conditional SQL statement. Deleted jobs return `job_deleted` without an archival reference or a misleading image result. Shared image objects stay intact for other/live references; invalid assets and unrelated database errors still raise normally.
+- **Verification:** seven focused Reports tests passed locally (the IANA daylight-saving test is skipped on this Windows host without timezone data and is exercised by Linux CI); all 12 archive tests passed, including a deterministic concurrent-delete regression, HTTP recovery result, shared-object preservation, invalid FK/database propagation, backup and restore. SQL-only filesystem isolation passed. Real disposable Playwright runs exercised exact monthly values, both filters, missing costs, cache refresh after a preserved-timestamp edit, desktop/tablet/mobile/200% CSS zoom and keyboard horizontal scrolling. Final required CI is recorded on the PR head; physical-device/native-toolbar zoom and production behavior are not claimed.
+- **Scope / next action:** no historical prices are rewritten and no schema migration is needed. Availability/utilization, profit, ROI and forecasts remain undefined without explicit records and denominators; they are not simulated from recorded costs. Complete normal review and the established release gate after final CI. Production remains the previously verified v0.7.3 baseline.
+- **Import follow-up:** confirmed the old Moonraker importer classified every positive-duration job as completed before reading its terminal status. Explicit canceled/failed/completed status now wins; an explicit unknown stays unknown. Measured time and filament remain measured instead of falling back to canceled-attempt estimates. Only statusless legacy inputs retain the prior inference. Six inference tests and eight Reports tests pass locally (one host timezone-data skip), including explicit status versus stale inferred `job_outcome`, preserved zero/NULL costs and unchanged SQL job rows after reports. Existing production/history records are not rewritten.
+- **Final CI:** code head `6ef7e788a993ee774b0a49f54db2a851cb7518d0` passed [Release Validation 42041001756](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42041001756): all 240 Linux Python tests, SQL-only isolation, 66 layouts with zero overflow/unlabelled controls, desktop/mobile axe, actual Reports/History/pricing/project workflows, thumbnail/backup suites, SSH/systemd/Docker installer acceptance, release image smoke and upgrade preservation. Python Compile Check passed too. Browser screenshots/traces are in that run's artifact and local ignored `browser-artifacts/dashboard-workflows/`. This evidence update changes documentation only; required approving review and post-merge release gates still apply. No production deployment occurred.
+
+### 2026-11-04 — Milestone F monthly historical outcomes
+
+- Implemented the first historical analytics slice on `codex/report-outcomes`. Monthly Breakdown now counts completed, canceled, failed, and unknown outcomes, displays a rate over known outcomes, and identifies missing durations and unpriced jobs. Saved zero costs remain known values.
+- SQL and compatibility Reports use the same installation timezone and decimal aggregation. The report cache refreshes on job edits. This work reads existing data and requires no migration. See [Monthly print outcomes](docs/report-outcomes.md) for the calculations.
+- The two disposable Python tests passed. They cover monthly timezone boundaries, SQL/CSV parity for recorded statuses, signed and zero costs, missing values, and cache refresh after a status edit. Standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including the monthly outcomes table and completion rate in the mobile layout.
+- [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) contains implementation commit `887451f`. Required CI, review, release, and deployment remain separate gates. Printer utilization, comparisons, report presets, and analytics over business records remain future Milestone F slices.
 ### 2026-11-05 — inventory synchronized to current solo-maintainer main
 
 - Integrated main cd8685d, preserving lifecycle, canonical SQL state, reviewed estimates and atomic plan/manual mutation repairs. Additive browser/installer/image-upgrade coverage is retained. Human approvals are no longer required; strict exact-head validate/compile and normal PR merges remain mandatory. No production deployment or public exposure is claimed.

@@ -129,12 +129,16 @@ def get_job_status(job_uid):
 def _reference(job_uid,asset,status,source_url='',filename='',modified=None,provenance=''):
     with archive_lock, db.connect_db() as conn:
         db.apply_migrations(conn)
-        if not conn.execute('SELECT 1 FROM jobs WHERE job_uid=?',(job_uid,)).fetchone():return
-        conn.execute('''INSERT INTO job_thumbnails VALUES (?,?,?,?,?,?,?,?)
+        # The existence predicate and reference write must be one statement.
+        # A recovery request may outlive deletion of its job; SELECT-then-INSERT
+        # leaves a window for a foreign-key failure after the existence check.
+        result = conn.execute('''INSERT INTO job_thumbnails
+            SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM jobs WHERE job_uid=?)
             ON CONFLICT(job_uid) DO UPDATE SET asset_sha256=COALESCE(excluded.asset_sha256,job_thumbnails.asset_sha256),
             status=CASE WHEN COALESCE(excluded.asset_sha256,job_thumbnails.asset_sha256) IS NOT NULL THEN 'archived' ELSE excluded.status END,source_url=excluded.source_url,source_filename=excluded.source_filename,
             source_modified=excluded.source_modified,provenance=excluded.provenance,checked_at=excluded.checked_at''',
-            (job_uid,asset,status,source_url,filename,modified,provenance,db._utc_now_iso()))
+            (job_uid,asset,status,source_url,filename,modified,provenance,db._utc_now_iso(),job_uid))
+        return result.rowcount > 0
 
 
 def fetch_image(printer,filename,*,ended_at=None,historical=False):
@@ -194,11 +198,13 @@ def capture_job(job_uid,printer,filename,*,live_asset=None,ended_at=None,histori
     existing=get_job_asset(job_uid)
     if existing:return {'asset':existing,'status':'archived'}
     if live_asset and asset_path(live_asset):
-        _reference(job_uid,live_asset,'archived',filename=filename,provenance='captured_at_start')
+        if not _reference(job_uid,live_asset,'archived',filename=filename,provenance='captured_at_start'):
+            return {'asset':None,'status':'job_deleted'}
         return {'asset':live_asset,'status':'archived'}
     asset,status,modified=fetch_image(printer,filename,ended_at=ended_at,historical=historical)
     from core.thumbnails import resolve_moonraker_base_url
-    _reference(job_uid,asset,status,resolve_moonraker_base_url(printer) or '',filename,modified,'exact_source_path')
+    if not _reference(job_uid,asset,status,resolve_moonraker_base_url(printer) or '',filename,modified,'exact_source_path'):
+        return {'asset':None,'status':'job_deleted'}
     return {'asset':asset,'status':status}
 
 
@@ -220,8 +226,9 @@ def recover_cached_job(job_uid,printer,filename,token,ended_at=None):
         # A cache refreshed after the job may contain a reused filename's image.
         if ended_at and path.stat().st_mtime>float(ended_at)+2:return None
         asset=retain_image(path.read_bytes())
-        _reference(job_uid,asset,'archived',filename=filename,provenance='explicit_saved_cache_token')
-        return asset
+        if _reference(job_uid,asset,'archived',filename=filename,provenance='explicit_saved_cache_token'):
+            return asset
+        return None
     return None
 
 
