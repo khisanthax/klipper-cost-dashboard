@@ -7,6 +7,7 @@ import time
 import os
 import threading
 import copy
+import json
 from functools import wraps
 from core.config import DATA_DIR
 from core.storage import load_json_file, save_json_file
@@ -53,9 +54,17 @@ def _load_state():
     _jobs = data.get("jobs", {}) if data else {}
 
 
-def _save_state():
+def _save_state(connection=None):
     """Save live job state to disk."""
     if _is_sql_only():
+        if connection is not None:
+            from core import db
+            connection.execute(
+                """INSERT INTO user_settings (key, value_json, updated_at) VALUES ('live_jobs', ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at""",
+                (json.dumps({"jobs": _jobs}), db._utc_now_iso()),
+            )
+            return
         from core.storage import _save_user_settings_sql
         _save_user_settings_sql("live_jobs", {"jobs": _jobs})
         return
@@ -64,7 +73,7 @@ def _save_state():
 
 @synchronized
 def start_job(printer_name, filename, start_time=None, estimated_duration=None, 
-              estimated_filament=None, profile_id=None):
+              estimated_filament=None, profile_id=None, attempt_token=None):
     """
     Start a new print job for a printer.
     
@@ -101,6 +110,8 @@ def start_job(printer_name, filename, start_time=None, estimated_duration=None,
         job["estimated_filament_mm"] = float(estimated_filament)
     if profile_id:
         job["profile_id"] = str(profile_id)
+    if attempt_token:
+        job["attempt_token"] = str(attempt_token)
     
     _jobs[printer_name] = job
     _save_state()
@@ -126,7 +137,7 @@ def update_job(printer_name, **kwargs):
     
     # Update allowed fields
     allowed_fields = {
-        "filename", "estimated_duration", "estimated_filament_mm", "profile_id", "thumbnail_asset"
+        "filename", "estimated_duration", "estimated_filament_mm", "profile_id", "thumbnail_asset", "attempt_token"
     }
     for key, value in kwargs.items():
         if key in allowed_fields:
@@ -246,7 +257,7 @@ def cancel_job(printer_name, reason=None, *, remove=True):
 
 
 @synchronized
-def end_job(printer_name):
+def end_job(printer_name, *, connection=None):
     """
     Mark a job as completed and remove from active jobs.
     
@@ -266,7 +277,7 @@ def end_job(printer_name):
     
     # Remove from active jobs
     del _jobs[printer_name]
-    _save_state()
+    _save_state(connection)
     
     return job
 

@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-3">
+  <h1>Pre-print estimate</h1>
+  <p>Try slicer metadata or enter measurements manually. The calculator uses the same one-hour minimum as planned items.</p>
+  {% if error %}<p role="alert" class="alert alert-danger">{{ error }}</p>{% endif %}
+  {% if saved_plan %}<p role="status" class="alert alert-success">Planned item saved. Its reviewed estimate is retained in the plan notes.</p>{% endif %}
+  <form method="post" enctype="multipart/form-data" class="row g-3">
+    <div class="col-12">
+      <label class="form-label" for="gcode">G-code metadata file (optional, up to 16 MiB per request)</label>
+      <input class="form-control" type="file" accept=".gcode" name="gcode" id="gcode">
+    </div>
+    {% for key, label in [
+      ('duration_seconds', 'Duration override (seconds)'),
+      ('filament_grams', 'Filament weight override (grams)'),
+      ('hourly_rate', 'Machine price per hour'),
+      ('pricing_amount', 'Filament price per selected unit'),
+      ('net_spool_grams', 'Net spool weight (grams, spool pricing only)'),
+      ('grams_per_meter', 'Verified grams per meter for length conversion')
+    ] %}
+    <div class="col-12 col-md-6">
+      <label class="form-label" for="{{ key }}">{{ label }}</label>
+      <input class="form-control" type="number" min="0" step="any" name="{{ key }}" id="{{ key }}"
+             value="{{ values.get(key, '1000' if key == 'net_spool_grams' else '') }}"{% if key == 'hourly_rate' %} required{% endif %}>
+    </div>
+    {% endfor %}
+    <div class="col-12 col-md-6">
+      <label class="form-label" for="pricing_mode">Filament price unit</label>
+      <select class="form-select" id="pricing_mode" name="pricing_mode">
+        {% for unit, label in [('spool','Spool price'),('per_kg','Price per kilogram'),('per_gram','Price per gram'),('per_meter','Price per meter')] %}
+        <option value="{{ unit }}"{% if values.get('pricing_mode', 'spool') == unit %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-md-6">
+      <label class="form-label" for="filament_profile_id">Material profile</label>
+      <select class="form-select" name="filament_profile_id" id="filament_profile_id">
+        <option value="">Use the manual price</option>
+        {% for id, profile in profiles.items() %}
+        <option value="{{ id }}"{% if id == values.get('filament_profile_id') %} selected{% endif %}>{{ profile.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div><button class="btn btn-primary" type="submit">Calculate estimate</button></div>
+  </form>
+  {% if result %}
+  <section class="mt-4" aria-labelledby="estimate-result">
+    <h2 id="estimate-result">Estimated costs</h2>
+    <dl>
+      <dt>Duration</dt><dd>{{ '%.2f'|format(result.duration_seconds / 3600) }} hours</dd>
+      <dt>Filament</dt><dd>{{ ('%.2f g'|format(result.filament_grams)) if result.filament_grams is not none else 'Unknown' }} ({{ result.weight_source }})</dd>
+      <dt>Conversion factor</dt><dd>{{ result.grams_per_meter if result.grams_per_meter is not none else 'Unknown' }} g/m</dd>
+      <dt>Material price</dt><dd>{{ result.filament_price_per_kg }} per kg{% if result.pricing_source and result.pricing_source.profile_name %} from {{ result.pricing_source.profile_name }}{% endif %}</dd>
+      <dt>Machine time</dt><dd>${{ result.display_time }}</dd>
+      <dt>Material</dt><dd>{{ ('$' ~ result.display_material) if result.display_material is not none else 'Unknown' }}</dd>
+      <dt>Total</dt><dd>{{ ('$' ~ result.display_total) if result.display_total is not none else 'Unknown' }}</dd>
+    </dl>
+    <p><a href="{{ url_for('projects_page') }}">Open Projects</a> to upload G-code directly as a planned item.</p>
+    {% if review_token and project_candidates %}
+    <form method="post" action="{{ url_for('save_estimate_plan') }}" class="row g-3">
+      <input type="hidden" name="review_token" value="{{ review_token }}">
+      <div class="col-12 col-md-6"><label class="form-label" for="project_id">Destination project</label>
+      <select class="form-select" id="project_id" name="project_id" required>
+        {% for id, project in project_candidates.items() %}<option value="{{ id }}">{{ project.name }}</option>{% endfor %}
+      </select></div>
+      <div class="col-12 col-md-6"><label class="form-label" for="plan-title">Planned-item title</label>
+      <input class="form-control" id="plan-title" name="title" maxlength="200" required></div>
+      <p>Save this reviewed total as a planned estimate. Duration rounds up to whole seconds. The project may show an adjustment against its own component prices.</p>
+      <div><button class="btn btn-primary" type="submit">Save reviewed estimate as planned item</button></div>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
