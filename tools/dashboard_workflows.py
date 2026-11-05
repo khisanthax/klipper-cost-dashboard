@@ -23,6 +23,7 @@ def exercise(page,context,base,project,data,artifacts):
         page.goto(base+'/projects?edit_project='+uid)
         panel=page.locator('[id="proj-'+uid+'"]')
         if not panel.is_visible():page.locator('[data-bs-target="#proj-'+uid+'"]').click()
+        page.wait_for_function("uid=>{const p=document.getElementById('proj-'+uid);return p.classList.contains('show')&&!p.classList.contains('collapsing')}",arg=uid)
         panel.wait_for(state='visible')
         return panel
     # Read-only current observations must not modify persisted event state.
@@ -271,6 +272,27 @@ def exercise(page,context,base,project,data,artifacts):
         page.screenshot(path=str(artifacts / ('inventory-' + label + '.png')), full_page=True)
     page.evaluate('document.body.style.zoom=1')
     print('Dashboard workflows passed: six live states, retained SQL state, History session policy, RaRa project overlay, project CRUD, assignment/removal, signed manual adjustment, planned upload, cleared overrides, pause save and backup')
+    before_export = query("SELECT * FROM jobs ORDER BY job_uid")
+    response = context.request.get(base + f"/projects/{project}/export.json")
+    assert response.ok and response.headers["content-disposition"].startswith("attachment;")
+    assert response.headers["cache-control"] == "no-store"
+    document = response.json()
+    assert document["schema_version"] == 1 and document["project"]["uid"] == project
+    assert {job["job_uid"] for job in document["recorded_jobs"]} == {f"mask-{i}" for i in range(15)}
+    panel = open_project(project)
+    with page.expect_download() as pending:
+        panel.get_by_role('link', name='Download project JSON', exact=True).click()
+    download = pending.value
+    assert download.suggested_filename.endswith('.json')
+    exported = artifacts / 'project-download.json'
+    download.save_as(str(exported))
+    downloaded = json.loads(exported.read_text(encoding='utf-8'))
+    assert downloaded['project']['uid'] == project
+    assert {job['job_uid'] for job in downloaded['recorded_jobs']} == {f'mask-{i}' for i in range(15)}
+    assert downloaded['units']['filament_mm'] == 'mm'
+    assert query("SELECT * FROM jobs ORDER BY job_uid") == before_export
+    assert context.request.get(base + "/projects/missing/export.json").status == 404
+    print('Dashboard workflows passed: six live states, retained SQL state, History session policy, RaRa project overlay, project CRUD, assignment/removal, signed manual adjustment, planned upload, cleared overrides, pause save, backup and scoped project export')
     page.goto(base + "/estimates")
     page.set_viewport_size({"width": 390, "height": 844})
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")

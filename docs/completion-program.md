@@ -1,26 +1,29 @@
 # KCD completion and release execution plan
 
 
-**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes all earlier human-review blockers below. Required PRs and strict CI remain enforced. PR 61 is merged; release/deployment validation is continuing.
-Rechecked 2026-11-05 against GitHub, current main `7892765`, and production.
+**Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes earlier human-review blockers. Required PRs and strict CI remain enforced. PRs 61/71 are merged and v0.7.4 is verified deployed.
+The initial inventory was checked on 2026-11-05 at main `7892765`.
 This plan coordinates existing branches. The unified roadmap remains the product
 roadmap and root LOGBOOK records completed operations and evidence.
 
 ## Verified state
 
-Production is v0.7.3 at immutable index
-`sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`.
-The live SQL health check passed all five checks with 1,047 jobs, four printers and
-schema `0008_pricing_provenance`. The repository has no open issues. PRs 58 and
-61–70 remain open. Their current heads passed the required checks before this
-completion review. Existing local test edits and configuration are retained.
+Production is now verified v0.7.4 at immutable index
+`sha256:9e11c14a716a52df6c27fa6245a3d2d584b9484123c63b4905eaf556d779186e`,
+revision `237ccc88`, with 1,047 preserved jobs, four connected/identity-verified
+printers, SQL schema `0008_pricing_provenance`, 316 verified objects and 435 archived
+references. Both SV07 recovered rows visibly show Canceled and Unpriced. See
+[actual deployment and rollback evidence](v0.7.4-deployment-2026-11-05.md).
+PR 58 is superseded/closed; 61/71 and later 68/69 have merged normally. The latter
+feature code is queued for v0.8.0 and is not in the deployed v0.7.4 image. The
+remaining candidates and release cohorts below continue through strict CI.
+Existing local test edits and production configuration are retained.
 
-GitHub's active main ruleset requires one approving review and approval of the
-latest push by another eligible reviewer. The collaborator inventory currently
-contains only `khisanthax`, who authored these PRs. A review request cannot be
-assigned to an eligible collaborator with the current access inventory. A
-repository owner must make an eligible reviewer available. CI and internal
-engineering review do not satisfy that external gate.
+The owner replaced the unavailable-human-review gate on November 5 with the
+[solo-maintainer policy](solo-maintainer-release-policy.md). Main requires PRs,
+strict successful `validate` and `compile` checks, resolved threads and final
+diff/migration inspection; required human approvals are zero. Existing deletion
+and force-push protections remain. Normal merges are used without admin bypass.
 
 Remote branch inventory additionally found `feature/sql-hardening` with one
 unmerged January 3 commit, `0624952`, after its earlier PR 44 had merged. Its
@@ -36,8 +39,8 @@ map to the inventoried PRs, including the preserved v0.7.2 documentation branch.
 
 | Order | Existing PR | Dependency and completion action |
 | --- | --- | --- |
-| 1 | 61 · lifecycle recovery | Review identity, delivery and event replay safety. Verify previously repaired SQL rows read-only. After eligible approval, merge and validate main, tag v0.7.4, publish, back up, deploy and verify Canceled/Unpriced rows. |
-| 2 | 58 · older handoff | Recover the missing root AGENTS instructions and retain v0.7.2 evidence as historical documentation. Supersede the stale PR with a linked current handoff. Preserve the current v0.7.3 baseline. |
+| 1 | 61 · lifecycle recovery | Complete: merged normally with governance PR 71, published/deployed v0.7.4 at 237ccc88; fresh backup, isolated restore and live Canceled/Unpriced checks passed. |
+| 2 | 58 · older handoff | Complete: useful AGENTS and historical v0.7.2 evidence preserved in merged PR 71; stale PR 58 closed with linked handoff. |
 | 3 | 62 · printer pages | Finish missing-value and filter/pagination coverage. Rebase onto approved main, resolve shared telemetry changes and rerun all checks. |
 | 4 | 63 · browser installer | Depends on 61. Finish scoped discovery, effective macro inspection and actionable repair diagnostics through the same CLI engine. Keep service and destructive host operations CLI-only. |
 | 5 | 65 · modes | Personal now includes Projects under the Nov 5 directive. Verify direct routes, reversible settings and complete data preservation. |
@@ -60,8 +63,8 @@ No financial recompute or production recalculation belongs to this program.
    evidence. Add regression tests for actual gaps discovered by the review.
 2. Update each branch's logbook and relevant operator documentation. Mark a draft
    ready only after its documented scope and required checks pass.
-3. Record code-review findings and request eligible reviews when the repository
-   has an eligible reviewer. Address feedback on the branch.
+3. Inspect the final diff and migrations, record findings and resolve them on the
+   branch. Merge normally after required checks pass under the solo policy.
 4. Merge one approved feature at a time. Rebase the next dependent candidate onto
    approved main, resolve overlaps in app.py, templates, migration state and tests,
    and revalidate. Retarget 63 after 61 and 66 after 65.
@@ -70,6 +73,17 @@ No financial recompute or production recalculation belongs to this program.
    the integrated scope and release notes.
 
 ## Required release sequence
+
+Current release cohorts separate risk and migrations: v0.7.4 contains lifecycle
+and governance at 237ccc88; v0.8.0 groups reviewed estimates/atomic project
+mutations (68), isolated project export (69) and printer pages (62). The confirmed
+project lost-write and canonical-identity repairs precede Business workflows.
+Next cohorts are Modes/Orders (65/66, v0.9.0), inventory/reporting (67/70,
+v0.10.0), then optional private administration/demo tooling (63/64, v0.11.0).
+Secure each tag at its validated cohort commit before later main integrations.
+Each production replacement requires its own fresh verified backup and evidence.
+Shipping optional service code does not activate a public demo or administrative
+listener; those operational boundaries remain explicit.
 
 For each eligible merge, require full Release Validation and Compile checks.
 Use the existing tag-triggered GHCR workflow, which validates before publishing
@@ -87,10 +101,11 @@ to the release and commit the actual outcome to LOGBOOK.
 
 ## Current blockers and continuing work
 
-Main merges and production releases await an eligible non-author review. Public
-demo publication also awaits explicit approval of its endpoint and security
-configuration. Independent implementation, tests and isolated staging continue
-while those gates are pending.
+Human review is no longer a blocker. Finish required CI and normal incremental
+merges, then publish and deploy verified releases with coordinated backups.
+Public demo publication still requires explicit approval of its concrete endpoint
+and security configuration. Isolated implementation and staging continue without
+public exposure.
 
 The [November 5 production check](completion-program-production-2026-11-05.md)
 confirms all four loaded identities, both previously recovered SV07 rows, SQL
