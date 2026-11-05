@@ -2718,6 +2718,23 @@ def project_pricing_page(project_uid):
     return render_template('project_pricing.html',plan=plan,error=error),409 if error else 200
 
 
+@app.get("/projects/<project_uid>/export.json")
+def export_project(project_uid):
+    if not _is_sql_only():
+        return jsonify(error="Project export requires SQL-only storage"), 404
+    from core.project_export import project_document
+
+    with closing(db_module.connect_db()) as connection:
+        connection.execute("BEGIN")
+        document = project_document(connection, project_uid)
+    if document is None:
+        return jsonify(error="Project not found"), 404
+    response = jsonify(document)
+    response.headers["Content-Disposition"] = 'attachment; filename="kcd-project.json"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/projects", methods=["GET", "POST"])
 def projects_page():
     """
@@ -3282,6 +3299,7 @@ def projects_page():
         "projects.html",
         error=error,
         message=message,
+        project_export_enabled=_is_sql_only(),
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
         display_settings=display_settings,
