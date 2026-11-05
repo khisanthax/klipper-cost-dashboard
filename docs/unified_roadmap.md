@@ -179,33 +179,38 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.8.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:3e00a068e7505ee9753b4aa03faf735876c909f6b8abcd913f99c23b22e5df6d`, revision `b154137b`. Printer pages, reviewed estimates/atomic project mutations and SQL export are deployed; four identities, SQL readiness/integrity, 1,047 jobs and 316 objects are preserved, and both SV07 rows remain Canceled/Unpriced. See [actual evidence](v0.8.0-deployment-2026-11-05.md). Later Modes/Orders code is for v0.9.0 and is not in this image. Phase 6 shipped in v0.4.0; SQL-only remains canonical, CSV/dual remain compatibility modes and Recalculate remains pricing-only. Read root LOGBOOK for current outcomes.
+Production v0.9.0 was independently verified on 2026-11-05, pinned to immutable index `sha256:57613a356037293310430551d11ef2025332873a4d18b2846e3f3e2cc1d28d25`, revision `c282f889`. Modes/Orders are deployed with Advanced default and additive empty 0009 Orders schema; prior printer pages, estimates and export remain verified. Four identities, readiness/integrity, 1,047 jobs and 316 objects are preserved; both SV07 rows remain Canceled/Unpriced. See [actual evidence](v0.9.0-deployment-2026-11-05.md). Later inventory/reporting main is queued for v0.10.0. SQL-only remains canonical; CSV/dual remain compatibility modes and Recalculate remains pricing-only. Read root LOGBOOK for actual outcomes.
 
 ## Current Active Work
 
 v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
-The v0.7.3 deployment handoff merged in PR 60. The two matched SV07 history rows and on-printer script repairs were applied to production. PR 61 lifecycle and Unpriced presentation are merged. The v0.7.4 tag/release is published; production deployment verification is tracked separately in LOGBOOK.
+The lifecycle repair shipped and was verified in v0.7.4; v0.8.0 and v0.9.0 subsequently shipped their documented feature cohorts. Read root LOGBOOK for exact deployed digests and evidence; main can contain later, undeployed code.
 
-## Approved development sequence
+## Completion-program state
 
-The November 1 proposal's v0.5.1 baseline is historical. Preserve the released CLI installer and its acceptance tests, SQL registration, archived thumbnails, pause-aware accounting, explicit spool units, saved cost snapshots, project components and planned-item projections. Implement the remaining work in separately reviewed slices. Release only after each applicable gate passes.
+The current owner directive and the [completion execution plan](completion-program.md)
+supersede the older November 1 starting inventory. Retain every released storage,
+pricing, identity, installer and thumbnail guarantee while completing the remaining
+code cohorts through strict CI and normal solo-maintainer PR merges.
 
-| Priority | Milestone | Verified starting point and remaining work |
-| --- | --- | --- |
-| A | Web installer and administration | [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63) passed release validation for configured local and SSH targets, reviewed previews and optional local SQL backups. Master bootstrap, open discovery, macro controls and safe retirement remain work. Retarget after PR 61 merges. |
-| B | Public interactive demo | [PR 64](https://github.com/khisanthax/klipper-cost-dashboard/pull/64) recovers workspace foundation `58d1368` for the v0.7 codebase, with synthetic activity, quotas, cleanup and isolated browser tests. Review deployment isolation in staging before selecting a public hostname or hosting. Review the demo's deny-by-default policy when other routes integrate. |
-| C | Individual printer pages | [PR 62](https://github.com/khisanthax/klipper-cost-dashboard/pull/62) passed release validation for telemetry, progress, date comparisons, outcome analytics and printer-scoped history. The two Mercury identities were verified independently in production. |
-| D | Personal, Advanced and Business modes | [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) passed release validation for reversible instance-wide presentation settings with Advanced as the default. Business currently inherits Advanced pending integration with Orders. |
-| E | Business orders and profitability | [PR 66](https://github.com/khisanthax/klipper-cost-dashboard/pull/66) adds SQL project-backed order metadata, revenue, expenses and unknown-aware profitability. The stack on PR 65 passed validation with Business-only access and preservation across mode changes. |
-| F | Analytics and reporting | [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) adds monthly outcomes and recorded-cost subtotals with missing-data counts. Broader comparisons, business analytics, utilization and presets remain work. |
-| G | Filament inventory | [PR 67](https://github.com/khisanthax/klipper-cost-dashboard/pull/67) adds SQL physical spools, printer assignment and idempotent, verified stock movements. Further reporting and inventory convenience remain work. |
-| H | Slicer estimates | [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) adds bounded metadata import and explicit-unit browser and JSON estimates. Reviewed estimate promotion and atomic project mutations merged through PR 68. |
-| I | Notifications and exports | [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) adds a versioned SQL project JSON snapshot. Order, inventory and printable exports and optional notification delivery remain work. |
+| Milestone | Current supported scope and actual state |
+| --- | --- |
+| A · Browser administration | Scoped local/SSH discovery and inspection, reviewed registration/repair/relocation, active-include and hook diagnostics, private backups and recoverable errors are implemented in PR 63. The service is separately authenticated and allowlisted. Unbounded discovery, initial Master bootstrap, macro edits and destructive host/lifecycle operations remain deliberately CLI-only. Optional listener activation is not part of the production Master deployment. |
+| B · Interactive demo | PR 64 implements synthetic per-visitor workspaces, simulated activity, reset/expiry/quotas, isolated TLS/browser/container acceptance and default-deny boundaries. The owner explicitly requested isolated code/staging/release packaging only; no public endpoint or pending public-approval blocker belongs to this program. |
+| C · Printer pages | Released in v0.8.0 with known/unknown telemetry, scoped history, outcomes and comparisons. |
+| D/E · Modes and Orders | Released in v0.9.0 with reversible Advanced-default preferences and Business-gated project-backed financial/lifecycle data. |
+| F/G · Reports and stock | Merged and tagged for v0.10.0; deployment evidence remains separate. Includes historical monthly filters/comparisons/coverage, safe outcome inference/cache invalidation and exact-milligram stock/correction/archive ledgers. |
+| H/I · Estimates and project export | Released in v0.8.0: explicit spool units, signed reviewed planned items, atomic project mutations, canonical identity and consistent versioned SQL exports preserving original pricing. |
 
-These PRs are separate review candidates. Rebase and validate each against current main before release. Review the stacked Business Orders after Modes, reconcile overlapping reporting and Projects changes, and retest the demo route policy with integrated features. Retain previous rollback images and coordinated archives.
-1. Monitor genuine SV07 lifecycle events after verified v0.7.4 deployment; preserve the two recovered canceled/unpriced rows without replaying recovery or recalculating their costs.
-1. Monitor genuine printer events on verified v0.8.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
+All final service-packaging code remains subject to its exact-head validation.
+Public demo hosting, Full Recompute and undefined utilization/profit/ROI or optional
+notification/import/printable-export workflows require separately established
+requirements; they are not invented from printing cost or silently claimed complete.
+
+## Next Planned Work
+
+1. Monitor genuine printer events on verified v0.9.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
 2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
 3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
@@ -228,17 +233,17 @@ These PRs are separate review candidates. Rebase and validate each against curre
 
 ### Application modes
 
-- status: implemented candidate in PR 65; not merged or deployed
+- status: merged and verified deployed in v0.9.0
 - current requirements:
   - single global mode per KCD instance
   - reversible switching with no data deletion
   - Personal includes everyday history, Projects and basic pricing under the November 5 directive
   - Advanced is the existing-installation default
-  - Business includes Advanced plus the separately reviewed Orders candidate in PR 66
+  - Business includes Advanced plus project-backed Orders from PR 66
   - mode preferences preserve history, pricing, profiles, assignments and identities
   - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
 - See [Application modes](application-modes.md) for the operator workflow and root LOGBOOK for exact validation and deployment status.
-- The stacked PR 66 candidate adds project-backed Orders and profitability on SQL-only installations; switching away from Business preserves saved orders and returns an explicit mode prompt for their direct URL.
+- Merged PR 66 adds project-backed Orders and profitability on SQL-only installations; switching away from Business preserves saved orders and returns an explicit mode prompt for their direct URL.
 
 ### Historical reporting
 
