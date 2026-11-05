@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% macro operation(action, spool=none) %}
+<input type="hidden" name="action" value="{{ action }}">
+<input type="hidden" name="operation_uid" value="{{ new_operation() }}">
+{% if spool %}<input type="hidden" name="spool_uid" value="{{ spool.spool_uid }}">{% endif %}
+{% endmacro %}
+{% block content %}
+<h1>Filament inventory</h1>
+<p>Track physical spools and measured consumption. Print estimates do not deduct stock.</p>
+{% if error %}<p class="alert alert-danger" role="alert">{{ error }}</p>{% endif %}
+{% if request.args.get('saved') == '1' %}<p class="alert alert-success" role="status">Inventory saved.</p>{% endif %}
+{% if request.args.get('saved') == '0' %}<p class="alert alert-info" role="status">Already recorded; stock was not changed again.</p>{% endif %}
+<section class="card card-body mb-4" aria-labelledby="add-spool">
+    <h2 class="h4" id="add-spool">Add a spool</h2>
+    <form method="post" class="row g-3">
+        {{ operation('create') }}
+        <label class="col-sm-6 col-lg-4">Material <input class="form-control" name="material" maxlength="160" required></label>
+        <label class="col-sm-6 col-lg-4">Manufacturer <input class="form-control" name="manufacturer" maxlength="160"></label>
+        <label class="col-sm-6 col-lg-4">Color <input class="form-control" name="color" maxlength="160"></label>
+        <label class="col-sm-6 col-lg-4">Net weight (g) <input class="form-control" name="net_grams" type="number" min=".001" step=".001" required></label>
+        <label class="col-sm-6 col-lg-4">Opening balance (g) <input class="form-control" name="remaining_grams" type="number" min="0" step=".001" required></label>
+        <label class="col-sm-6 col-lg-4">Low-stock threshold (g) <input class="form-control" name="low_stock_grams" type="number" min="0" step=".001" value="0" required></label>
+        <label class="col-sm-6 col-lg-4">Purchase price ($, optional) <input class="form-control" name="purchase_price" type="number" min="0" step=".01"></label>
+        <label class="col-sm-6 col-lg-4">Purchase date (optional) <input class="form-control" name="purchased_on" type="date"></label>
+        <label class="col-sm-6 col-lg-4">Verified conversion (g/m, optional) <input class="form-control" name="grams_per_meter" type="number" min=".000001" step="any"></label>
+        <div class="col-12"><button class="btn btn-primary" type="submit">Add spool</button></div>
+    </form>
+</section>
+<section aria-labelledby="spools-heading">
+    <h2 class="h4" id="spools-heading">Spools</h2>
+    {% if not spools %}<p>No physical spools recorded.</p>{% endif %}
+    {% for spool in spools %}
+    <article class="card card-body mb-3">
+        <h3 class="h5">{{ spool.material }}{% if spool.color %} · {{ spool.color }}{% endif %}</h3>
+        <p>
+            <strong>{{ '%.3f'|format(spool.remaining_mg / 1000) }} g remaining</strong>
+            of {{ '%g'|format(spool.net_mg / 1000) }} g
+            {% if spool.remaining_mg <= spool.low_stock_mg %}<span class="badge text-bg-warning">Low stock</span>{% endif %}
+            <br>{{ spool.manufacturer or 'Manufacturer unknown' }} · {{ spool.printer_name or 'No assigned printer' }}
+            {% if spool.archived_at %}<span class="badge text-bg-secondary">Archived</span> · {{ spool.archive_reason }}{% endif %}
+            {% if spool.purchase_cents is not none %} · {{ '$%.2f'|format(spool.purchase_cents / 100) }}{% endif %}
+            {% if spool.purchased_on %} · {{ spool.purchased_on }}{% endif %}
+            {% if spool.grams_per_meter %} · {{ spool.grams_per_meter }} g/m{% endif %}
+        </p>
+        {% if not spool.archived_at %}
+        <details class="mb-2">
+            <summary>Assign printer</summary>
+            <form method="post" class="d-flex flex-wrap gap-2 align-items-end my-2">
+                {{ operation('assign', spool) }}
+                <div>
+                <label for="spool-printer-{{ spool.spool_uid }}">Printer</label>
+                <select id="spool-printer-{{ spool.spool_uid }}" class="form-select" name="printer_id">
+                    <option value="">Unassigned</option>
+                    {% for printer in printers %}
+                    <option value="{{ printer.id }}"{% if printer.id == spool.printer_id %} selected{% endif %}>{{ printer.name }}</option>
+                    {% endfor %}
+                </select>
+                </div>
+                <button class="btn btn-outline-primary" type="submit">Save assignment</button>
+            </form>
+        </details>
+        <details class="mb-2">
+            <summary>Record estimated job use</summary>
+            <p>Estimates do not reserve or deduct stock. Record verified use separately after measuring it.</p>
+            <form method="post" class="row g-2 my-2">
+                {{ operation('estimate', spool) }}
+                <label class="col-md-4">Job UID <input class="form-control" list="inventory-jobs" name="job_uid" required maxlength="160"></label>
+                <label class="col-md-4">Estimated consumption (g) <input class="form-control" name="grams" type="number" min="0" step=".001" required></label>
+                <label class="col-md-4">Estimate source <input class="form-control" name="source" maxlength="160" required placeholder="Slicer or length × g/m"></label>
+                <div class="col-12"><button class="btn btn-outline-primary" type="submit">Save estimate without deduction</button></div>
+            </form>
+        </details>
+        <details class="mb-2">
+            <summary>Record verified job use</summary>
+            <form method="post" class="row g-2 my-2">
+                {{ operation('consume', spool) }}
+                <label class="col-md-6">History job UID <input class="form-control" list="inventory-jobs" name="job_uid" required maxlength="160"></label>
+                <label class="col-md-6">Measured consumption (g) <input class="form-control" name="grams" type="number" min=".001" step=".001" required></label>
+                <label class="col-12"><input class="form-check-input" type="checkbox" name="verified" value="1" required> I verified the amount used from this physical spool.</label>
+                <div class="col-12"><button class="btn btn-primary" type="submit">Deduct measured amount</button></div>
+            </form>
+        </details>
+        {% endif %}
+        {% if spool.consumptions %}
+        <details class="my-2">
+            <summary>Verified consumption and corrections</summary>
+            <p>Replace the measured total for a specific spool and job. The original deduction remains in stock history; the difference is recorded as a linked correction.</p>
+            {% for use in spool.consumptions %}
+            <section class="border rounded p-2 my-2" aria-label="Verified use {{ use.job_uid }}">
+                <p>{{ use.job_filename }} · <small>{{ use.job_uid }}</small><br><strong>{{ '%.3f'|format(use.measured_mg / 1000) }} g verified</strong></p>
+                {% if not spool.archived_at %}
+                <form method="post" class="row g-2">
+                    {{ operation('correct', spool) }}
+                    <input type="hidden" name="original_event_uid" value="{{ use.event_uid }}">
+                    <input type="hidden" name="expected_grams" value="{{ '%.3f'|format(use.measured_mg / 1000) }}">
+                    <label class="col-md-6">Corrected measured total (g) <input class="form-control" name="grams" type="number" min="0" step=".001" required></label>
+                    <label class="col-md-6">Correction reason <input class="form-control" name="reason" maxlength="160" required></label>
+                    <div class="col-12"><button class="btn btn-outline-primary" type="submit">Record linked correction</button></div>
+                </form>
+                {% endif %}
+            </section>
+            {% endfor %}
+        </details>
+        {% endif %}
+        {% if spool.estimates %}
+        <details class="my-2">
+            <summary>Latest job estimates (no stock deduction)</summary>
+            {% for estimate in spool.estimates %}
+            <p>{{ estimate.job_filename }} · <small>{{ estimate.job_uid }}</small><br>{{ '%.3f'|format(estimate.estimated_mg / 1000) }} g estimated · {{ estimate.source }}</p>
+            {% endfor %}
+        </details>
+        {% endif %}
+        <details class="my-2">
+            <summary>{{ 'Reactivate spool' if spool.archived_at else 'Archive spool' }}</summary>
+            <p>Archiving prevents new stock changes and preserves the balance, purchase record and audit history. Historical job deletion does not restore consumed stock.</p>
+            <form method="post" class="row g-2">
+                {{ operation('reactivate' if spool.archived_at else 'archive', spool) }}
+                <label class="col-md-8">Archive or reactivation reason <input class="form-control" name="reason" maxlength="160" required></label>
+                <div class="col-md-4"><button class="btn btn-outline-secondary" type="submit">{{ 'Reactivate spool' if spool.archived_at else 'Archive spool' }}</button></div>
+            </form>
+        </details>
+        {% if not spool.archived_at %}
+        <details>
+            <summary>Adjust stock</summary>
+            <form method="post" class="row g-2 my-2">
+                {{ operation('adjust', spool) }}
+                <label class="col-md-6">Signed adjustment (g) <input class="form-control" name="grams" type="number" step=".001" required></label>
+                <label class="col-md-6">Reason <input class="form-control" name="reason" maxlength="160" required></label>
+                <div class="col-12"><button class="btn btn-outline-primary" type="submit">Record adjustment</button></div>
+            </form>
+        </details>
+        {% endif %}
+    </article>
+    {% endfor %}
+</section>
+<datalist id="inventory-jobs">
+{% for job in jobs %}
+    <option value="{{ job.job_uid }}">{{ job.printer_name }} · {{ job.filename }} · {{ job.status }}</option>
+{% endfor %}
+</datalist>
+<section aria-labelledby="events-heading">
+    <h2 class="h4" id="events-heading">Recent stock history</h2>
+    {% if not events %}<p>No stock changes recorded.</p>{% else %}
+    <div class="table-responsive" tabindex="0" role="region" aria-label="Stock changes">
+        <table class="table table-striped">
+            <thead><tr><th scope="col">Recorded (UTC)</th><th scope="col">Spool</th><th scope="col">Change (g)</th><th scope="col">Reason</th><th scope="col">Job</th></tr></thead>
+            <tbody>
+                {% for event in events %}
+                <tr>
+                    <td>{{ event.recorded_at }}</td><td>{{ event.material }} {{ event.color }} <small>{{ event.spool_uid[:8] }}</small></td>
+                    <td>{{ '%+.3f'|format(event.delta_mg / 1000) }}</td><td>{% if event.original_event_uid %}Linked consumption correction · {% endif %}{{ event.reason }}</td>
+                    <td>{{ event.job_filename or event.corrected_job_filename or '—' }}{% if event.job_uid or event.corrected_job_uid %}<br><small>{{ event.job_uid or event.corrected_job_uid }}</small>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
