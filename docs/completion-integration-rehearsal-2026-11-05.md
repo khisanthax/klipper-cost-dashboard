@@ -63,6 +63,8 @@ The first sandbox browser attempt could not create loopback sockets (Windows 100
 
 The combined HTTPS demo reproduced the public-page storage-context failure before its fix. Its trace and server log were preserved locally under ignored `browser-artifacts/demo-public-context-failure/`. Successful normal workflow captures are under `browser-artifacts/dashboard-workflows/`; successful HTTPS captures are under `browser-artifacts/demo/`. These contain only disposable synthetic state. GitHub CI uploads its own exact-head `browser-regression-<run-id>` artifact.
 
+Initial [Linux Release Validation 42044092307](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42044092307) ran 376 tests and found one merge-only default-navigation regression. Inventory's explicit default-true predicate had been nested inside the Recalculate Advanced block. Moving Inventory outside that outer block preserves its own mode/demo rules and its standalone default. Compile CI passed; full downstream validation requires the corrected-head run.
+
 ## Production and promotion
 
 No live printer commands, database writes, credential changes, service restarts or deployments were made by this rehearsal. The separately verified [November 5 read-only production record](completion-program-production-2026-11-05.md) remains authoritative for v0.7.3, preserved SV07 cancellations and persistent thumbnail objects.
