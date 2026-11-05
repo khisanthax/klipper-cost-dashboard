@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Browser installer workflow completion
+
+- Extended [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63) with scoped local and SSH instance discovery, active include-chain and effective macro verification, possible duplicate hook reporting, precise configuration actions and private backup filenames. The `inspect-client` CLI uses the same inspection implementation.
+- Browser targets remain explicit operator allowlist entries. Inspection reads only the selected configuration root, distinguishes included files from other root alternatives and verifies the exact Moonraker root and port. Repair retains idle-state verification, single-use reviewed revisions and private credential propagation.
+- Added safe diagnostics for authentication, wrong configuration roots, active printers, stale reviews, permissions and partial registration/write failures. Fourteen focused inspection, authorization and shared-engine tests passed locally. The actual Playwright installer passed responsive, keyboard, read-only instance inspection, active-printer rejection, registration and backup/restore verification.
+- CI, required review, release and deployment are recorded separately in the PR checks. Advanced destructive and host-service operations use the existing CLI. Production was untouched by this change.
+
 ### 2026-11-04 — Program baseline and first browser installer slice
 
 - **Status.** Implemented and locally tested the first Milestone A slice in [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63). Stacked on the pending SV07 fix in PR 61 so new clients inherit correct shell argument handling. Candidate remains subject to GitHub review and release validation.

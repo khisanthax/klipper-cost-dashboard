@@ -155,12 +155,31 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
     if web_safe and _web_source_state(directory) != source_state:
         raise ValueError("The client configuration changed during planning. Generate a fresh preview.")
     changes = []
+    change_details = []
     for path, (content, mode) in plan.items():
         old = path.read_text() if path.exists() else ""
         if old==content and path.exists() and (os.name=='nt' or (path.stat().st_mode & 0o777)==mode):
             continue
         if web_safe:
             changes.append(f"{'Update' if path.exists() else 'Create'} {path.name}")
+            if path.suffix == ".sh":
+                actions = ["Set private executable permissions"]
+                if old != content:
+                    actions.insert(0, "Write the shared lifecycle client script using the configured Master credential")
+            elif path.name == "printer.cfg":
+                actions = ["Add [include print_cost.cfg] to the active printer configuration"]
+            else:
+                actions = ["Set configuration file permissions to 0644"]
+                identity_line = re.compile(r"^\s*variable_printer_name:.*$", re.M)
+                if identity_line.findall(old) != identity_line.findall(content):
+                    actions.append(f"Set KCD printer identity to {name}")
+                commands = re.compile(r"^command:.*$", re.M)
+                if commands.findall(old) != commands.findall(content):
+                    actions.append(f"Set managed Bash command paths in {directory} and pass the macro arguments once")
+                sections = re.compile(r"^\[(?:gcode_macro KCD_JOB_\w+|gcode_shell_command \w+)\]$", re.M)
+                added = sorted(set(sections.findall(content)) - set(sections.findall(old)))
+                actions.extend("Add " + section for section in added)
+            change_details.append({"file": path.name, "actions": actions})
         elif path.suffix == ".sh":
             changes.append(f"{path}: {'update' if path.exists() else 'create'} private client script (credential omitted)")
         else:
@@ -184,7 +203,7 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
             },
         }
         revision = hmac.new(key.encode("utf-8"), json.dumps(fingerprint, sort_keys=True).encode("utf-8"), "sha256").hexdigest()
-        result.update(revision=revision, master_backend=status["backend"])
+        result.update(revision=revision, master_backend=status["backend"], change_details=change_details)
         if apply:
             if not hmac.compare_digest(revision, expected_revision):
                 raise ValueError("The repair preview is stale. Generate a fresh preview.")
@@ -204,6 +223,7 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Master registration was retained. No client files were written. {exc}") from None
     try:
+        backups_before = set(directory.glob("*.kcd-backup-*")) if web_safe else set()
         for path, (content, mode) in plan.items():
             atomic_write(path, content, mode)
             if os.name=='posix' and os.geteuid()==0:
@@ -217,5 +237,7 @@ def repair_client(config_dir, name, moonraker, master, key, *, apply=False, relo
     if not web_safe and not utils.is_sql_only():
         utils.register_client({**metadata,'printer_name':name,'moonraker_url':moonraker})
         utils.save_state('master_url',master)
+    if web_safe:
+        result["backup_files"] = sorted(path.name for path in set(directory.glob("*.kcd-backup-*")) - backups_before)
     return {**result, "applied": True, "registration": registration,
             "macro_action": "Inspect active hooks with macro-plan; reload Klipper only while idle if configuration changed"}

@@ -123,6 +123,9 @@ def main():
                         assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
                         page.screenshot(path=str(ARTIFACTS / f"installer-{width}.png"))
                     preview = page.get_by_role("button", name="Preview installation or repair")
+                    page.get_by_role("button", name="Discover and verify this instance").click()
+                    page.get_by_role("heading", name="Instance verification for WebFixture").wait_for()
+                    page.get_by_text("printer.cfg", exact=True).wait_for()
                     preview.focus()
                     preview.press("Enter")
                     page.get_by_role("heading", name="Review WebFixture").wait_for()
@@ -199,6 +202,8 @@ def exercise_ssh(env, master, moon, directory):
             page.set_default_timeout(90000)
             try:
                 page.goto(url)
+                page.get_by_role("button", name="Discover and verify this instance").click()
+                page.get_by_role("heading", name="Instance verification for One").wait_for()
                 page.get_by_role("button", name="Preview installation or repair").click()
                 page.get_by_role("heading", name="Review One").wait_for()
                 page.get_by_text("Update kcd_job_cancel.sh", exact=True).wait_for()

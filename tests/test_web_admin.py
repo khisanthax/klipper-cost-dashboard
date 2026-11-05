@@ -87,3 +87,18 @@ class WebAdminTests(unittest.TestCase):
                 path.write_text(json.dumps({"master": "http://localhost", "targets": {"p": {**entry, **invalid}}}))
                 with self.assertRaises(ValueError):
                     web_admin.load_configuration(path)
+
+    def test_inspection_is_scoped_and_authentication_error_is_actionable(self):
+        csrf = self.token(self.client.get("/", headers=self.headers), "csrf")
+        result = {"config_dir": self.target.config_dir, "printer_name": "SV07", "port": 7125,
+                  "moonraker": self.target.moonraker, "active_process": True, "connected": True,
+                  "active_files": ["printer.cfg"], "unused_files": ["auto.cfg"], "errors": [], "macros": []}
+        with patch("installer.inspection.inspect_client", return_value=result) as inspect:
+            response = self.client.post("/inspect", headers=self.headers,
+                                        data={"csrf": csrf, "target": "sv07", "config_dir": "/arbitrary"})
+        self.assertIn(b"Instance verification for SV07", response.data)
+        self.assertIn(b"outside the active include chain", response.data)
+        inspect.assert_called_once_with(config_dir=self.target.config_dir, moonraker=self.target.moonraker)
+        with patch.object(workflow, "repair_client", side_effect=RuntimeError("Master authentication failed")):
+            response = self.client.post("/preview", headers=self.headers, data={"csrf": csrf, "target": "sv07"})
+        self.assertIn(b"Verify KCD_API_KEY", response.data)

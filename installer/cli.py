@@ -11,6 +11,9 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     discovery = sub.add_parser("discover")
     discovery.add_argument("--config-dir", action="append", default=[])
+    inspect_client = sub.add_parser("inspect-client")
+    inspect_client.add_argument("--config-dir", required=True)
+    inspect_client.add_argument("--moonraker", required=True)
     repair = sub.add_parser("repair-client")
     for option in ("config-dir", "printer", "moonraker", "master"):
         repair.add_argument("--"+option, required=True)
@@ -30,6 +33,9 @@ def main(argv=None):
             from .discovery import discover_local, discover_endpoints
             clients = discover_local(extra_dirs=args.config_dir)
             result = {"candidates": clients, "endpoints": discover_endpoints([c["moonraker_port"] for c in clients])}
+        elif args.command == "inspect-client":
+            from .inspection import inspect_client
+            result = inspect_client(args.config_dir, args.moonraker)
         elif args.command == "repair-client":
             from .workflow import repair_client
             import getpass

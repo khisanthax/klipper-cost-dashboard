@@ -51,11 +51,14 @@ def active_config_files(config_dir, max_files=256, *, restrict_to_root=False):
     return files, errors
 
 
-def effective_macro_sources(config_dir):
+def effective_macro_sources(config_dir, *, restrict_to_root=False):
     """Follow Klipper's linear include/override order for each macro's gcode."""
     active, definitions, stack = {}, [], set()
+    root = Path(config_dir).resolve()
     def visit(path, depth=0):
         path = Path(os.path.abspath(path))
+        if restrict_to_root and not path.resolve().is_relative_to(root):
+            raise ValueError("An active Klipper configuration escapes the selected directory")
         if path in stack or depth > 24 or len(definitions) > 2048:
             raise ValueError("Recursive or excessive macro include graph")
         stack.add(path)
@@ -75,6 +78,8 @@ def effective_macro_sources(config_dir):
             match=re.match(r'^\s*\[include\s+(.+?)\]\s*(?:[#;].*)?$',line,re.I)
             if match:
                 flush()
+                if restrict_to_root and not (path.parent / match[1]).resolve().is_relative_to(root):
+                    raise ValueError("An active Klipper include escapes the selected directory")
                 for child in sorted(glob.glob(str(path.parent/match[1]))):visit(child,depth+1)
             else:buffer.append(line)
         flush();stack.remove(path)

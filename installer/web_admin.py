@@ -23,6 +23,26 @@ from .remote_workflow import remote_operation
 PLAN_LIFETIME = 300
 
 
+def diagnostic(error):
+    text = str(error)
+    for marker, message in (
+        ("authentication failed", "Master authentication failed. Verify KCD_API_KEY in the administrator service environment."),
+        ("different config", "Moonraker serves another configuration. Correct the target's URL, port and configuration directory in the private allowlist."),
+        ("inactive printer", "The printer is active or its state is uncertain. Wait for a verified idle state and review a fresh preview."),
+        ("preview is stale", "Files, registration or the target changed after review. Create and review a fresh preview."),
+        ("directory must contain", "The configured root is missing printer.cfg. Verify the allowlisted path and file access."),
+        ("escapes the selected", "An active include escapes the allowed configuration root. Review that include with the CLI before continuing."),
+        ("client files incomplete", "Master registration succeeded, but a client write failed. Review private per-file backups and permissions, then rerun the same repair."),
+        ("registration was retained", "Master registration was retained and no client files were written. Recheck printer state and file changes, then review a new preview."),
+        ("readiness failed", "Client files were written but SQL readiness failed. Inspect Master readiness and retain backups before rerunning repair."),
+    ):
+        if marker in text:
+            return message
+    if isinstance(error, PermissionError):
+        return "The administrator account cannot access a configured file. Correct ownership or permissions before retrying."
+    return "The operation could not be verified. Check Master access, Moonraker identity and port, allowlisted paths and SSH permissions. Review registration and private backups before retrying."
+
+
 @dataclass(frozen=True)
 class Target:
     name: str
@@ -133,8 +153,15 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
             "admin.html", targets=targets, csrf=session["csrf"], backup_data=backup_data, **context,
         )
 
-    def operation(identifier, *, revision=None):
+    def operation(identifier, *, revision=None, inspect=False):
         target = targets[identifier]
+        if inspect:
+            payload = {"config_dir": target.config_dir, "moonraker": target.moonraker}
+            with operation_lock:
+                if target.ssh_alias:
+                    return remote_operation(target.ssh_alias, "inspect", payload)
+                from .inspection import inspect_client
+                return inspect_client(**payload)
         payload = {
             "config_dir": target.config_dir, "name": target.name, "moonraker": target.moonraker,
             "master": master, "key": master_key, "relocate": target.relocate,
@@ -176,8 +203,8 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
             revision = result["revision"]
             if not isinstance(revision, str) or not revision:
                 raise ValueError("Installer did not return a plan revision")
-        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError):
-            return page(error="Preview failed. Verify Master access, the Moonraker instance, configured paths and SSH permissions."), 409
+        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
+            return page(error=diagnostic(error)), 409
         nonce = secrets.token_urlsafe(24)
         with plan_lock:
             now = time.monotonic()
@@ -190,6 +217,17 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
         session["plan"] = nonce
         ticket = signer.dumps({"target": identifier, "revision": revision, "nonce": nonce})
         return page(selected=targets[identifier], result=result, ticket=ticket)
+
+    @app.post("/inspect")
+    def inspect():
+        identifier = request.form.get("target")
+        if identifier not in targets:
+            abort(404)
+        try:
+            result = operation(identifier, inspect=True)
+        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
+            return page(error=diagnostic(error)), 409
+        return page(selected=targets[identifier], inspection=result)
 
     @app.post("/apply")
     def apply():
@@ -205,8 +243,8 @@ def create_app(master, targets, password, master_key, *, backup_data=None):
             return page(error="The preview was already used or expired. Review a new preview."), 409
         try:
             result = operation(reviewed["target"], revision=reviewed["revision"])
-        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError):
-            return page(error="Apply could not be verified. Check printer activity and permissions, then review a new preview. If a write was interrupted, review the installer backups and Master registration."), 409
+        except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
+            return page(error=diagnostic(error)), 409
         if result.get("applied") is not True:
             return page(error="The installer did not confirm application. Review registration and try a new preview."), 409
         return page(selected=targets[reviewed["target"]], result=result)
