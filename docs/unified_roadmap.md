@@ -174,17 +174,31 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.7.3 was independently verified on 2026-11-03, pinned to immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. Phase 6 shipped in v0.4.0; SQL-only remains the strict/canonical architecture, while CSV and dual remain supported compatibility runtime modes. Recalculate is deliberately pricing-only. Read root `LOGBOOK.md` for the authoritative engineering handoff and exact deployment evidence.
+Production v0.7.3 was independently reverified on 2026-11-04, pinned to immutable index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. All five SQL readiness checks passed with 1,041 jobs and four registered printers. Phase 6 shipped in v0.4.0. SQL-only remains canonical, with CSV and dual retained for compatibility. Recalculate is pricing-only. See [LOGBOOK](../LOGBOOK.md) for deployment and recovery evidence.
 
 ## Current Active Work
 
 v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Actual browser workflows cover all major pages, explicit spool pricing, project snapshots, recalculation, selection safety, current printer observations, accessibility and realistic history sizes. See [dashboard audit](dashboard-audit-v0.7.3.md) for implementation tests and [production evidence](v0.7.3-deployment-2026-11-03.md) for verified release/deployment results.
 
-## Next Planned Work
+The v0.7.3 deployment handoff merged in PR 60. The two matched SV07 history rows and on-printer script repairs were applied to production. The general lifecycle fix and Unpriced presentation await review in PR 61. A released v0.7.4 has not been verified.
 
-1. Continue production monitoring and intentionally review SV07's retained cancelled-job discrepancy; do not automatically finalize uncertain tracking.
-2. Review/merge the deployment handoff documentation. Retain v0.7.2 and earlier recovery artifacts and follow the established validation, backup and immutable-digest process for future releases.
-3. Choose further work deliberately. Full Recompute remains deferred. Physical hardware, assistive-technology, and long-running performance certification are separate validation limits.
+## Approved development sequence
+
+The November 1 proposal's v0.5.1 baseline is historical. Preserve the released CLI installer and its acceptance tests, SQL registration, archived thumbnails, pause-aware accounting, explicit spool units, saved cost snapshots, project components and planned-item projections. Implement the remaining work in separately reviewed slices. Release only after each applicable gate passes.
+
+| Priority | Milestone | Verified starting point and remaining work |
+| --- | --- | --- |
+| A | Web installer and administration | [PR 63](https://github.com/khisanthax/klipper-cost-dashboard/pull/63) passed release validation for configured local and SSH targets, reviewed previews and optional local SQL backups. Master bootstrap, open discovery, macro controls and safe retirement remain work. Retarget after PR 61 merges. |
+| B | Public interactive demo | [PR 64](https://github.com/khisanthax/klipper-cost-dashboard/pull/64) recovers workspace foundation `58d1368` for the v0.7 codebase, with synthetic activity, quotas, cleanup and isolated browser tests. Review deployment isolation in staging before selecting a public hostname or hosting. Review the demo's deny-by-default policy when other routes integrate. |
+| C | Individual printer pages | [PR 62](https://github.com/khisanthax/klipper-cost-dashboard/pull/62) passed release validation for telemetry, progress, date comparisons, outcome analytics and printer-scoped history. The two Mercury identities were verified independently in production. |
+| D | Personal, Advanced and Business modes | [PR 65](https://github.com/khisanthax/klipper-cost-dashboard/pull/65) passed release validation for reversible instance-wide presentation settings with Advanced as the default. Business currently inherits Advanced pending integration with Orders. |
+| E | Business orders and profitability | [PR 66](https://github.com/khisanthax/klipper-cost-dashboard/pull/66) adds SQL project-backed order metadata, revenue, expenses and unknown-aware profitability. The stack on PR 65 passed validation with Business-only access and preservation across mode changes. |
+| F | Analytics and reporting | [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) adds monthly outcomes and recorded-cost subtotals with missing-data counts. Broader comparisons, business analytics, utilization and presets remain work. |
+| G | Filament inventory | [PR 67](https://github.com/khisanthax/klipper-cost-dashboard/pull/67) adds SQL physical spools, printer assignment and idempotent, verified stock movements. Further reporting and inventory convenience remain work. |
+| H | Slicer estimates | [PR 68](https://github.com/khisanthax/klipper-cost-dashboard/pull/68) adds bounded metadata import and explicit-unit browser and JSON estimates. Direct promotion of a reviewed what-if result into the existing planned-item workflow remains work. |
+| I | Notifications and exports | [PR 69](https://github.com/khisanthax/klipper-cost-dashboard/pull/69) adds a versioned SQL project JSON snapshot. Order, inventory and printable exports and optional notification delivery remain work. |
+
+These PRs are separate review candidates. Rebase and validate each against current main before release. Review the stacked Business Orders after Modes, reconcile overlapping reporting and Projects changes, and retest the demo route policy with integrated features. Retain previous rollback images and coordinated archives.
 
 ## Deferred Feature Track
 

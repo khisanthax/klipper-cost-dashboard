@@ -8,6 +8,8 @@ import tempfile
 
 
 def remote_operation(host, operation, payload):
+    if operation not in {"discover", "inspect", "repair"}:
+        raise ValueError("Unsupported remote installer operation")
     if not host or host.startswith("-") or any(c.isspace() for c in host):
         raise ValueError("Invalid SSH host/alias")
     root = Path(__file__).resolve().parents[1]
@@ -27,6 +29,8 @@ def remote_operation(host, operation, payload):
             subprocess.run(["scp", "-q", str(archive), host+":"+remote+"/source.tar"], check=True, timeout=30, capture_output=True)
         if operation == "discover":
             source = "import json; from installer.discovery import discover_local; print(json.dumps(discover_local()))"
+        elif operation == "inspect":
+            source = "import json,sys; payload=json.load(sys.stdin); from installer.inspection import inspect_client; print(json.dumps(inspect_client(**payload)))"
         else:
             source = "import json,sys,os; payload=json.load(sys.stdin); os.environ['KCD_API_KEY']=payload['key']; from installer.workflow import repair_client; print(json.dumps(repair_client(**payload)))"
         command = ("cd "+shlex.quote(remote)+" && tar -xf source.tar && KCD_INSTALLER_SKIP_DOCKER=1 python3 -c "+shlex.quote(source))
