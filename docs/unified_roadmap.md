@@ -187,9 +187,9 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ## Next Planned Work
 
-1. Continue production monitoring and intentionally review SV07's retained cancelled-job discrepancy; do not automatically finalize uncertain tracking.
-2. Review/merge the deployment handoff documentation. Retain v0.7.2 and earlier recovery artifacts and follow the established validation, backup and immutable-digest process for future releases.
-3. Choose further work deliberately. Full Recompute and Modes remain deferred; physical hardware/assistive-technology and long-running performance certification are separate validation limits.
+1. Preserve the two SV07 cancellations already recovered on November 4; the November 5 read-only check confirms canceled outcomes and null costs. Complete PR 61 review and the v0.7.4 release process without replaying that recovery.
+2. Follow the [completion execution plan](completion-program.md) for PRs 62–70 and their dependencies. PR 60's v0.7.3 deployment handoff is already merged. PR 58's historical evidence and permanent governance are preserved in the current handoff replacement.
+3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 
 ## Deferred Feature Track
 
@@ -210,17 +210,15 @@ v0.7.3 — Dashboard UX and Functional Reliability shipped from merged PR 59. Ac
 
 ### Modes
 
-- status: deferred, planned-only
-- why it is deferred:
-  - The audit found no repo evidence that modes were implemented.
-  - The current engineering priority is storage/source-of-truth hardening, not UI product segmentation.
-  - Starting mode work before Phase 6 is stabilized would add another layer of gating on top of a still-transitional architecture.
-- frozen constraints summary:
+- status: implemented candidate in PR 65; not merged or deployed
+- current requirements:
   - single global mode per KCD instance
   - reversible switching with no data deletion
-  - personal mode hides Projects
-  - business mode reveals optional profit-aware/business framing
-  - backend/schema/storage remain identical across modes
+  - Personal includes everyday history, Projects and basic pricing under the November 5 directive
+  - Advanced is the existing-installation default
+  - Business includes Advanced plus the separately reviewed Orders candidate in PR 66
+  - mode preferences preserve history, pricing, profiles, assignments and identities
+  - Orders enforce their Business-mode boundary; presentation modes do not replace service authentication
 
 ## Current Risks / Contradictions
 

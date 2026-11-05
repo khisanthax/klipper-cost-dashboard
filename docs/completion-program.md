@@ -36,7 +36,8 @@ engineering review do not satisfy that external gate.
 | 10 | 70 · reports | Complete date/printer filters, known material/time costs, unavailable measurements and monthly comparisons across SQL/CSV/dual. |
 | 11 | 64 · demo | Finish isolated TLS/proxy tests, fail-closed host/auth/egress boundaries, expiration and interrupted-workspace recovery. Public exposure requires an approved target and security configuration. |
 
-Orders migration 0009 and inventory migration 0010 are additive. Verify upgrade
+Orders migration 0009 and inventory migrations 0010/0011 are additive. Migration
+0011 preserves 0010 and adds correction/recovery records for existing installations. Verify upgrade
 and restored-backup readiness after each integration. Preserve migration filenames
 already present in candidates, and check combined startup against current main.
 No financial recompute or production recalculation belongs to this program.
@@ -78,3 +79,13 @@ Main merges and production releases await an eligible non-author review. Public
 demo publication also awaits explicit approval of its endpoint and security
 configuration. Independent implementation, tests and isolated staging continue
 while those gates are pending.
+
+The [November 5 production check](completion-program-production-2026-11-05.md)
+confirms all four loaded identities, both previously recovered SV07 rows, SQL
+integrity/readiness and all 316 permanent object hashes. PR 58 is now closed with
+a linked handoff to PR 71; its useful governance and v0.7.2 evidence are retained.
+
+Release Validation now defaults the disposable image rehearsal to the current
+pinned v0.7.3 baseline and also retains a v0.7.2 compatibility run. Both paths test
+baseline → candidate → rollback and compare post-upgrade SQL tables after the
+old image returns. This is isolated CI validation, not a production rollback.

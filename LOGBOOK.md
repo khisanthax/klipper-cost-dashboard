@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-05 — Completion-program production baseline and rollback validation
+
+- **Status.** Continued implementation and validation across existing PRs; protected main has not been merged and no new release/deployment is claimed. Closed superseded PR 58 with a linked handoff to [PR 71](https://github.com/khisanthax/klipper-cost-dashboard/pull/71), preserving its useful governance and historical evidence.
+- **Production.** Rechecked immutable v0.7.3. At 13:39Z and 13:51Z, SQL integrity, foreign keys and all five readiness checks passed with 1,047 jobs and all four connected loaded identities. Both SV07 import rows remain canceled with null time/material/total costs. All 316 persistent objects matched their SQL sizes and SHA-256 values; 435 archived references remain. See [read-only evidence](docs/completion-program-production-2026-11-05.md). No production state was changed.
+- **Validation tooling.** The image rehearsal now defaults to pinned v0.7.3 and retains an explicit v0.7.2 compatibility run. Both execute upgrade and return to the old image, checking exact core state, archived thumbnail bytes and all post-upgrade SQL tables. Compile/diff checks pass locally; actual Docker execution is delegated to Linux CI because the local Docker engine is unavailable.
+- **Next.** Finish combined candidate regression checks, publish exact branch/CI evidence, obtain the required eligible non-author reviews, then perform incremental release/backups/deployment. Public demo exposure additionally requires approval of a concrete target and security configuration.
+
 ### 2026-11-05 — Completion-program inventory and execution plan
 
 - **Status.** Rechecked GitHub and production. Main is `7892765`. PRs 58 and 61–70 remain open and no newer release exists. The required review is still pending.
