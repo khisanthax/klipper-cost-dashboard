@@ -2,6 +2,11 @@
 
 ## Purpose
 
+The [completion execution plan](completion-program.md) records the November 5
+inventory, branch dependencies, release sequence and externally imposed gates.
+Personal mode includes Projects under the current owner directive. Full
+Recompute remains deferred.
+
 This document is the single source of truth for Klipper Cost Dashboard roadmap planning. It captures:
 
 - project history

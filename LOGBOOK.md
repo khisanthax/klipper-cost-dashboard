@@ -147,6 +147,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 - SQL and compatibility Reports use the same installation timezone and decimal aggregation. The report cache refreshes on job edits. This work reads existing data and requires no migration. See [Monthly print outcomes](docs/report-outcomes.md) for the calculations.
 - The two disposable Python tests passed. They cover monthly timezone boundaries, SQL/CSV parity for recorded statuses, signed and zero costs, missing values, and cache refresh after a status edit. Standalone SQL-only validation passed. The disposable dashboard Playwright workflow passed with 100 bulk history jobs, including the monthly outcomes table and completion rate in the mobile layout.
 - [PR 70](https://github.com/khisanthax/klipper-cost-dashboard/pull/70) contains implementation commit `887451f`. Required CI, review, release, and deployment remain separate gates. Printer utilization, comparisons, report presets, and analytics over business records remain future Milestone F slices.
+### 2026-11-05 — Completion-program inventory and execution plan
+
+- **Status.** Rechecked GitHub and production. Main is `7892765`. PRs 58 and 61–70 remain open and no newer release exists. The required review is still pending.
+- **Production.** Read-only image inspection confirmed v0.7.3 index `sha256:006588a2d1f50ca2db977a950cdae56266d76aa166d7279d5b1e7dea0264eb0d`. All five SQL health checks passed with schema 0008, 1,047 jobs and four printers.
+- **Plan.** Added [dependency-aware completion and release steps](docs/completion-program.md). Parallel scoped reviews cover the existing feature branches. Updated the current Personal-mode requirement to include Projects. Recovered permanent AGENTS handoff instructions from PR 58.
+- **Review gate.** Main requires an eligible non-author approval, including latest-push approval. The current collaborator inventory lists only the author. An eligible external reviewer is needed for main merges and release. Public demo exposure additionally needs an explicitly approved target and security configuration.
+- **Next.** Complete independent branch fixes, validate each, preserve SV07's existing recovery, supersede stale PR 58 with a linked current handoff and publish test/review results. No production deployment is claimed for these candidates.
 
 ### 2026-11-03 — v0.7.3 publication and verified production deployment
 
