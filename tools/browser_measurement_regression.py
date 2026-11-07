@@ -116,10 +116,10 @@ def main():
                     page = context.new_page(); errors = []; results = []
                     page.on('pageerror', lambda error: errors.append(str(error)))
                     try:
-                        page.goto(base+'/settings/other')
+                        page.goto(base+'/settings/display')
                         assert page.locator('[name=filament_measurement]').input_value() == 'weight'
                         for pref in ('weight','length'):
-                            page.goto(base+'/settings/other')
+                            page.goto(base+'/settings/display')
                             page.locator('[name=filament_measurement]').select_option(pref)
                             with page.expect_navigation():
                                 page.locator('form').filter(has=page.locator('[name=filament_measurement]')).get_by_role('button').click()
@@ -151,7 +151,7 @@ def main():
                                     page.screenshot(path=str(artifacts/(pref+'-'+route.split('?')[0].strip('/').replace('/','_')+'-'+label+'.png')),full_page=True)
                                     results.append({'preference':pref,'route':route,'layout':label,'primaries':primary.count()})
                             # Independent browser context sees the installation preference.
-                            other=browser.new_context(); check=other.new_page();check.goto(base+'/settings/other')
+                            other=browser.new_context(); check=other.new_page();check.goto(base+'/settings/display')
                             assert check.locator('[name=filament_measurement]').input_value()==pref
                             other.close()
                             telemetry=context.request.get(base+'/api/printer-status').json()['printers']['Fixture']
@@ -187,7 +187,7 @@ def main():
                         if detail.count():
                             detail.locator('summary').focus(); page.keyboard.press('Enter')
                             assert detail.get_attribute('open') is not None
-                        stop(server);server=start();page.goto(base+'/settings/other')
+                        stop(server);server=start();page.goto(base+'/settings/display')
                         assert page.locator('[name=filament_measurement]').input_value()=='length'
                         assert snapshot()==original
                         assert not errors,errors
