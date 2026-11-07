@@ -179,7 +179,7 @@ This phase shipped in v0.4.0 on 2026-08-17 and is complete for the current relea
 
 ## Current Position
 
-Production v0.11.0 was independently verified on 2026-11-05 at immutable index `sha256:9f851f76cb2be97216f557721a09ec6e3c2d7fc3a684bd2dc4e7c0d2c5eedebf`, exact 23977013. All existing source PRs are resolved through verified serial releases; optional administration/demo code shipped with separate services inactive and demo isolated by owner choice. Normal Master runtime, ports/config, all four identities, SQL readiness/integrity, 1,049 jobs, 317 objects and 436 references retained (original 1,047 historical rows unchanged; two naturally completed prints during the safe-window wait); both SV07 rows remain Canceled/Unpriced. See [actual deployment and full workstream matrix](v0.11.0-deployment-2026-11-05.md). SQL-only remains canonical, CSV/dual compatibility retained, Full Recompute and undefined denominator-dependent analytics deferred. Root LOGBOOK is the authoritative actual-outcome handoff.
+Production v0.12.0 was independently verified on 2026-11-07 at exact 98831507 and immutable index `sha256:ffe9451b8edb106ba90c8cc91633d7366e7022feec71e3bdab52b1533c971201`. Global Settings Display Weight/Length, one-primary quantity/provenance and Project/Recalculate pricing reviews are deployed with no DDL or historical repricing. Read-only production checks preserved 1,052 jobs, 318 object hashes, 438 archived references, all business rows, the original 15-job pricing fingerprints and all four identities. Advanced/normal mode retained; separate administration/demo remain off and demo isolated. See [actual deployment/rollback](v0.12.0-deployment-2026-11-07.md) and root LOGBOOK. SQL-only remains canonical; prior completion-program evidence and explicit future/deferred scopes remain historical, without reopening that backlog.
 
 ## Current Active Work
 
@@ -210,7 +210,7 @@ requirements; they are not invented from printing cost or silently claimed compl
 
 ## Next Planned Work
 
-1. Monitor genuine printer events on verified v0.11.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
+1. Monitor genuine printer events on verified v0.12.0; preserve historical prices and the two recovered SV07 canceled/unpriced rows without replaying recovery or recalculation.
 2. Retain the [completed execution plan](completion-program.md), acceptance matrix and recovery evidence. PRs 61–70 are resolved, with PR 58's useful historical handoff preserved through governance PR 71. Scope any future operational activation or feature work explicitly.
 3. Retain v0.7.2 and later recovery artifacts and use validation, coordinated backup and immutable image digests for incremental releases. Full Recompute remains deferred. Physical hardware/assistive-technology and long-running performance certification remain separate validation limits.
 

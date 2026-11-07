@@ -1,5 +1,8 @@
 # KCD completion and release execution plan
 
+> Historical November 5 completion-program record. Current November 7 production is v0.12.0; see [LOGBOOK](../LOGBOOK.md) and [actual measurement/pricing deployment](v0.12.0-deployment-2026-11-07.md). The earlier program outcomes below are retained as dated evidence.
+
+
 
 **Policy update:** The owner-authorized [solo-maintainer policy](solo-maintainer-release-policy.md) supersedes human-review blockers. Required PRs and strict CI remain enforced. v0.7.4 through v0.11.0 completed verified deployment; every source PR is resolved. Optional services remain inactive and demo stays isolated by owner choice.
 The initial inventory was checked on 2026-11-05 at main `7892765`.
