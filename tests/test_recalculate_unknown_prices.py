@@ -39,7 +39,7 @@ assert 'Known Original Subtotal' in html and 'partial subtotal' in html
 assert 'data-col="old">Unpriced</td>' in html
 assert 'data-col="delta">Unavailable</td>' in html
 assert '-$4.55' in html and '$-4.55' not in html
-assert 'Time: Unavailable' in html and 'Material: Unavailable' in html
+assert 'Original Time Cost: Unavailable' in html and 'Original Material Cost: Unavailable' in html
 with db.connect_db() as conn:
  row=conn.execute("SELECT * FROM jobs WHERE job_uid='unknown'").fetchone()
  assert row['total_cost'] is None and row['time_cost'] is None
