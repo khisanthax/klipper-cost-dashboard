@@ -72,10 +72,14 @@ def main():
                     details.locator('summary').first.focus();page.keyboard.press('Enter')
                     assert 'New Material Cost' in details.inner_text()
                     page.keyboard.press('Enter')
-                    for width,height in ((1440,1000),(768,1024),(390,844)):
+                    for width,height,zoom,label in ((1440,1000,1,'desktop'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')):
                         page.set_viewport_size({'width':width,'height':height})
+                        page.evaluate('(z)=>document.body.style.zoom=z',zoom)
                         assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth+1')
-                        page.screenshot(path=str(artifacts/f'project-price-preview-{width}.png'),full_page=True)
+                        for summary in page.locator('#project-pricing-preview summary:visible').all():
+                            assert summary.bounding_box()['height']>=24*zoom,(label,summary.bounding_box())
+                        page.screenshot(path=str(artifacts/f'project-price-preview-{label}.png'),full_page=True)
+                    page.evaluate('document.body.style.zoom=1')
                     page.set_viewport_size({'width':1440,'height':1000})
                     with page.expect_navigation(wait_until='domcontentloaded'):page.get_by_role('button',name='Apply to Project',exact=True).click()
                     assert len(query('SELECT * FROM project_job_pricing'))==15

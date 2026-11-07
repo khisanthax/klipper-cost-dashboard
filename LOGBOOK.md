@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-07 — PR 78 accessibility validation correction
+
+- Initial full [Release Validation 42373366330](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42373366330) passed Linux unit tests, SQL isolation, history/pricing/project browser suites and 56 measurement layouts. The 96-page audit found zero page overflow/unlabelled controls but failed axe `target-size` for adjacent Full filename and Calculation Details summaries on Project pricing. Failure JSON/screenshots remain in that run's artifact and ignored local evidence.
+- Enlarged native detail targets to at least 24 px, without waiving axe or reducing existing checks. Added actual geometry assertions, explicit Project preview CSS 200% coverage and project-pricing measurement-route coverage (now 64 combinations). Exact final-head full CI remains required before normal merge; production unchanged.
+
 ### 2026-11-07 — Coordinated v0.12.0 candidate in PR 78
 
 - **Status:** [PR 78](https://github.com/khisanthax/klipper-cost-dashboard/pull/78) implements the updated global measurement, Project pricing and Recalculate Center request. Candidate only; not merged, released or deployed. Main/production remains the verified v0.11.0 handoff below. All source diffs and the unchanged migration set were inspected under the solo-maintainer policy.

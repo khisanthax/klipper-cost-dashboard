@@ -126,7 +126,7 @@ def main():
                             page.reload()
                             assert page.locator('[name=filament_measurement]').input_value() == pref
                             expected = '436.35 g' if pref=='weight' else '145.45 m'
-                            for route in ('/?history_per_page=10','/projects','/printers/Fixture','/reports','/inventory','/recalculate','/estimates'):
+                            for route in ('/?history_per_page=10','/projects','/projects/'+project+'/pricing','/printers/Fixture','/reports','/inventory','/recalculate','/estimates'):
                                 for width,height,zoom,label in ((1440,1000,1,'desktop'),(768,1024,1,'tablet'),(390,844,1,'mobile'),(1440,1000,2,'zoom200')):
                                     page.set_viewport_size({'width':width,'height':height})
                                     response=page.goto(base+route,wait_until='load')
@@ -137,6 +137,8 @@ def main():
                                     for value in primary.all_inner_texts():
                                         assert 'g/m' not in value and ' · ' not in value,(route,value)
                                     assert page.locator('[data-filament-details][open]').count()==0
+                                    for summary in page.locator('details > summary:visible').all():
+                                        assert summary.bounding_box()['height']>=24*zoom,(pref,route,label,summary.bounding_box())
                                     if route.startswith('/?'):
                                         row=page.locator('#history-table tbody tr').filter(has=page.locator('input[value="measure-0"]'))
                                         assert expected in row.inner_text(),(pref,row.inner_text())
