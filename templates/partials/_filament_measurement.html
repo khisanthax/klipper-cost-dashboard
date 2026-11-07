@@ -4,7 +4,7 @@
 <details class="kcd-measurement-details small text-muted text-start mt-1" data-filament-details>
   <summary>{{ label }}</summary>
   <dl class="mb-0 text-break">
-    <dt>Original length</dt><dd>{{ value.meters ~ ' m' if value.meters is not none else 'Unknown' }}</dd>
+    <dt>Length</dt><dd>{{ value.meters ~ ' m' if value.meters is not none else 'Unknown' }}</dd>
     <dt>{{ 'Estimated weight' if value.kind == 'estimated' else 'Recorded weight' if value.kind == 'recorded' else 'Weight' }}</dt><dd>{{ value.grams ~ ' g' if value.grams is not none else 'Unknown' }}</dd>
     <dt>Conversion factor</dt><dd>{{ value.factor ~ ' g/m' if value.factor is not none else 'Unavailable' }}</dd>
     <dt>Conversion source</dt><dd>{{ value.source or 'No verified conversion' }}</dd>

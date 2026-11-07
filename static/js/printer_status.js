@@ -18,7 +18,7 @@
     details.append(summary);
     const list=document.createElement('dl');
     for (const [label,text] of [
-      ['Reported length', value?.meters!=null?value.meters+' m':'Unknown'],
+      ['Length', value?.meters!=null?value.meters+' m':'Unknown'],
       ['Estimated weight', value?.grams!=null?value.grams+' g':'Unknown'],
       ['Conversion factor', value?.factor!=null?value.factor+' g/m':'Unavailable'],
       ['Conversion source', value?.source||item.conversion_source||'No verified conversion']
