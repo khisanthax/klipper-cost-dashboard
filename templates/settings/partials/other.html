@@ -28,6 +28,26 @@
     </div>
 </div>
 
+<section class="card mb-4" aria-labelledby="filament-display-heading">
+    <div class="card-header"><h2 class="h5 mb-0" id="filament-display-heading">Filament measurement</h2></div>
+    <div class="card-body">
+        <p id="filament-display-description">Choose the primary consumption unit for everyone using this installation. Pricing units and recorded measurements remain unchanged. Conversion details stay available beside each quantity.</p>
+        {% if not kcd_demo_mode or demo_endpoint_available('settings_other_page', 'POST', 'update_measurement_display') %}
+        <form method="post" class="d-flex flex-wrap align-items-end gap-2">
+            <input type="hidden" name="action" value="update_measurement_display">
+            <div>
+                <label for="filament-measurement" class="form-label">Primary filament measurement</label>
+                <select id="filament-measurement" name="filament_measurement" class="form-select" aria-describedby="filament-display-description">
+                    <option value="weight"{% if filament_measurement_preference != 'length' %} selected{% endif %}>Weight (g/kg)</option>
+                    <option value="length"{% if filament_measurement_preference == 'length' %} selected{% endif %}>Length (m)</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Save Filament Measurement</button>
+        </form>
+        {% else %}<p class="text-muted">Display preference changes are unavailable in this demo.</p>{% endif %}
+    </div>
+</section>
+
 <!-- Column Visibility -->
 <div class="card mb-4">
     <div class="card-header">
@@ -39,7 +59,7 @@
             "material_cost": "Material Cost",
             "adjustment": "Adjustment",
             "total_cost": "Total Cost",
-            "filament_g": "Filament (g)",
+            "filament_g": "Filament",
             "estimated_time": "Est. Time",
             "estimated_time_cost": "Est. Time Cost",
             "estimated_material_cost": "Est. Material Cost",

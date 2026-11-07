@@ -1,5 +1,27 @@
 # Dashboard workflow guide
 
+## Primary filament measurement
+
+Open **Settings → Other → Filament measurement** and choose **Weight (g/kg)**
+(the default) or **Length (m)**. This installation-wide display preference is
+stored by the active backend, including canonical SQL settings in SQL-only mode,
+and applies across navigation, browsers and restarts. It does not change pricing
+units, profiles, raw measurements or any recorded cost.
+
+Ordinary filament cells show one primary quantity. Weight uses grams below
+1,000 g and kilograms at or above 1,000 g, with two decimal places. For example,
+145.45 m at a verified 3 g/m displays **436.35 g**. Open **Measurement details**
+beside the value to inspect original length, recorded or estimated weight,
+conversion factor, source and material profile. Details begin closed.
+
+Length is unknown when an entry has weight but no verified conversion. A missing
+factor is never replaced with a generic material assumption. Manual and planned
+items can use their reviewed estimate conversion or an explicit project-material
+snapshot. Mixed-material totals add each item's known consumption separately and
+identify missing measurements. Inventory stays stored as integer milligrams;
+length balances require that physical spool's verified factor. Stock-entry and
+pricing forms retain their explicitly labeled units regardless of this preference.
+
 ## Project JSON download
 
 On SQL-only installations, open a project and choose **Download project JSON**. The [versioned schema](project-export-schema.md) separates recorded job prices, recoverable original pricing, explicit overrides, manual work, planned items and applied project-price snapshots. Unknown stored values remain JSON null. The document uses one consistent SQL read snapshot and preserves stored numeric precision and original units. The download uses the dashboard's normal access boundary and contains project data, so store it appropriately. This export is separate from a coordinated backup and does not change the project or its history.

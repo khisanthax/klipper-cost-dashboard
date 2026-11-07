@@ -1,6 +1,34 @@
 /* Current observations are separate from retained KCD event state. */
 (() => {
   let pending=false;
+  function renderFilament(node, item, active) {
+    node.replaceChildren();
+    if (!active) { node.textContent=item.connected?'No active print':'Unverified'; return; }
+    const value=item.filament_display;
+    const primary=document.createElement('span');
+    primary.dataset.filamentPrimary='';
+    primary.dataset.filamentPreference=value?.preference||'';
+    primary.textContent=value?.text||'Measurement unavailable';
+    node.append(primary);
+    const details=document.createElement('details');
+    details.dataset.filamentDetails='';
+    details.className='kcd-measurement-details small text-muted text-start mt-1';
+    const summary=document.createElement('summary');
+    summary.textContent='Measurement details';
+    details.append(summary);
+    const list=document.createElement('dl');
+    for (const [label,text] of [
+      ['Reported length', value?.meters!=null?value.meters+' m':'Unknown'],
+      ['Estimated weight', value?.grams!=null?value.grams+' g':'Unknown'],
+      ['Conversion factor', value?.factor!=null?value.factor+' g/m':'Unavailable'],
+      ['Conversion source', value?.source||item.conversion_source||'No verified conversion']
+    ]) {
+      const term=document.createElement('dt'),definition=document.createElement('dd');
+      term.textContent=label; definition.textContent=text;
+      list.append(term,definition);
+    }
+    details.append(list); node.append(details);
+  }
   window.kcdRefreshPrinterStatus=async () => {
     if(pending)return;
     pending=true;
@@ -18,13 +46,13 @@
         const active=item.connected&&['printing','paused'].includes(item.state)
           &&(!node.hasAttribute('data-kcd-require-identity')||item.identity_verified);
         const current=node.querySelector('[data-live-current]');
-        if(current)current.textContent=active?item.filename+' · '+(item.grams!=null?item.grams.toFixed(2)+' g':'weight unavailable')+' · '+(item.total_cost!=null?'$'+item.total_cost.toFixed(2)+' estimated':item.pricing_error||'price unavailable'):'';
+        if(current)current.textContent=active?item.filename+' · '+(item.filament_display?.text||'Measurement unavailable')+' · '+(item.total_cost!=null?'$'+item.total_cost.toFixed(2)+' estimated':item.pricing_error||'price unavailable'):'';
         const filename=node.querySelector('[data-live-filename]');
         if(filename&&active)filename.textContent=item.filename;
         const cost=node.querySelector('[data-live-cost]');
         if(cost){cost.textContent=active&&item.total_cost!=null?'$'+item.total_cost.toFixed(2):item.pricing_error||item.tracking_warning||item.error||(active?'Estimate unavailable':'No active print');cost.title='Live estimate includes material and time at current printer pricing; final billing applies the configured minimum hour.';}
         const filament=node.querySelector('[data-live-filament]');
-        if(filament){filament.textContent=active&&item.grams!=null?item.grams.toFixed(2)+' g ('+(item.filament_mm/1000).toFixed(2)+' m)':'—';filament.title=item.conversion_source||'No verified current weight';}
+        if(filament)renderFilament(filament,item,active);
         const elapsed=node.querySelector('[data-live-elapsed]');
         if(elapsed){elapsed.textContent=active?(Number.isFinite(item.print_seconds)?Math.floor(item.print_seconds/60)+' min active':'Elapsed time unavailable'):item.connected?'No active print':'Unverified';}
         const progress=node.querySelector('[data-live-progress]');

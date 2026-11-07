@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_filament_measurement.html" import measurement with context %}
 {% block content %}
 {% macro money(value) %}{{ '$%.2f'|format(value) if value is not none else 'Unpriced' }}{% endmacro %}
 {% macro hours(value) %}{{ '%.2f h'|format(value) if value is not none else 'Unknown' }}{% endmacro %}
@@ -63,8 +64,9 @@
                 {% for key, title in [('hours', 'Print hours'), ('_weight_grams', 'Filament consumed'), ('time_cost', 'Time cost'), ('material_cost', 'Material cost'), ('total_cost', 'Total cost')] %}
                 <tr><th scope="row">{{ title }}</th>
                     {% for data in periods %}
-                    <td>{{ hours(data.totals[key]) if key == 'hours' else mass(data.totals[key]) if key == '_weight_grams' else money(data.totals[key]) }}
-                        {% if data.unknown[key] %}<span class="text-muted small">({{ data.unknown[key] }} unknown)</span>{% endif %}
+                    <td>{% if key == '_weight_grams' %}{{ measurement(filament_display(grams=data.totals.get('_weight_grams'), meters=data.totals.get('_length_meters'), source='Known job subtotals; saved per-job conversions')) }}{% else %}{{ hours(data.totals[key]) if key == 'hours' else money(data.totals[key]) }}{% endif %}
+                        {% set unknown_key = '_length_meters' if key == '_weight_grams' and filament_measurement_preference == 'length' else key %}
+                        {% if data.unknown.get(unknown_key, 0) %}<span class="text-muted small">({{ data.unknown[unknown_key] }} unknown)</span>{% endif %}
                     </td>
                     {% endfor %}
                 </tr>
@@ -122,7 +124,7 @@
                 {% for row in rows %}
                 <tr>
                     <td>{{ row.timestamp or 'Unknown' }}</td><td class="text-break">{{ row.filename }}</td><td>{{ row.outcome }}</td>
-                    <td>{{ hours(row.hours) }}</td><td title="{{ row._weight_source }}">{{ mass(row._weight_grams) }}</td>
+                    <td>{{ hours(row.hours) }}</td><td>{{ measurement(filament_display(row), row) }}</td>
                     <td>{{ money(row.time_cost) }}</td><td>{{ money(row.material_cost) }}</td><td>{{ money(row.total_cost) }}</td>
                 </tr>
                 {% else %}<tr><td colspan="8">No jobs in this date range.</td></tr>{% endfor %}

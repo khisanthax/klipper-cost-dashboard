@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_filament_measurement.html" import measurement with context %}
 
 {% block content %}
 {% set show_cost_totals = display_settings.get("projects_show_cost_totals", True) if display_settings is defined else True %}
@@ -172,13 +173,8 @@
                         <td class="text-end">{{ p.totals.prints|int }}</td>
                         <td class="text-end">{{ "%.2f"|format(p.totals.hours) }}</td>
                         <td class="text-end">
-                            <div class="fw-semibold">{{ '%.2f'|format(p.totals.get('tracked_filament_g',0) + (p.totals.filament_g or 0)) }} g known</div>
-                            <div class="small text-muted">{{ "%.2f"|format(p.totals.meters) }} m tracked length</div>
-                            <div class="small">Tracked: {{ '%.2f'|format(p.totals.get("tracked_filament_g",0)) }} g ({{ '%.5f'|format(p.totals.get("tracked_filament_g",0) / 1000) }} kg)</div>
-                            {% if p.totals.get("unknown_weights",0) %}<div class="text-warning small">{{ p.totals.get("unknown_weights",0) }} job(s) need weight conversion</div>{% endif %}
-                            {% if p.totals.filament_g and p.totals.filament_g > 0 %}
-                            <div class="text-muted small">Manual: {{ "%.1f"|format(p.totals.filament_g) }} g</div>
-                            {% endif %}
+                            {{ measurement(p.totals.filament_display) }}
+                            {% if p.totals.filament_display.unknown_count %}<div class="text-muted small">Known subtotal · {{ p.totals.filament_display.unknown_count }} unknown</div>{% endif %}
                         </td>
                         {% if show_cost_totals %}
                         <td class="text-end">{{ money(p.totals.time_cost) }}</td>
@@ -309,13 +305,9 @@
                               <td class="text-break{% if 'filename' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename"><div>{{ j.filename }}</div><small>{{ j.pricing_view }}</small>{% if j.pricing_view == 'Project-adjusted snapshot' %}<div class="small text-muted">Saved historical: ${{ '%.2f'|format(j.historical_costs.total_cost) }}</div>{% endif %}</td>
                              <td class="text-nowrap{% if 'status' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.status|lower }}" data-sort-key="status" data-col="status">{{ j.status }}</td>
                              <td class="text-end{% if 'hours' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.duration_hours or 0 }}" data-sort-key="hours" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
-                             <td class="text-end text-nowrap{% if 'filament' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filament_meters or 0 }}" data-sort-key="filament" data-col="filament">
-                                                        {% if j.get('_weight_grams') is not none %}<div class="small" title="{{ j._weight_source }}">{{ '%.2f'|format(j._weight_grams) }} g · {{ j._weight_factor }} g/m</div>{% else %}<div class="small text-warning">Weight unknown</div>{% endif %}
-                                                        {% if j.filament_meters %}
-                                                        {{ "%.2f"|format(j.filament_meters|float) }} m
-                                                        {% else %}
-                                                        —
-                                                        {% endif %}
+                             {% set measure_sort = filament_display(j) %}
+                             <td class="text-end text-nowrap{% if 'filament' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ measure_sort.grams if filament_measurement_preference == 'weight' and measure_sort.grams is not none else measure_sort.meters if filament_measurement_preference == 'length' and measure_sort.meters is not none else '' }}" data-sort-key="filament" data-col="filament">
+                                                        {{ measurement(filament_display(j), j) }}
                                                     </td>
                              {% if show_cost_totals %}
                              <td class="text-end{% if 'time_cost' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.time_cost or 0 }}" data-sort-key="time_cost" data-col="time_cost">{{ money(j.time_cost) }}</td>
@@ -386,11 +378,7 @@
                                                     </td>
                                                     <td class="text-end text-nowrap {% if 'hours' not in _manual_cols %}d-none{% endif %}" data-col="hours">{{ "%.2f"|format(mj.hours|float) }}</td>
                                                     <td class="text-end text-nowrap {% if 'filament_g' not in _manual_cols %}d-none{% endif %}" data-col="filament_g">
-                                                        {% if mj.filament_g and mj.filament_g > 0 %}
-                                                        {{ "%.1f"|format(mj.filament_g|float) }}
-                                                        {% else %}
-                                                        —
-                                                        {% endif %}
+                                                        {{ measurement(mj.filament_display) }}
                                                     </td>
                                                     {% if show_cost_totals %}
                                                     <td class="text-end text-nowrap {% if 'time_cost' not in _manual_cols %}d-none{% endif %}" data-col="time_cost">{{ money(mj.time_cost) }}</td>
@@ -555,11 +543,7 @@
                                                         {{ (pl.est_time_s // 3600)|int }}h {{ ((pl.est_time_s % 3600) // 60)|int }}m
                                                     </td>
                                                     <td class="text-end text-nowrap {% if 'filament_g' not in _planned_cols %}d-none{% endif %}" data-col="filament_g">
-                                                        {% if pl.est_filament_g is not none %}
-                                                        {{ "%.1f"|format(pl.est_filament_g) }}
-                                                        {% else %}
-                                                        -
-                                                        {% endif %}
+                                                        {{ measurement(pl.filament_display) }}
                                                     </td>
                                                     {% if show_cost_totals %}
                                                     <td class="text-end text-nowrap {% if 'estimated_time_cost' not in _planned_cols %}d-none{% endif %}" data-col="estimated_time_cost">{{ money(pl.estimated_time_cost) }}</td>
@@ -741,12 +725,9 @@
                               <td class="text-break{% if 'filename' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filename">{{ j.filename }}</td>
                              <td class="text-nowrap{% if 'status' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="status">{{ j.status }}</td>
                              <td class="text-end{% if 'hours' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
-                             <td class="text-end text-nowrap{% if 'filament' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filament">
-                                {% if j.filament_meters %}
-                                {{ "%.2f"|format(j.filament_meters|float) }} m
-                                {% else %}
-                                —
-                                {% endif %}
+                             {% set measure_sort = filament_display(j) %}
+                             <td class="text-end text-nowrap{% if 'filament' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-sort="{{ measure_sort.grams if filament_measurement_preference == 'weight' and measure_sort.grams is not none else measure_sort.meters if filament_measurement_preference == 'length' and measure_sort.meters is not none else '' }}" data-col="filament">
+                                {{ measurement(filament_display(j), j) }}
                             </td>
                              {% if show_cost_totals %}
                              <td class="text-end{% if 'cost' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="cost">
