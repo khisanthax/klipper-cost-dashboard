@@ -198,10 +198,9 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertNotIn("Full (coming soon)", page_text)
         self.assertNotIn('option value="full"', page_text)
-        self.assertIn("Filament (m)", page_text)
-        self.assertIn("Time Cost ($)", page_text)
-        self.assertIn("Material Cost ($)", page_text)
-        self.assertIn("Total Cost ($)", page_text)
+        self.assertIn("Current Price", page_text)
+        self.assertIn("Job UID:", page_text)
+        self.assertNotIn("Time Cost ($)", page_text)
 
         def fake_compute_costs(_printer_name, _duration_seconds, _filament_mm, _paused_seconds_total=0.0):
             return {
@@ -219,11 +218,14 @@ class RecalculateCenterPhase1Tests(unittest.TestCase):
             )
         preview_text = preview.get_data(as_text=True)
         self.assertEqual(preview.status_code, 200)
-        self.assertIn("Old Total ($)", preview_text)
-        self.assertIn("New Total ($)", preview_text)
+        self.assertIn("Original Total", preview_text)
+        self.assertIn("New Total", preview_text)
+        self.assertIn("Original Price", preview_text)
+        self.assertIn("Full precision (saved", preview_text)
+        self.assertIn("current saved price before this operation", preview_text)
         self.assertIn(">6.50<", preview_text)
         self.assertIn(">2.25<", preview_text)
-        self.assertIn(">8.75<", preview_text)
+        self.assertIn(">$8.75<", preview_text)
 
     def test_full_recompute_request_is_explicitly_out_of_scope(self):
         response = self.client.post(

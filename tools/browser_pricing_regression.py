@@ -19,6 +19,7 @@ from core import db,profiles,rates,projects
 register_printer('Fixture','http://127.0.0.1:1')
 rates.upsert_rate_profile(dict(id='free-time',name='Zero dollars per hour',rate_per_hour=0))
 profiles.upsert_profile(dict(id='petg-15',name='PETG fifteen per kg',material='PETG',filament_mode='per_kg',filament_rate=15,cost_per_kg=15,grams_per_meter=3))
+profiles.upsert_profile(dict(id='petg-same-price',name='PETG same price different profile',material='PETG',filament_mode='per_kg',filament_rate=15,cost_per_kg=15,grams_per_meter=3))
 p=projects.create_project('RaRa fixture',filament_cost_per_kg_override=15)
 with db.connect_db() as c:
  for i in range(16):
@@ -71,6 +72,26 @@ def main():
                     assert page.locator('[name=rate_profile_id]').input_value()=='free-time'
                     assert page.locator('#recalc-preview-table tbody tr').count()==15
                     assert page.locator('#kcd-recalc-btn').is_enabled()
+                    assert page.locator('#kcd-preview-btn').inner_text()=='Preview Changes'
+                    assert page.locator('#kcd-recalc-btn').inner_text()=='Apply New Prices'
+                    assert page.locator('#recalc-preview-table thead th').all_inner_texts()==['Filename','Original Price','Change','New Price']
+                    assert 'Original Total' in page.locator('#recalc-preview-totals').inner_text()
+                    assert 'New Total' in page.locator('#recalc-preview-totals').inner_text()
+                    assert page.locator('.kcd-recalc-audit[open]').count()==0
+                    details=page.locator('.kcd-recalc-audit').first
+                    details.locator('summary').focus();page.keyboard.press('Enter')
+                    assert details.get_attribute('open') is not None
+                    assert 'Full precision' in details.inner_text() and 'Selected filament profile: petg-15' in details.inner_text()
+                    page.keyboard.press('Enter')
+                    for width,height,zoom in ((1440,1000,1),(768,1024,1),(390,844,1),(720,500,2)):
+                        page.set_viewport_size({'width':width,'height':height})
+                        page.evaluate('(zoom) => document.documentElement.style.zoom=zoom',str(zoom))
+                        assert page.locator('#recalc-preview-table thead th').count()==4
+                        assert page.locator('#recalc-preview-table').evaluate('(el) => el.closest(".table-responsive").scrollWidth >= el.clientWidth')
+                        assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth+1'),'Page overflows outside scrollable table'
+                        page.screenshot(path=str(artifacts/f'pricing-preview-{width}-{zoom}.png'),full_page=True)
+                    page.evaluate('document.documentElement.style.zoom="1"')
+                    page.set_viewport_size({'width':1440,'height':1000})
                     page.screenshot(path=str(artifacts/'pricing-preview.png'),full_page=True)
                     with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-recalc-btn').click()
                     assert 'changed 15 job(s)' in page.locator('body').inner_text()
@@ -99,6 +120,15 @@ def main():
                     with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-preview-btn').click()
                     with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-recalc-btn').click()
                     assert 'changed 0 job(s). 15 already matched' in page.locator('body').inner_text()
+                    # A zero-dollar change still permits an explicitly reviewed profile update.
+                    page.goto(base+'/recalculate?project='+project+'&apply_rate_profile=1&rate_profile_id=free-time&apply_filament_profile=1&filament_profile_id=petg-same-price')
+                    page.locator('#kcd-select-page').click()
+                    with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-preview-btn').click()
+                    assert page.locator('#kcd-recalc-btn').is_enabled()
+                    assert all(value=='$0.00' for value in page.locator('#recalc-preview-table [data-col=delta]').all_inner_texts())
+                    with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-recalc-btn').click()
+                    assert all(row['filament_profile_id']=='petg-same-price' for row in query('SELECT filament_profile_id FROM jobs WHERE job_uid!=?', 'mask-15'))
+                    assert len(query('SELECT * FROM job_cost_originals'))==15
                     # Explicit zero overrides must survive server-rendered preview forms.
                     page.goto(base+'/recalculate?project='+project+'&rate_per_hour_override=0&filament_rate_per_meter_override=0')
                     assert float(page.locator('[name=rate_per_hour_override]').input_value())==0
@@ -112,13 +142,13 @@ def main():
                     # Changing a reviewed plan must invalidate the apply button.
                     page.locator('#kcd-select-page').click()
                     with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-preview-btn').click()
-                    page.locator('[name=pricing_amount]').fill('20');page.locator('[name=pricing_amount]').blur()
+                    page.locator('[name=pricing_amount]').fill('20')
                     assert page.locator('#kcd-recalc-btn').is_disabled()
                     # Fractional cents across 15 rows must reconcile in the preview.
                     page.locator('[name=pricing_amount]').fill('15.02')
                     with page.expect_navigation(wait_until='domcontentloaded'):page.locator('#kcd-preview-btn').click()
                     from decimal import Decimal
-                    displayed=page.locator('#recalc-preview-table tbody td[data-col=material_cost] strong').all_inner_texts()
+                    displayed=page.locator('#recalc-preview-table tbody [data-col=material_cost] strong').all_text_contents()
                     assert sum(Decimal(value) for value in displayed)==Decimal('40.88'),displayed
                     assert abs(query('SELECT SUM(total_cost) AS cost FROM jobs WHERE job_uid!=?','mask-15')[0]['cost']-40.82823)<1e-8
                     # A changed selection invalidates a reviewed plan immediately.
