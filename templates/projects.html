@@ -170,7 +170,7 @@
                                 <span class="kcd-caret">▸</span>
                             </button>
                         </td>
-                        <td class="fw-semibold">{{ p.name }}<div class="small text-muted">{{ 'Project-Adjusted Cost' if p.adjusted_jobs else 'Saved Historical Cost' }}</div>{% if p.pricing_snapshot_status.stale %}<div class="small text-warning">Snapshot uses previously reviewed prices; preview updated costs.</div>{% endif %}</td>
+                        <td class="fw-semibold"><span data-project-name>{{ p.name }}</span><div class="small text-muted">{{ 'Project-Adjusted Cost' if p.adjusted_jobs else 'Saved Historical Cost' }}</div>{% if p.pricing_snapshot_status.stale %}<div class="small text-warning">Snapshot uses previously reviewed prices; preview updated costs.</div>{% endif %}</td>
                         <td class="text-end">{{ p.totals.prints|int }}</td>
                         <td class="text-end">{{ "%.2f"|format(p.totals.hours) }}</td>
                         <td class="text-end">

@@ -20,6 +20,10 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-07 — Preserve project-name selection alongside pricing-view labels
+
+- Full validation [42373706470](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42373706470) passed the corrected axe/96-layout audit and all normal pricing/measurement workflows, then caught the demo suite selecting a hidden assignment option instead of the visible project name after adding the pricing-view label. Kept project names in a distinct span and made the positive browser assertion target that visible name. Cross-workspace negative assertions and all security policies remain unchanged. Final exact-head validation remains required; production unchanged.
+
 ### 2026-11-07 — Historical quantity provenance consistency
 
 - Final read-only presentation review found that Dashboard/Projects could fall back to a mutable current profile for an old job with no saved conversion, while Reports correctly kept that weight unknown. Historical `describe_job` now uses only saved job measurement/conversion, matching the shared formatter and Reports. Explicit reviewed pricing previews and live estimates retain their current conversion behavior. No raw measurement, profile, price or database row is changed.
