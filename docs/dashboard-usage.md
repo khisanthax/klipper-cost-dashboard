@@ -14,6 +14,11 @@ Ordinary filament cells show one primary quantity. Weight uses grams below
 beside the value to inspect original length, recorded or estimated weight,
 conversion factor, source and material profile. Details begin closed.
 
+Table filenames use a two-line preview so long names do not turn an ordinary row
+into a tall block of wrapped text. Open **Full filename** to read and select the
+entire original name. The preview does not rename the job or remove it from
+search, selection labels or sorting.
+
 Length is unknown when an entry has weight but no verified conversion. A missing
 factor is never replaced with a generic material assumption. Manual and planned
 items can use their reviewed estimate conversion or an explicit project-material
