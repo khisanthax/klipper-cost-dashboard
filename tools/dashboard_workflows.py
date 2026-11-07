@@ -221,7 +221,7 @@ def exercise(page,context,base,project,data,artifacts):
     # SQL-only backup/display/pause controls are actual UI actions.
     page.goto(base+'/settings/pause');page.locator('#pause_include_default').check();click(page.get_by_role('button',name='Save pause settings',exact=True))
     assert json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['pause_include_paused_time_default']
-    page.goto(base+'/settings/other')
+    page.goto(base+'/settings/display')
     display=form('update_columns').filter(has=page.locator('input[name=table][value=history]'))
     display.locator('input[name=columns][value=filament_rate]').uncheck()
     click(display.get_by_role('button',name='Save Print History Columns',exact=True))

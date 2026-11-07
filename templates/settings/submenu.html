@@ -7,6 +7,10 @@
        class="btn btn-outline-primary {% if request.path.startswith('/settings/profiles') %}active{% endif %}">
         Profiles
     </a>
+    <a href="{{ url_for('settings_display_page') }}"
+       class="btn btn-outline-primary {% if request.path.startswith('/settings/display') %}active{% endif %}">
+        Display
+    </a>
     <a href="{{ url_for('settings_other_page') }}"
        class="btn btn-outline-primary {% if request.path.startswith('/settings/other') %}active{% endif %}">
         Other

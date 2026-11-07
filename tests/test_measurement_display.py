@@ -101,16 +101,35 @@ def history():
 original=history()
 client=app.app.test_client()
 assert storage.load_display_settings(config.DISPLAY_FILE,config.HEADERS)['filament_measurement']=='weight'
+display_page=client.get('/settings/display')
+assert display_page.status_code==200
+assert b'name="filament_measurement"' in display_page.data
+assert b'value="update_columns"' in display_page.data
+assert b'value="update_application_mode"' not in display_page.data
+assert b'value="backup_now"' not in display_page.data
+assert b'name="filament_measurement"' not in client.get('/settings/other').data
 for mode in ('personal','advanced','business'):
  application_mode.set_application_mode(mode)
  for pref in ('length','weight','length'):
-  response=client.post('/settings/other',data=dict(action='update_measurement_display',filament_measurement=pref))
+  response=client.post('/settings/display',data=dict(action='update_measurement_display',filament_measurement=pref))
   assert response.status_code==302,(response.status_code,response.data)
+  assert '/settings/display' in response.location
   assert storage.load_display_settings(config.DISPLAY_FILE,config.HEADERS)['filament_measurement']==pref
   assert history()==original
 before=storage.load_display_settings(config.DISPLAY_FILE,config.HEADERS)
-client.post('/settings/other',data=dict(action='update_measurement_display',filament_measurement='kg'))
+invalid=client.post('/settings/display',data=dict(action='update_measurement_display',filament_measurement='kg'))
+assert '/settings/display' in invalid.location
 assert storage.load_display_settings(config.DISPLAY_FILE,config.HEADERS)==before
+legacy=client.post('/settings/other',data=dict(action='update_measurement_display',filament_measurement='length'))
+assert '/settings/display' in legacy.location
+columns=client.post('/settings/other',data={'action':'update_columns','table':'history','columns':['filename','filament_meters','total_cost']})
+assert '/settings/display' in columns.location
+assert storage.load_display_settings(config.DISPLAY_FILE,config.HEADERS)['visible_columns']==['filename','filament_meters','total_cost']
+from unittest.mock import patch
+with patch.object(app,'create_backup_archive',side_effect=AssertionError('wrong settings page')) as forbidden:
+ client.post('/settings/display',data={'action':'backup_now'})
+ forbidden.assert_not_called()
+assert history()==original
 assert not (Path(config.DATA_DIR)/'display.json').exists()
 archive=backup.create_backup_archive(keep=3)
 with tarfile.open(archive) as tar:

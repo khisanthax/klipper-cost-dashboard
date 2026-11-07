@@ -99,6 +99,16 @@ def exercise(base_url):
                 expect(desktop.locator('input[value="update_application_mode"]')).to_have_count(0)
                 assert_unavailable_controls_hidden(desktop)
 
+                desktop.goto(base_url + "/settings/display")
+                desktop.get_by_label("Primary filament measurement").select_option("length")
+                desktop.get_by_role("button", name="Save Filament Measurement").click()
+                expect(desktop.get_by_label("Primary filament measurement")).to_have_value("length")
+                mobile.goto(base_url + "/settings/display")
+                expect(mobile.get_by_label("Primary filament measurement")).to_have_value("weight")
+                desktop.screenshot(path=str(ARTIFACTS / "display-visitor-a-desktop.png"), full_page=True)
+                mobile.screenshot(path=str(ARTIFACTS / "display-visitor-b-mobile.png"), full_page=True)
+                assert first.request.post(base_url + "/settings/display", form={"action": "backup_now"}).status == 403
+
                 desktop.on("dialog", lambda dialog: dialog.accept())
                 desktop.get_by_role("button", name="Reset demo").click()
                 expect(desktop.get_by_label("Demo workspace")).to_be_visible()

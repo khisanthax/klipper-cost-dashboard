@@ -64,6 +64,7 @@ SETTINGS_ACTIONS = frozenset({
     "add_rate_profile", "update_rate_profile", "delete_rate_profile",
     "set_active_rate_profile",
 })
+DISPLAY_ACTIONS = frozenset({"update_columns", "update_measurement_display"})
 
 
 APPLICATION_ROUTE_POLICIES: Mapping[tuple[str, str], DemoRouteRule] = {
@@ -89,6 +90,8 @@ APPLICATION_ROUTE_POLICIES: Mapping[tuple[str, str], DemoRouteRule] = {
     ("settings_profiles_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, SETTINGS_ACTIONS),
     ("settings_other_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
     ("settings_other_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, SETTINGS_ACTIONS),
+    ("settings_display_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
+    ("settings_display_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, DISPLAY_ACTIONS),
     ("settings_pause_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
     ("settings_pause_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, SETTINGS_ACTIONS),
     ("log_print", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),

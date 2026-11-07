@@ -20,6 +20,13 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-07 — Dedicated Display settings page
+
+- **Status:** implemented in the coordinated measurement/pricing candidate, not released or deployed. The updated request explicitly locates the installation-wide measurement preference under Settings → Display.
+- **Changes:** `/settings/display` owns primary measurement and table-column forms; Other retains application mode, backups and exports. Existing display POSTs to Other remain compatible and redirect to Display. Display is available in Personal, Advanced and Business; its POST actions are limited to display changes. Demo has explicit workspace read/mutate policies for Display and denies operator/mode/printer actions on this route. No migration, history, pricing-engine or production modification.
+- **Verification:** focused Display route/security/CSV/dual tests (2), shared measurement persistence/restart/backup tests (6), and mode tests (3) passed. SQL-only startup and Display-route filesystem isolation passed with zero legacy access; scoped compilation passed. Actual TLS demo Chromium passed preference form saves, two independent workspaces retaining different preferences, reset and forbidden actions. Display desktop/mobile screenshots are included in the harness; broader responsive/axe acceptance remains with coordinated exact-head CI.
+- **Next:** integrate with Project pricing/Recalculate changes, complete exact-head browser/CI validation and record actual release/deployment only after the safe backup/rollback production workflow.
+
 ### 2026-11-07 — Integrated measurement preference and Recalculate Center candidate
 
 - **Status:** implementation candidate on `codex/measurement-ux`, based on verified main `8db0cd1`; required PR/CI, merge, release and deployment remain pending. Read-only production baseline on November 7 remains exact v0.11.0, 1,052 jobs / 318 objects / 438 archived references, all four identities connected/inactive and SQL ready. No production configuration, history, preference or printer change.

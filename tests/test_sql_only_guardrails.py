@@ -191,6 +191,7 @@ class SqlOnlyGuardrailTests(unittest.TestCase):
                 "/reports",
                 "/projects",
                 "/settings/printers",
+                "/settings/display",
                 "/settings/other",
                 "/system-events",
             ]

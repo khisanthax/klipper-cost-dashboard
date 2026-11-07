@@ -2,7 +2,7 @@
 
 ## Primary filament measurement
 
-Open **Settings → Other → Filament measurement** and choose **Weight (g/kg)**
+Open **Settings → Display → Filament measurement** and choose **Weight (g/kg)**
 (the default) or **Length (m)**. This installation-wide display preference is
 stored by the active backend, including canonical SQL settings in SQL-only mode,
 and applies across navigation, browsers and restarts. It does not change pricing
@@ -165,7 +165,9 @@ keyboard-focusable scrollable tables. Native dialogs confirm destructive actions
 project edit dialogs support Escape and labelled titles. Small navigation targets
 have been enlarged and contrast corrected while retaining KCD's Bootstrap styling.
 
-Settings → Other stores shared display preferences and provides Backup now.
+Settings → Display stores shared measurement and table-column preferences.
+Settings → Other provides application mode and Backup now. Legacy display form
+submissions to Other still save their display setting and redirect to Display.
 SQL-only automatic backup scheduling remains intentionally disabled. Backups
 coordinate a consistent SQLite snapshot with permanent thumbnail objects. Test
 restores in isolation; never overwrite newer production jobs to recover an image.

@@ -3492,7 +3492,8 @@ def settings_page():
 
 
 def _settings_endpoint_for_action(action: str) -> str:
-    other_actions = {"update_columns", "backup_now", "update_backup_settings", "update_application_mode", "update_measurement_display"}
+    display_actions = {"update_columns", "update_measurement_display", "display"}
+    other_actions = {"backup_now", "update_backup_settings", "update_application_mode", "other"}
     pause_actions = {"update_pause_settings"}
     profiles_actions = {
         "add_filament_profile",
@@ -3502,6 +3503,8 @@ def _settings_endpoint_for_action(action: str) -> str:
         "update_rate_profile",
         "delete_rate_profile",
     }
+    if action in display_actions:
+        return "settings_display_page"
     if action in other_actions:
         return "settings_other_page"
     if action in pause_actions:
@@ -3513,20 +3516,23 @@ def _settings_endpoint_for_action(action: str) -> str:
 
 def _settings_view(tab: str):
     tab = (tab or "printers").strip().lower()
-    if tab not in {"printers", "profiles", "other", "pause"}:
+    if tab not in {"printers", "profiles", "other", "display", "pause"}:
         tab = "printers"
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
 
+        if tab == "display" and action not in {"update_columns", "update_measurement_display"}:
+            return redirect(url_for("settings_display_page", error="Choose a display setting to update."))
+
         if action == "update_measurement_display":
             measurement = request.form.get("filament_measurement")
             if measurement not in ("weight", "length"):
-                return redirect(url_for("settings_other_page", error="Choose Weight (g/kg) or Length (m)."))
+                return redirect(url_for("settings_display_page", error="Choose Weight (g/kg) or Length (m)."))
             display = load_display_settings(DISPLAY_FILE, HEADERS)
             display["filament_measurement"] = measurement
             save_display_settings(DISPLAY_FILE, DATA_DIR, display)
-            return redirect(url_for("settings_other_page", msg="Filament display updated. Pricing and historical measurements are unchanged."))
+            return redirect(url_for("settings_display_page", msg="Filament display updated. Pricing and historical measurements are unchanged."))
 
         if action == "update_application_mode":
             try:
@@ -4210,7 +4216,7 @@ def _settings_view(tab: str):
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     selected_columns = display_settings.get("visible_columns") or HEADERS
 
-    # Settings → Other: per-table column visibility (server-backed display.json).
+    # Settings → Display: per-table column visibility, canonical in the active backend.
     # Defaults: show all allowed columns if no saved selection exists.
     recalc_allowed_cols = [
         "printer",
@@ -4252,12 +4258,14 @@ def _settings_view(tab: str):
         "printers": "settings/printers.html",
         "profiles": "settings/profiles.html",
         "other": "settings/other.html",
+        "display": "settings/display.html",
         "pause": "settings/pause.html",
     }
     subtitle_by_tab = {
         "printers": "Manage printers connected to KCD.",
         "profiles": "Rates and material costs used for calculations.",
-        "other": "Display preferences, backups, and exports.",
+        "other": "Application mode, backups, and exports.",
+        "display": "Primary filament measurements and table column preferences.",
         "pause": "Pause accounting preferences for hourly time cost.",
     }
 
@@ -4308,6 +4316,11 @@ def settings_profiles_page():
 @app.route("/settings/other", methods=["GET", "POST"], endpoint="settings_other_page")
 def settings_other_page():
     return _settings_view(tab="other")
+
+
+@app.route("/settings/display", methods=["GET", "POST"], endpoint="settings_display_page")
+def settings_display_page():
+    return _settings_view(tab="display")
 
 
 @app.route("/printer-diagnostics", methods=["GET"])
