@@ -103,6 +103,28 @@ with db.connect_db() as c:
  assert not c.execute("SELECT 1 FROM project_job_pricing WHERE job_uid IN ('canceled','active')").fetchall()
 project_pricing.clear(p.id)
 assert not project_pricing.saved_overlays(p.id)
+# Incomplete original components with a known total cannot invent a signed
+# adjustment even when both new rates are explicit. The real apply route rejects
+# the signed review and writes no partial overlay.
+with db.connect_db() as c:
+ db.upsert_job(c,dict(job_uid='incomplete',printer='Fixture',filename='incomplete.gcode',status='completed',filament_meters=10,grams_per_meter=3,duration_seconds=3600,time_cost=None,material_cost=None,total_cost=10))
+ c.execute("UPDATE jobs SET time_cost=NULL,material_cost=NULL WHERE job_uid='incomplete'")
+projects.assign_jobs(['incomplete'],p.id)
+response=client.post('/projects/'+p.id+'/pricing',data=form)
+assert response.status_code==200
+assert any('signed adjustment cannot be verified' in error['error'] for error in contexts[-1]['plan']['errors'])
+assert 'value="apply" disabled>Apply to Project</button>' in response.get_data(as_text=True)
+assert client.post('/projects/'+p.id+'/pricing',data=dict(action='apply',review_token=contexts[-1]['review_token'])).status_code==409
+assert not project_pricing.saved_overlays(p.id)
+# A wholly unpriced project without explicit rates stays unavailable, rather
+# than proposing fabricated zero prices.
+unpriced=projects.create_project('Unpriced defaults')
+projects.assign_jobs(['unknown'],unpriced.id)
+response=client.get('/projects/'+unpriced.id+'/pricing')
+assert response.status_code==200
+assert not contexts[-1]['plan']['rows'] and len(contexts[-1]['plan']['errors'])==1
+assert 'Original time cost is unavailable' in response.get_data(as_text=True)
+assert '<td>Unavailable</td><td>Unavailable</td><td>Unavailable</td>' in response.get_data(as_text=True)
 '''
         with tempfile.TemporaryDirectory() as tmp:
             result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).resolve().parents[1],

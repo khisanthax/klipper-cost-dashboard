@@ -32,11 +32,25 @@ def _completed(row):
 
 def calculate_job(row,project,profile=None,*,factor_override=None):
     measurement=conversion(row,profile,factor_override=factor_override)
+    known={key:row.get(key) not in (None,'') for key in ('time_cost','material_cost','total_cost')}
+    exact_total=row.get('override_total_cost') not in (None,'')
+    explicit_time=project.get('hourly_rate_override') is not None
+    explicit_material=bool(project.get('labor_only')) or project.get('filament_cost_per_kg_override') is not None
+    if not known['time_cost'] and not explicit_time:
+        raise ValueError('Original time cost is unavailable. Choose an explicit project hourly rate before previewing new costs.')
+    if not known['material_cost'] and not explicit_material:
+        raise ValueError('Original material cost is unavailable. Choose explicit project filament pricing or Labor-only before previewing new costs.')
+    if known['total_cost'] and not all(known[key] for key in ('time_cost','material_cost')) and not exact_total:
+        raise ValueError('Original cost components are incomplete, so the historical signed adjustment cannot be verified. Restore the missing original components or retain an explicit saved exact total override.')
+    if not known['total_cost'] and not exact_total and not (explicit_time and explicit_material):
+        raise ValueError('Original total is unavailable. Choose both an explicit project hourly rate and filament pricing (or Labor-only) to initialize a new price with zero adjustment.')
     time=number(row.get('time_cost') or 0);material=number(row.get('material_cost') or 0)
     original_total=number(row.get('total_cost') or 0,signed=True)
-    adjustment=original_total-time-material
+    adjustment=original_total-time-material if all(known.values()) else Decimal(0)
     before={'time_cost':time,'material_cost':material,'adjustment':adjustment,'total_cost':original_total}
     source=[]
+    if not known['total_cost'] and not exact_total:
+        source.append('Unpriced original: explicit project pricing initializes a new price with zero adjustment')
     rate=project.get('hourly_rate_override')
     if rate is not None:
         hours=row.get('billable_hours')
@@ -132,7 +146,7 @@ def preview(project_uid,inputs=None):
 
 def apply(project_uid,fingerprint,inputs=None):
     plan=preview(project_uid,inputs)
-    if plan['errors']:raise ValueError('Resolve missing filament conversions before applying project pricing')
+    if plan['errors']:raise ValueError('Resolve the pricing calculation errors shown in a fresh preview before applying project pricing.')
     if not plan['rows']:raise ValueError('No completed prints are available for project pricing')
     if fingerprint!=plan['fingerprint']:raise ValueError('Pricing or membership changed. Review a fresh preview before applying')
     with db.connect_db() as conn:
