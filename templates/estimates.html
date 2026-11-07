@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_filament_measurement.html" import measurement with context %}
 {% block content %}
 <div class="container py-3">
   <h1>Pre-print estimate</h1>
@@ -48,8 +49,7 @@
     <h2 id="estimate-result">Estimated costs</h2>
     <dl>
       <dt>Duration</dt><dd>{{ '%.2f'|format(result.duration_seconds / 3600) }} hours</dd>
-      <dt>Filament</dt><dd>{{ ('%.2f g'|format(result.filament_grams)) if result.filament_grams is not none else 'Unknown' }} ({{ result.weight_source }})</dd>
-      <dt>Conversion factor</dt><dd>{{ result.grams_per_meter if result.grams_per_meter is not none else 'Unknown' }} g/m</dd>
+      <dt>Filament</dt><dd>{{ measurement(filament_display(grams=result.filament_grams, meters=result.get('filament_meters'), factor=result.grams_per_meter, source=result.weight_source, kind='estimated')) }}</dd>
       <dt>Material price</dt><dd>{{ result.filament_price_per_kg }} per kg{% if result.pricing_source and result.pricing_source.profile_name %} from {{ result.pricing_source.profile_name }}{% endif %}</dd>
       <dt>Machine time</dt><dd>${{ result.display_time }}</dd>
       <dt>Material</dt><dd>{{ ('$' ~ result.display_material) if result.display_material is not none else 'Unknown' }}</dd>

@@ -82,7 +82,7 @@ with db.connect_db() as c:
                     page.get_by_role('button',name='Recalculate cost (selected)',exact=True).click()
                 assert rows()==after,'History recalculation must preview first'
                 with page.expect_navigation(wait_until='load'):
-                    page.get_by_role('button',name='Apply previewed prices',exact=True).click()
+                    page.get_by_role('button',name='Apply New Prices',exact=True).click()
                 recalculated=rows();assert abs(recalculated['row-1']['total']-1.25)<1e-9
                 page.goto(base)
                 assert all(recalculated[k]==v for k,v in after.items() if k!='row-1')

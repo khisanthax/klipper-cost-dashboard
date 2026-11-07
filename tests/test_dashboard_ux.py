@@ -100,7 +100,7 @@ class DashboardUXTests(unittest.TestCase):
             with patch.object(profiles,'get_all_profiles',wraps=profiles.get_all_profiles) as catalog:
                 response=app.app.test_client().get('/projects')
             self.assertEqual(response.status_code,200)
-            self.assertIn(b'Weight unknown',response.data)
+            self.assertIn(b'Unknown weight',response.data)
             self.assertEqual(catalog.call_count,1)
 
     def test_history_filters_do_not_zero_another_printers_today_card(self):

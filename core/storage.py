@@ -39,6 +39,14 @@ _DISPLAY_HIDDEN_DEFAULTS = {
     "filament_mm_raw",
     "filament_mm_est",
     "filament_mm_effective",
+    # One consumption column by default. Raw measurements/conversion columns
+    # remain opt-in; every primary quantity also has closed audit details.
+    "filament_mm",
+    "grams_per_meter",
+    "filament_grams",
+    "filament_weight_kind",
+    "filament_density",
+    "filament_diameter",
 }
 
 
@@ -88,6 +96,7 @@ def _default_display_settings(headers):
         "hidden_printers": [],
         "pause_include_paused_time_default": False,
         "projects_show_cost_totals": True,
+        "filament_measurement": "weight",
     }
 
 
@@ -128,6 +137,7 @@ def _normalize_display_settings(data, headers):
         "hidden_printers": hidden,
         "pause_include_paused_time_default": pause_include,
         "projects_show_cost_totals": show_cost_totals,
+        "filament_measurement": data.get("filament_measurement") if data.get("filament_measurement") in ("weight", "length") else "weight",
     }
 
 def _copy_if_missing(src: str, dest: str) -> bool:
@@ -334,7 +344,7 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     visible_columns = []
     try:
-        visible_columns = list(display_settings.get("visible_columns") or [])
+        visible_columns = list(display_settings.get("visible_columns", existing.get("visible_columns")) or [])
     except Exception:
         visible_columns = []
 
@@ -345,7 +355,7 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     visible = [c for c in visible_columns if c in HEADERS and c != "job_uid"]
     if not visible:
-        visible = [h for h in HEADERS if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
+        visible = list(_default_display_settings(HEADERS)["visible_columns"])
 
     hidden = display_settings.get("hidden_printers", existing.get("hidden_printers", []))
     if not isinstance(hidden, list):
@@ -382,6 +392,8 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
     existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
+    measurement = display_settings.get("filament_measurement", existing.get("filament_measurement", "weight"))
+    existing["filament_measurement"] = measurement if measurement in ("weight", "length") else "weight"
 
     if _is_sql_only():
         _save_user_settings_sql("display_settings", existing)

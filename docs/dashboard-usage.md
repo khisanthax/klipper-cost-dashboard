@@ -1,5 +1,32 @@
 # Dashboard workflow guide
 
+## Primary filament measurement
+
+Open **Settings → Display → Filament measurement** and choose **Weight (g/kg)**
+(the default) or **Length (m)**. This installation-wide display preference is
+stored by the active backend, including canonical SQL settings in SQL-only mode,
+and applies across navigation, browsers and restarts. It does not change pricing
+units, profiles, raw measurements or any recorded cost.
+
+Ordinary filament cells show one primary quantity. Weight uses grams below
+1,000 g and kilograms at or above 1,000 g, with two decimal places. For example,
+145.45 m at a verified 3 g/m displays **436.35 g**. Open **Measurement details**
+beside the value to inspect original length, recorded or estimated weight,
+conversion factor, source and material profile. Details begin closed.
+
+Table filenames use a two-line preview so long names do not turn an ordinary row
+into a tall block of wrapped text. Open **Full filename** to read and select the
+entire original name. The preview does not rename the job or remove it from
+search, selection labels or sorting.
+
+Length is unknown when an entry has weight but no verified conversion. A missing
+factor is never replaced with a generic material assumption. Manual and planned
+items can use their reviewed estimate conversion or an explicit project-material
+snapshot. Mixed-material totals add each item's known consumption separately and
+identify missing measurements. Inventory stays stored as integer milligrams;
+length balances require that physical spool's verified factor. Stock-entry and
+pricing forms retain their explicitly labeled units regardless of this preference.
+
 ## Project JSON download
 
 On SQL-only installations, open a project and choose **Download project JSON**. The [versioned schema](project-export-schema.md) separates recorded job prices, recoverable original pricing, explicit overrides, manual work, planned items and applied project-price snapshots. Unknown stored values remain JSON null. The document uses one consistent SQL read snapshot and preserves stored numeric precision and original units. The download uses the dashboard's normal access boundary and contains project data, so store it appropriately. This export is separate from a coordinated backup and does not change the project or its history.
@@ -53,9 +80,18 @@ confirmation and retain backups before destructive operations.
 
 ## Historical recalculation
 
-Select jobs and the intended profiles/overrides, choose Preview changes and
-inspect saved versus proposed costs, weight, conversion and units. Applying
-changes updates current saved historical prices and retains original snapshots.
+Select jobs and the intended profiles/overrides, then choose **Preview Changes**.
+Review **Original Total**, **Change**, and **New Total**, with one price comparison
+per filename. Expand a filename for calculation details, exact components,
+signed adjustments, profiles and conversion provenance. Original means the
+currently recorded price before this operation; a prior first-original snapshot
+is separately recoverable. Unpriced originals remain **Unpriced** and their
+changes are unavailable; a legitimate $0 remains $0.00. Partial original totals
+are labelled as known subtotals.
+
+Choose **Apply New Prices** only after reviewing a valid preview. Its status
+explains when another preview is needed. A $0 change can still apply different
+profiles. Applying updates current recorded prices and retains original snapshots.
 Changed selections, prices, profiles or jobs invalidate the review. Repeated runs
 distinguish changed from already matching records; a matched SQL update count
 alone is not reported as verified success. See [pricing recovery](pricing-and-thumbnail-recovery.md)
@@ -129,7 +165,9 @@ keyboard-focusable scrollable tables. Native dialogs confirm destructive actions
 project edit dialogs support Escape and labelled titles. Small navigation targets
 have been enlarged and contrast corrected while retaining KCD's Bootstrap styling.
 
-Settings → Other stores shared display preferences and provides Backup now.
+Settings → Display stores shared measurement and table-column preferences.
+Settings → Other provides application mode and Backup now. Legacy display form
+submissions to Other still save their display setting and redirect to Display.
 SQL-only automatic backup scheduling remains intentionally disabled. Backups
 coordinate a consistent SQLite snapshot with permanent thumbnail objects. Test
 restores in isolation; never overwrite newer production jobs to recover an image.

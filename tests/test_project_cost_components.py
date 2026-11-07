@@ -486,6 +486,15 @@ class ProjectCostComponentViewTests(unittest.TestCase):
             "actual_tracked_cost": 12.5,
             "actual_manual_cost": 35.0,
         }
+        from core.measurement_display import filament_display,filament_total
+        project.update(price_record={},adjusted_jobs=0,pricing_snapshot_status={'active':False,'stale':False},
+            hourly_rate_override=None,filament_cost_per_kg_override=None,labor_only=False)
+        for row in project['jobs']:
+            row['pricing_view']='Saved historical'
+        project['manual_jobs'][0]['filament_display']=filament_display(grams=500)
+        project['planned_items'][0]['filament_display']=filament_display(grams=500)
+        project['totals']['filament_display']=filament_total(project['jobs']+[{'filament_grams':500}])
+        project['projected']['filament_display']=filament_display(grams=500)
         unassigned = []
         if include_unassigned:
             unassigned = [{
@@ -500,6 +509,7 @@ class ProjectCostComponentViewTests(unittest.TestCase):
                 "_thumbs_enabled": False,
             }]
         context = {
+            "filament_display": filament_display,
             "projects": [project],
             "projects_by_id": {"p1": project},
             "display_settings": {"projects_show_cost_totals": show_costs},

@@ -85,12 +85,12 @@ def exercise(page,context,base,project,data,artifacts):
     # Existing RaRa acceptance: saved historical totals, project-only snapshot.
     originals=query('SELECT * FROM jobs ORDER BY job_uid')
     page.goto(base+'/projects/'+project+'/pricing')
-    assert '40.83' in page.locator('tfoot').inner_text()
+    assert '40.83' in page.locator('#project-pricing-totals').inner_text()
     assert '2721.882' in page.locator('body').inner_text() or '2721.882' in str(sum(Decimal(str(r['filament_grams'])) for r in query("SELECT filament_grams FROM jobs WHERE job_uid LIKE 'mask-%'")))
-    click(page.get_by_role('button',name='Apply project-adjusted snapshot',exact=True))
+    click(page.get_by_role('button',name='Apply to Project',exact=True))
     assert len(query('SELECT * FROM project_job_pricing'))==15
     assert query('SELECT * FROM jobs ORDER BY job_uid')==originals
-    page.goto(base+'/projects/'+project+'/pricing');click(page.get_by_role('button',name='Use saved historical costs',exact=True))
+    page.goto(base+'/projects/'+project+'/pricing');click(page.get_by_role('button',name='Use Original Prices',exact=True))
     assert not query('SELECT * FROM project_job_pricing')
     # Create with a project profile; manual/planned costs are distinct actual/estimated views.
     page.goto(base+'/projects');create=form('create_project')
@@ -101,7 +101,7 @@ def exercise(page,context,base,project,data,artifacts):
     created=query('SELECT * FROM projects WHERE name=?',"Maker's browser workflow")[0];pid=created['project_uid']
     assert created['hourly_rate_override']==0 and created['filament_cost_per_kg_override']==15
     assert json.loads(created['filament_price_json'])['profile_id']=='petg-15'
-    panel=open_project(pid);edit=form('update_project',panel);edit.locator('[name=notes]').fill('Verified through actual forms');click(edit.get_by_role('button',name='Save',exact=True))
+    panel=open_project(pid);edit=form('update_project',panel);edit.locator('[name=notes]').fill('Verified through actual forms');click(edit.get_by_role('button',name='Save Project Defaults',exact=True))
     assert query('SELECT notes FROM projects WHERE project_uid=?',pid)[0]['notes']=='Verified through actual forms'
     # Assign and remove exactly one existing job; history remains unchanged.
     assignment=page.locator('form').filter(has=page.locator('button[value=assign_jobs]'))
@@ -155,7 +155,7 @@ def exercise(page,context,base,project,data,artifacts):
     # Project defaults can be explicitly cleared without modifying saved history.
     panel=open_project(pid);edit=form('update_project',panel)
     edit.locator('[name=project_filament_profile_id]').select_option('');edit.locator('[name=pricing_amount]').fill('');edit.locator('[name=hourly_rate_override]').fill('')
-    click(edit.get_by_role('button',name='Save',exact=True))
+    click(edit.get_by_role('button',name='Save Project Defaults',exact=True))
     cleared=query('SELECT * FROM projects WHERE project_uid=?',pid)[0]
     assert cleared['hourly_rate_override'] is None and cleared['filament_cost_per_kg_override'] is None
     # Delete project after reviewing the confirmation; jobs are never deleted.
@@ -221,18 +221,20 @@ def exercise(page,context,base,project,data,artifacts):
     # SQL-only backup/display/pause controls are actual UI actions.
     page.goto(base+'/settings/pause');page.locator('#pause_include_default').check();click(page.get_by_role('button',name='Save pause settings',exact=True))
     assert json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['pause_include_paused_time_default']
-    page.goto(base+'/settings/other')
-    display=form('update_columns').filter(has=page.locator('input[name=table][value=recalc_jobs]'))
-    display.locator('input[name=columns][value=material_cost]').uncheck()
-    click(display.get_by_role('button',name='Save Recalculate Columns',exact=True))
-    assert 'material_cost' not in json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['tables']['recalc_jobs']['visible_columns']
-    page.goto(base+'/recalculate');material_header=page.locator('#recalc-table th[data-col=material_cost]')
-    assert material_header.count()==1 and not material_header.is_visible()
+    page.goto(base+'/settings/display')
+    display=form('update_columns').filter(has=page.locator('input[name=table][value=history]'))
+    display.locator('input[name=columns][value=filament_rate]').uncheck()
+    click(display.get_by_role('button',name='Save Print History Columns',exact=True))
+    assert 'filament_rate' not in json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['tables']['history']['visible_columns']
+    page.goto(base+'/');assert page.locator('#history-table th[data-col=filament_rate]').count()==0
+    page.goto(base+'/recalculate');assert page.locator('#recalc-table thead th').count()==3
     page.goto(base+'/settings/other');click(form('backup_now').get_by_role('button',name='Backup now',exact=True))
     assert list(Path(data,'backups').glob('kcd_backup_*.tar.gz'))
     assert 'Backup' in page.locator('body').inner_text()
     with closing(sqlite3.connect(Path(data)/'kcd.db')) as conn:
-        assert conn.execute('pragma integrity_check').fetchone()[0]=='ok';assert not conn.execute('pragma foreign_key_check').fetchall()
+        assert conn.execute('pragma integrity_check').fetchone()[0]=='ok'
+        foreign_keys=conn.execute('pragma foreign_key_check').fetchall()
+        assert not foreign_keys,foreign_keys
     page.screenshot(path=str(artifacts/'workflow-complete.png'),full_page=True)
     job_before = query("SELECT * FROM jobs WHERE job_uid='mask-0'")
     assert job_before
@@ -253,7 +255,7 @@ def exercise(page,context,base,project,data,artifacts):
     estimate.get_by_label('Estimated consumption (g)', exact=True).fill('78')
     estimate.get_by_label('Estimate source', exact=True).fill('Slicer estimate, not measured')
     click(estimate.get_by_role('button', name='Save estimate without deduction'))
-    assert page.get_by_text('80.000 g remaining', exact=True).is_visible()
+    assert page.get_by_text('80.00 g', exact=True).is_visible()
     for _ in range(2):
         page.get_by_text('Record verified job use', exact=True).click()
         consumption = form('consume')
@@ -261,7 +263,7 @@ def exercise(page,context,base,project,data,artifacts):
         consumption.get_by_label('Measured consumption (g)').fill('77.5')
         consumption.get_by_role('checkbox').check()
         click(consumption.get_by_role('button', name='Deduct measured amount'))
-    assert page.get_by_text('2.500 g remaining', exact=True).is_visible()
+    assert page.get_by_text('2.50 g', exact=True).is_visible()
     assert page.get_by_text('Low stock', exact=True).is_visible()
     assert len(query("SELECT * FROM filament_stock_events WHERE kind='verified_consumption'")) == 1
     page.get_by_text('Verified consumption and corrections', exact=True).click()
@@ -270,7 +272,8 @@ def exercise(page,context,base,project,data,artifacts):
     correction.get_by_label('Correction reason', exact=True).fill('Measured on corrected scale')
     correction_payload = dict(correction.locator('input').evaluate_all('es=>es.map(e=>[e.name,e.value])'))
     click(correction.get_by_role('button', name='Record linked correction'))
-    assert page.get_by_text('3.875 g remaining', exact=True).is_visible()
+    assert page.get_by_text('3.88 g', exact=True).is_visible()
+    assert query('SELECT remaining_mg FROM filament_spools')[0]['remaining_mg'] == 3875
     replay = context.request.post(base + '/inventory', form=correction_payload)
     assert replay.status == 200 and 'Already recorded; stock was not changed again.' in replay.text()
     stale_payload = {**correction_payload, 'operation_uid': uuid.uuid4().hex, 'grams': '76'}
@@ -291,7 +294,8 @@ def exercise(page,context,base,project,data,artifacts):
     reactivation = form('reactivate')
     reactivation.get_by_label('Archive or reactivation reason', exact=True).fill('Returned to printer')
     click(reactivation.get_by_role('button', name='Reactivate spool', exact=True))
-    assert page.get_by_text('3.875 g remaining', exact=True).is_visible()
+    assert page.get_by_text('3.88 g', exact=True).is_visible()
+    assert query('SELECT remaining_mg FROM filament_spools')[0]['remaining_mg'] == 3875
     assert len(query('SELECT * FROM filament_spool_lifecycle_events')) == 2
     assert job_before == query("SELECT * FROM jobs WHERE job_uid='mask-0'")
     for width, height, zoom, label in ((390,844,1,'mobile'),(768,1024,1,'tablet'),(1440,1000,2,'zoom200')):

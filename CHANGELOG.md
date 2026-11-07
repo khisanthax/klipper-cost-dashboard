@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.12.0 - 2026-11-07
+
+- Add Settings → Display with installation-wide Weight (g/kg, default) or Length (m) consumption display. Keep pricing units separate, with SQL-backed persistence and no historical repricing or raw-measurement migration.
+- Show one primary quantity throughout Dashboard, History, Projects/manual/planned items, printer pages, Reports, estimates and spool summaries. Keep conversion/material provenance in closed, keyboard-accessible details; missing conversion remains unknown.
+- Simplify Recalculate Center to Original Total / Change / New Total and a four-column comparison. Retain full-precision details, immediate stale-input invalidation, explicit preview/apply and original-price recovery.
+- Distinguish Save Project Defaults from Preview New Project Costs. Review current inputs, Apply to Project using an isolated pricing snapshot, or Use Original Prices without overwriting historical prints; identify active and outdated snapshots explicitly.
+- Preserve saved estimated weights and per-item mixed-material subtotals. Add SQL/CSV/dual persistence, restart/backup, browser preference/layout and financial regression coverage.
+
 ## v0.11.0 - 2026-11-05
 
 - Ship separate opt-in browser administration using exact target allowlists, private credentials, active-configuration inspection, reviewed expiring previews, inactive guards and the shared CLI registration/repair engine. Keep advanced host/service/macro operations CLI-only.

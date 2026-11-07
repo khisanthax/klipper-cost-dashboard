@@ -14,6 +14,7 @@ pricing recalculation, and CSV export.
 - Projects, manual jobs, and planned items
 - Previewable, recoverable pricing recalculation and project-only adjusted snapshots
 - Spool price/net weight inputs with explicit units and per-job filament conversion
+- Shared weight/length consumption display, independent of pricing units, with optional measurement details
 - Permanent job thumbnails retained independently of printer files and addresses
 - SQL-backed system events and runtime health checks
 - Explicit CSV export, parity, import, and migration tooling

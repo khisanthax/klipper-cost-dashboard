@@ -58,12 +58,13 @@ PROJECT_ACTIONS = frozenset({
     "fulfill_plan_item", "delete_plan_item", "convert_plan_to_manual",
 })
 SETTINGS_ACTIONS = frozenset({
-    "delete_printer", "update_pause_settings", "save_printer_defaults", "update_columns",
+    "delete_printer", "update_pause_settings", "save_printer_defaults", "update_columns", "update_measurement_display",
     "rename_printer", "merge_printers", "add_filament_profile",
     "update_filament_profile", "delete_filament_profile", "set_active_filament_profile",
     "add_rate_profile", "update_rate_profile", "delete_rate_profile",
     "set_active_rate_profile",
 })
+DISPLAY_ACTIONS = frozenset({"update_columns", "update_measurement_display"})
 
 
 APPLICATION_ROUTE_POLICIES: Mapping[tuple[str, str], DemoRouteRule] = {
@@ -89,6 +90,8 @@ APPLICATION_ROUTE_POLICIES: Mapping[tuple[str, str], DemoRouteRule] = {
     ("settings_profiles_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, SETTINGS_ACTIONS),
     ("settings_other_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
     ("settings_other_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, SETTINGS_ACTIONS),
+    ("settings_display_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
+    ("settings_display_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, DISPLAY_ACTIONS),
     ("settings_pause_page", "GET"): DemoRouteRule(DemoPolicyClass.WORKSPACE_READ),
     ("settings_pause_page", "POST"): DemoRouteRule(DemoPolicyClass.WORKSPACE_MUTATE, SETTINGS_ACTIONS),
     ("log_print", "POST"): DemoRouteRule(DemoPolicyClass.BLOCKED_DEMO),

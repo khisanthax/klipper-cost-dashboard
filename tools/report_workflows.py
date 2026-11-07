@@ -16,6 +16,7 @@ def exercise_reports(page, base, data, artifacts):
     ]
     try:
         with closing(sqlite3.connect(database)) as conn, conn:
+            conn.execute('PRAGMA foreign_keys=ON')
             for uid, printer, ended, status, hours, meters, grams, kind, time_cost, material_cost, total in fixtures:
                 printer_id = conn.execute("SELECT id FROM printers WHERE name=?", (printer,)).fetchone()[0]
                 conn.execute("""INSERT INTO jobs
@@ -35,15 +36,19 @@ def exercise_reports(page, base, data, artifacts):
         table = page.get_by_role("table", name="Monthly print outcomes")
         october = table.get_by_role("row").filter(has=page.get_by_role("rowheader", name="2019-10", exact=False))
         cells = october.locator("th,td")
-        assert cells.count() == 13
+        assert cells.count() == 12
         assert "4" == cells.nth(1).inner_text().splitlines()[0]
         assert [cells.nth(index).inner_text() for index in (2, 3, 4, 5)] == ["1", "1", "1", "1"]
         assert "33.3%" in cells.nth(6).inner_text()
         assert "-66.7 pp" in cells.nth(6).inner_text()
-        for index, amount in ((7, "3.50"), (8, "25.00 m"), (9, "70.00 g"), (10, "$5.00"), (11, "$1.00"), (12, "$3.00")):
+        for index, amount in ((7, "3.50"), (8, "70.00 g"), (9, "$5.00"), (10, "$1.00"), (11, "$3.00")):
             assert cells.nth(index).inner_text().startswith(amount), (index, cells.nth(index).inner_text())
-        assert "2 missing" in cells.nth(12).inner_text()
-        assert "Change unavailable" in cells.nth(12).inner_text()
+        assert "2 missing" in cells.nth(11).inner_text()
+        assert "Change unavailable" in cells.nth(11).inner_text()
+        detail=cells.nth(8).locator('[data-filament-details]')
+        detail.locator('summary').click()
+        assert '25' in detail.inner_text() and ' m' in detail.inner_text()
+        detail.locator('summary').click()
         recent = page.locator("#report-recent-jobs")
         assert recent.get_by_role("cell", name="Unpriced", exact=True).count() == 2
         assert "Completed" not in recent.inner_text()
@@ -59,6 +64,7 @@ def exercise_reports(page, base, data, artifacts):
         page.wait_for_function("document.querySelector('table caption').parentElement.parentElement.scrollLeft > 0")
         # Cache must refresh after a historical edit that deliberately preserves updated_at.
         with closing(sqlite3.connect(database)) as conn, conn:
+            conn.execute('PRAGMA foreign_keys=ON')
             conn.execute("UPDATE jobs SET total_cost=4.1 WHERE job_uid='report-browser-end-day'")
         page.reload()
         table = page.get_by_role("table", name="Monthly print outcomes")
@@ -69,4 +75,8 @@ def exercise_reports(page, base, data, artifacts):
         page.evaluate("document.body.style.zoom=1")
         page.set_viewport_size({"width": 1440, "height": 1000})
         with closing(sqlite3.connect(database)) as conn, conn:
+            # Match production connections: fixture cleanup must cascade image
+            # references, including callbacks that finished during navigation.
+            conn.execute('PRAGMA foreign_keys=ON')
             conn.execute("DELETE FROM jobs WHERE job_uid LIKE 'report-browser-%'")
+            assert not conn.execute('PRAGMA foreign_key_check').fetchall()

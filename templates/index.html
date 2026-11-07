@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_filename.html" import filename as filename_label %}
+{% from "partials/_filament_measurement.html" import measurement with context %}
 
 {% block content %}
 <script src="{{ url_for('static',filename='js/printer_status.js') }}"></script>
@@ -335,7 +337,7 @@
                         <th>File</th>
                         <th>Status</th>
                         <th>Elapsed</th>
-                        <th>Filament used (g)</th>
+                        <th>Filament used</th>
                         <th class="text-end">Live estimated cost</th>
                         <th class="text-end">Est. Final</th>
                         <th>Actions</th>
@@ -358,7 +360,7 @@
                                 {% include "partials/_thumbnail.html" %}
                             {% endif %}
                         </td>
-                        <td data-live-filename>{{ job.filename }}</td>
+                        <td data-live-filename>{{ filename_label(job.filename) }}</td>
                         <td>
                             <span
                                 data-live-state class="badge bg-secondary">
@@ -436,9 +438,10 @@
                     <span class="fw-semibold">{{ "%.2f"|format(summary.total_hours) }}</span>
                 </div>
                 <div class="col-6 col-md-3">
-                    <span class="text-muted small">Known filament weight</span><br>
-                    <span class="fw-semibold">{{ "%.2f"|format(summary.known_grams) }} g</span>
-                    <div class="small text-muted">{{ "%.2f"|format(summary.total_meters) }} m{% if summary.unknown_weights %} · {{ summary.unknown_weights }} unknown weights{% endif %}</div>
+                    <span class="text-muted small">Known filament consumption</span><br>
+                    {{ measurement(filament_display(grams=summary.known_grams, meters=summary.total_meters, source='Known job subtotals; each job retains its conversion')) }}
+                    {% set missing_measurements = summary.unknown_weights if filament_measurement_preference == 'weight' else summary.get('unknown_lengths', 0) %}
+                    {% if missing_measurements %}<div class="small text-muted">{{ missing_measurements }} unknown {{ 'weights' if filament_measurement_preference == 'weight' else 'lengths' }}</div>{% endif %}
                 </div>
                 <div class="col-6 col-md-3">
                     <span class="text-muted small">Total Cost</span><br>
@@ -614,7 +617,7 @@
                             <th class="col-{{ h|replace(' ', '-')|lower }}"
                                 data-col="{{ h }}"
                                 {% if h == 'timestamp' %}data-sort-type="date"{% elif h in ['duration_seconds','duration_hours','filament_mm','filament_meters','total_cost','time_cost','material_cost','rate_per_hour','filament_rate','grams_per_meter'] %}data-sort-type="number"{% else %}data-sort-type="text"{% endif %}>
-                                {{ friendly_headers.get(h, h) }}
+                                {{ 'Filament' if h == 'filament_meters' else friendly_headers.get(h, h) }}
                             </th>
                             {% endif %}
                             {% endfor %}
@@ -630,7 +633,7 @@
                             </td>
                             {% for h in headers %}
                             {% if h in visible %}
-                            <td class="col-{{ h|replace(' ', '-')|lower }}">
+                            <td class="col-{{ h|replace(' ', '-')|lower }}"{% if h == 'filament_meters' %}{% set measure_sort = filament_display(row) %} data-sort="{{ measure_sort.grams if filament_measurement_preference == 'weight' and measure_sort.grams is not none else measure_sort.meters if filament_measurement_preference == 'length' and measure_sort.meters is not none else '' }}"{% endif %}>
                                  {% if h == 'thumbnail' %}
                                      {% if row.get('_thumbs_enabled') %}
                                          {% set thumb_url = row.get('_thumb_small') %}
@@ -651,7 +654,7 @@
                                          <div class="kcd-dt">{{ dt }}</div>
                                      {% endif %}
                                  {% elif h == 'filename' %}
-                                     <div>{{ row.get(h, '') }}</div>
+                                     {{ filename_label(row.get(h, '')) }}
                                      {% if row.get('import_source') == 'moonraker_history' %}
                                      <div class="text-muted small">
                                          Imported (Moonraker){% if row.get('job_outcome') %} &middot; {{ row.get('job_outcome')|upper }}{% endif %}
@@ -681,8 +684,7 @@
                                  <span class="fw-semibold">{{ "%.2f"|format(val|float) }}</span>
                                  {% endif %}
                                  {% elif h == 'filament_meters' %}
-                                 <div class="fw-semibold" title="{{ row.get('_weight_source','Missing conversion information') }}">{{ '%.2f'|format(row._weight_grams) ~ ' g' if row.get('_weight_grams') is not none else 'Weight unknown' }}</div>
-                                 <div class="small text-muted">{{ "%.2f"|format(row.get(h, 0)|float) }} m · {{ row.get('_weight_factor') if row.get('_weight_factor') is not none else '?' }} g/m</div>
+                                 {{ measurement(filament_display(row), row) }}
                                  {% elif h == 'filament_rate' %}
                                  <span>{{ row.get(h, '') }} {{ row.get('_price_unit','Unknown unit') }}</span>
                                  {% elif h in ['job_uid', 'filament_profile_id', 'import_id'] %}

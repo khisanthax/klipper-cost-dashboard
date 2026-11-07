@@ -42,6 +42,8 @@ jobs:
         run: |
           python tools/browser_history_regression.py
           python tools/browser_pricing_regression.py
+          python tools/browser_project_pricing_regression.py
+          python tools/browser_measurement_regression.py
           python tools/browser_dashboard_audit.py --axe
           python tools/browser_dashboard_audit.py --baseline --history-jobs 500
           python tools/browser_thumbnail_regression.py

@@ -88,8 +88,10 @@ display_context={}
 app.app.context_processor(lambda:display_context)
 client=app.app.test_client()
 assert 'Calculate a pre-print estimate' in client.get('/projects').get_data(as_text=True)
-display_context.update(kcd_demo_mode=True,demo_endpoint_available=lambda endpoint:False)
-assert 'Calculate a pre-print estimate' not in client.get('/projects').get_data(as_text=True)
+display_context.update(kcd_demo_mode=True,demo_endpoint_available=lambda *_args:False)
+response=client.get('/projects')
+assert response.status_code==200,response.data
+assert 'Calculate a pre-print estimate' not in response.get_data(as_text=True)
 display_context.clear()
 preview=client.post('/api/estimates',json={
     'duration_seconds':1800,'filament_grams':20,'hourly_rate':0,

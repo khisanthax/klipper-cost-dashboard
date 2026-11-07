@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "partials/_filename.html" import filename as filename_label %}
+{% from "partials/_filament_measurement.html" import measurement with context %}
 
 {% block content %}
 {% macro monthly_value(month, field, unit='', currency=false) -%}
@@ -46,7 +48,9 @@
 </div>
 
 <!-- Pause & Runout -->
-<p class="small">Known filament weight: <strong>{{ summary.recorded.grams_display ~ ' g' if summary.recorded.grams_display is not none else 'Unknown' }}</strong>{% if summary.recorded.missing_grams %} · {{ summary.recorded.missing_grams }} jobs have unknown weight{% endif %}. Weight uses each job's saved measurements or conversion. Saved historical costs are retained.</p>
+<div class="small mb-3">Known filament consumption: {{ measurement(filament_display(grams=summary.recorded.grams if summary.recorded.grams_display is not none else none, meters=summary.recorded.meters if summary.recorded.meters_display is not none else none, source='Known job subtotals; saved per-job measurements and conversions')) }}
+{% set missing = summary.recorded.missing_grams if filament_measurement_preference == 'weight' else summary.recorded.missing_meters %}
+{% if missing %}<span class="text-muted">{{ missing }} jobs have unknown {{ 'weight' if filament_measurement_preference == 'weight' else 'length' }}.</span>{% endif %} Historical costs are retained.</div>
 <div class="card mb-4">
     <div class="card-header">
         <h2 class="h5 mb-0">Pause & Runout</h2>
@@ -159,8 +163,7 @@
                         <th scope="col">Unknown outcome</th>
                         <th scope="col">Completion rate</th>
                         <th scope="col">Known hours</th>
-                        <th scope="col">Filament length</th>
-                        <th scope="col">Filament weight</th>
+                        <th scope="col">Filament</th>
                         <th scope="col">Saved time cost</th>
                         <th scope="col">Saved material cost</th>
                         <th scope="col">Saved total cost</th>
@@ -177,8 +180,14 @@
                         <td>{{ m.unknown }}</td>
                         <td>{{ "%.1f%%"|format(m.completion_rate) if m.completion_rate is not none else "Unknown" }}{% if m.completion_rate_change is not none %}<span class="small text-muted d-block">{{ '%+.1f'|format(m.completion_rate_change) }} pp vs prior</span>{% endif %}</td>
                         <td>{{ monthly_value(m, 'hours') }}</td>
-                        <td>{{ monthly_value(m, 'meters', ' m') }}</td>
-                        <td>{{ monthly_value(m, 'grams', ' g') }}<span class="small text-muted d-block">{{ m.recorded_weights }} recorded / {{ m.estimated_weights }} estimated</span></td>
+                        <td>{{ measurement(filament_display(grams=m.grams_exact, meters=m.meters_exact, source='Known monthly subtotal; saved job measurements')) }}
+                          {% set metric = 'grams' if filament_measurement_preference == 'weight' else 'meters' %}
+                          {% if m['missing_' ~ metric] %}<span class="small text-muted d-block">{{ m['missing_' ~ metric] }} missing</span>{% endif %}
+                          <details class="small text-muted"><summary>Comparison and coverage</summary>
+                            {{ m.recorded_weights }} recorded / {{ m.estimated_weights }} estimated weights.
+                            {% if m.previous_month %}<div>{{ m[metric ~ '_change_display'] ~ (' g' if metric == 'grams' else ' m') ~ ' vs prior' if m[metric ~ '_change_display'] is not none else 'Change unavailable' }}</div>{% endif %}
+                          </details>
+                        </td>
                         <td>{{ monthly_value(m, 'time_cost', currency=true) }}</td>
                         <td>{{ monthly_value(m, 'material_cost', currency=true) }}</td>
                         <td>{{ monthly_value(m, 'cost', currency=true) }}</td>
@@ -307,8 +316,8 @@
     <thead><tr><th>Thumbnail</th><th>Printer / file</th><th>Filament</th><th>Saved material pricing</th><th>Total ($)</th></tr></thead>
     <tbody>{% for row in recent_jobs|default([]) %}<tr>
       <td>{% set thumb_url=row._thumb_small %}{% set size='small' %}{% set alt=row.filename %}{% include 'partials/_thumbnail.html' %}</td>
-      <td>{{ row.printer }}<br>{{ row.filename }}</td>
-      <td><strong>{{ '%.2f'|format(row._weight_grams) ~ ' g' if row._weight_grams is not none else 'Weight unknown' }}</strong><br>{{ '%.2f'|format(row._length_meters) ~ ' m' if row._length_meters is not none else 'Length unknown' }}<br><small>{{ row._weight_factor if row._weight_factor is not none else '?' }} g/m · {{ row._weight_source }}</small></td>
+      <td>{{ row.printer }}{{ filename_label(row.filename) }}</td>
+      <td>{{ measurement(filament_display(row), row) }}</td>
       <td>{{ row.filament_rate if row.filament_rate not in (none, '') else 'Rate unknown' }} {{ row._price_unit }}<br><small>Saved material: {{ '$' ~ row._material_cost_display if row._material_cost_display is not none else 'Unpriced' }}</small></td>
       <td>{{ row._total_cost_display if row._total_cost_display is not none else 'Unpriced' }}</td>
     </tr>{% else %}<tr><td colspan="5" class="text-muted">No prints in this range.</td></tr>{% endfor %}</tbody>

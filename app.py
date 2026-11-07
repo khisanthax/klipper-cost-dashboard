@@ -1369,6 +1369,11 @@ def printer_status():
                     item['pricing_error']='Live estimate incomplete; Moonraker measurements are unavailable'
             except (ValueError,RuntimeError,TypeError):
                 item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
+        from core.measurement_display import filament_display
+        item['filament_display'] = filament_display(
+            grams=item.get('grams'), meters=(item['filament_mm'] / 1000 if item.get('filament_mm') is not None else None),
+            source=item.get('conversion_source'), kind='estimated', preference=_filament_measurement_preference(),
+        )
     return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}
 
 
@@ -1674,6 +1679,8 @@ def index():
     from core.filament import describe_job,summarize_weights
     all_filament_profiles=profiles.get_all_profiles()
     summary.update(summarize_weights(rows,all_filament_profiles))
+    from core.measurement_display import filament_total
+    summary['unknown_lengths'] = filament_total(rows)['unknown_lengths']
     for row in history_rows_page:
         describe_job(row,all_filament_profiles.get(row.get('filament_profile_id')))
 
@@ -1740,6 +1747,26 @@ def index():
 @app.context_processor
 def inventory_navigation():
     return {"inventory_available": _is_sql_only()}
+
+
+def _filament_measurement_preference():
+    """Request-local display setting, including a storage-free demo welcome."""
+    if not hasattr(flask.g, "filament_measurement_preference"):
+        public_demo = is_demo_runtime() and not getattr(flask.g, "demo_workspace_session", None)
+        config = {} if public_demo else load_display_settings(DISPLAY_FILE, HEADERS)
+        flask.g.filament_measurement_preference = config.get("filament_measurement", "weight")
+    return flask.g.filament_measurement_preference
+
+
+@app.context_processor
+def filament_measurement_context():
+    from core.measurement_display import filament_display, filament_total
+    pref = _filament_measurement_preference()
+    return {
+        "filament_measurement_preference": pref,
+        "filament_display": lambda row=None, **kwargs: filament_display(row, preference=pref, **kwargs),
+        "filament_total": lambda rows: filament_total(rows, preference=pref),
+    }
 
 
 @app.route("/inventory", methods=["GET", "POST"])
@@ -2636,8 +2663,13 @@ def recalculate_preview():
             paused_seconds_total = 0.0
         try:
             old_total = float(r.get("total_cost") or 0.0)
+            original_price_known = r.get("total_cost") not in (None, "") and math.isfinite(old_total)
         except Exception:
             old_total = 0.0
+            original_price_known = False
+        if not math.isfinite(old_total):
+            old_total = 0.0
+        recorded_prices = {key: r.get(key) for key in ("total_cost", "time_cost", "material_cost")}
 
         try:
             computed = (compute_fn.for_row(r) if hasattr(compute_fn,"for_row") else compute_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total)) or {}
@@ -2665,27 +2697,57 @@ def recalculate_preview():
         except Exception:
             material_cost = 0.0
 
+        # Rendering a preview must not turn absent telemetry into zero merely
+        # because the legacy pricing callable accepts numeric fallbacks.
+        from core.measurement_display import filament_display
+        measure_options = {}
+        if computed.get('filament_grams') is not None:
+            measure_options['grams'] = computed['filament_grams']
+        if computed.get('grams_per_meter') is not None:
+            measure_options['factor'] = computed['grams_per_meter']
+        display_measure = filament_display(r, **measure_options)
+        display_hours = None
+        for key, divisor in (('duration_seconds', 3600), ('duration_hours', 1)):
+            try:
+                value = float(r[key])
+                if math.isfinite(value) and value >= 0:
+                    display_hours = value / divisor
+                    break
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+
         before_total += old_total
         after_total += new_total
         preview_rows.append(
             {
                 "job_uid": uid,
+                "original_price_known": original_price_known,
+                "recorded_prices": recorded_prices,
                 "printer": printer_name,
                 "filename": str(r.get("filename") or ""),
-                "duration_hours": duration_hours,
-                "filament_meters": filament_meters,
+                "duration_hours": display_hours,
+                "billable_hours": computed.get('billable_hours'),
+                "filament_meters": display_measure['meters'],
                 "time_cost": time_cost,
                 "material_cost": material_cost,
                 "old_time_cost": r.get("time_cost") or 0,
                 "old_material_cost": r.get("material_cost") or 0,
                 "old_adjustment": float(r.get("total_cost") or 0)-float(r.get("time_cost") or 0)-float(r.get("material_cost") or 0),
                 "adjustment": computed.get("adjustment",0),
-                "filament_grams": computed.get("filament_grams"),
-                "grams_per_meter": computed.get("grams_per_meter"),
+                "filament_grams": display_measure['grams'],
+                "grams_per_meter": display_measure['factor'],
+                "weight_kind": computed.get('filament_weight_kind') or display_measure['kind'],
                 "conversion_source": computed.get("conversion_source"),
                 "pricing_source": computed.get("pricing_source"),
                 "filament_mode": computed.get("filament_mode"),
                 "filament_rate": computed.get("filament_rate"),
+                "rate_per_hour": computed.get("rate_per_hour"),
+                "old_rate_per_hour": r.get("rate_per_hour"),
+                "old_filament_mode": r.get("filament_mode"),
+                "old_filament_rate": r.get("filament_rate"),
+                "old_grams_per_meter": r.get("grams_per_meter"),
+                "hourly_rate_profile_id": computed.get("hourly_rate_profile_id"),
+                "filament_profile_id": computed.get("filament_profile_id"),
                 "old_total": old_total,
                 "new_total": new_total,
                 "delta": new_total - old_total,
@@ -2696,6 +2758,8 @@ def recalculate_preview():
     display_before,display_after=reconcile_preview(preview_rows)
     before_total=float(display_before['total_cost'])
     after_total=float(display_after['total_cost'])
+    unknown_original_count=sum(not row['original_price_known'] for row in preview_rows)
+    known_original_total=sum(row['display_old_total_cost'] for row in preview_rows if row['original_price_known'])
 
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
@@ -2755,7 +2819,8 @@ def recalculate_preview():
         preview_hash=preview_fingerprint(list(raw_preview.values()),compute_fn,plan) if _is_sql_only() and not preview_errors else '',
         preview={
             "rows": preview_rows,
-            "totals": {"before": before_total, "after": after_total, "delta": after_total - before_total},
+            "totals": {"before": known_original_total, "after": after_total, "delta": after_total - before_total,
+                       "unknown_original_count": unknown_original_count},
             "plan": plan,
         },
         pager={
@@ -2772,23 +2837,35 @@ def recalculate_preview():
 @app.route('/projects/<project_uid>/pricing',methods=['GET','POST'])
 def project_pricing_page(project_uid):
     from core import project_pricing
+    from itsdangerous import URLSafeTimedSerializer,BadSignature
     if not _is_sql_only():
         return redirect(url_for('projects_page',error='Project-only pricing snapshots require SQL storage; compatibility history is unchanged'))
     error=None
+    request.max_content_length=64*1024
+    signer=URLSafeTimedSerializer(API_KEY,salt='kcd-project-pricing-review-v1')
     try:
         if request.method=='POST':
-            if request.form.get('action')=='clear':
+            action=request.form.get('action')
+            if action=='clear':
                 project_pricing.clear(project_uid)
-            elif request.form.get('action')=='apply':
-                project_pricing.apply(project_uid,request.form.get('fingerprint',''))
-            return redirect(url_for('projects_page',msg='Project price view updated. Historical job prices were retained.'))
-        plan=project_pricing.preview(project_uid)
+                return redirect(url_for('projects_page',msg='Original historical prices are active. Project snapshots removed; history and defaults unchanged.',edit_project=project_uid),code=303)
+            elif action=='apply':
+                try:review=signer.loads(request.form.get('review_token',''),max_age=900)
+                except BadSignature:raise ValueError('Pricing review expired or is invalid. Preview New Project Costs again.')
+                if review.get('project_uid')!=project_uid:raise ValueError('Pricing review belongs to another project. Preview again.')
+                project_pricing.apply(project_uid,review['fingerprint'],review.get('inputs'))
+                return redirect(url_for('projects_page',msg='Project-Adjusted Cost is active. Saved Historical Cost and project defaults were retained.',edit_project=project_uid),code=303)
+            elif action=='update_project' or action=='preview':
+                plan=project_pricing.preview(project_uid,project_pricing.inputs_from_form(request.form))
+            else:raise ValueError('Unknown project pricing action. Preview New Project Costs again.')
+        else:plan=project_pricing.preview(project_uid)
     except ValueError as exc:
         error=str(exc)
         if error=='Project not found':
             return ('Project not found',404)
         plan=project_pricing.preview(project_uid)
-    return render_template('project_pricing.html',plan=plan,error=error),409 if error else 200
+    review_token=signer.dumps(dict(project_uid=project_uid,inputs=plan['inputs'],fingerprint=plan['fingerprint']))
+    return render_template('project_pricing.html',plan=plan,error=error,review_token=review_token),409 if error else 200
 
 
 @app.get("/projects/<project_uid>/export.json")
@@ -2867,6 +2944,7 @@ def projects_page():
                     filament_price=modern_spec,
                     labor_only=labor_only,
                 )
+                redirect_args = {"msg": "Project defaults saved for manual and planned work. Existing completed print prices were not changed.", "edit_project": project_id}
 
             elif action == "delete_project":
                 project_id = request.form.get("project_id", "").strip()
@@ -3192,6 +3270,15 @@ def projects_page():
                 }
             )
         manual_jobs_view.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        from core.measurement_display import project_item_measurement, filament_display, filament_total
+        measurement_preference = _filament_measurement_preference()
+        project_factor = (p.filament_price or {}).get('grams_per_meter')
+        for item in manual_jobs_view:
+            item['_measurement'] = project_item_measurement(item['filament_g'], item['notes'], project_factor)
+            item['filament_display'] = filament_display(item['_measurement'], preference=measurement_preference)
+        totals['filament_display'] = filament_total(
+            jobs + [item['_measurement'] for item in manual_jobs_view], preference=measurement_preference,
+        )
 
         # Tracked (CSV) actual cost only (manual jobs are shown separately in totals).
         tracked_cost = 0.0
@@ -3225,6 +3312,10 @@ def projects_page():
                 }
             )
 
+        for item in plans_view:
+            item['_measurement'] = project_item_measurement(item['est_filament_g'], item['notes'], project_factor, estimated=True)
+            item['filament_display'] = filament_display(item['_measurement'], preference=measurement_preference)
+
         # Reconcile the actual view at cent precision across tracked and manual
         # components, keeping stored history and overlay full precision intact.
         actual_views=jobs+manual_jobs_view
@@ -3254,6 +3345,7 @@ def projects_page():
                 "hourly_rate_override": p.hourly_rate_override,
                 "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter"),"profile_id":p.filament_price.get("profile_id")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
                 "adjusted_jobs": len(overlays),
+                "pricing_snapshot_status": project_pricing.overlay_status(pid,overlays) if overlays else {'active':False,'stale':False},
                 "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
                 "labor_only": bool(p.labor_only),
                 "created_at": p.created_at,
@@ -3373,6 +3465,7 @@ def projects_page():
         error=error,
         message=message,
         project_export_enabled=_is_sql_only(),
+        project_pricing_enabled=_is_sql_only(),
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
         display_settings=display_settings,
@@ -3435,7 +3528,8 @@ def settings_page():
 
 
 def _settings_endpoint_for_action(action: str) -> str:
-    other_actions = {"update_columns", "backup_now", "update_backup_settings", "update_application_mode"}
+    display_actions = {"update_columns", "update_measurement_display", "display"}
+    other_actions = {"backup_now", "update_backup_settings", "update_application_mode", "other"}
     pause_actions = {"update_pause_settings"}
     profiles_actions = {
         "add_filament_profile",
@@ -3445,6 +3539,8 @@ def _settings_endpoint_for_action(action: str) -> str:
         "update_rate_profile",
         "delete_rate_profile",
     }
+    if action in display_actions:
+        return "settings_display_page"
     if action in other_actions:
         return "settings_other_page"
     if action in pause_actions:
@@ -3456,11 +3552,23 @@ def _settings_endpoint_for_action(action: str) -> str:
 
 def _settings_view(tab: str):
     tab = (tab or "printers").strip().lower()
-    if tab not in {"printers", "profiles", "other", "pause"}:
+    if tab not in {"printers", "profiles", "other", "display", "pause"}:
         tab = "printers"
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+
+        if tab == "display" and action not in {"update_columns", "update_measurement_display"}:
+            return redirect(url_for("settings_display_page", error="Choose a display setting to update."))
+
+        if action == "update_measurement_display":
+            measurement = request.form.get("filament_measurement")
+            if measurement not in ("weight", "length"):
+                return redirect(url_for("settings_display_page", error="Choose Weight (g/kg) or Length (m)."))
+            display = load_display_settings(DISPLAY_FILE, HEADERS)
+            display["filament_measurement"] = measurement
+            save_display_settings(DISPLAY_FILE, DATA_DIR, display)
+            return redirect(url_for("settings_display_page", msg="Filament display updated. Pricing and historical measurements are unchanged."))
 
         if action == "update_application_mode":
             try:
@@ -4144,7 +4252,7 @@ def _settings_view(tab: str):
     display_settings = load_display_settings(DISPLAY_FILE, HEADERS)
     selected_columns = display_settings.get("visible_columns") or HEADERS
 
-    # Settings → Other: per-table column visibility (server-backed display.json).
+    # Settings → Display: per-table column visibility, canonical in the active backend.
     # Defaults: show all allowed columns if no saved selection exists.
     recalc_allowed_cols = [
         "printer",
@@ -4186,12 +4294,14 @@ def _settings_view(tab: str):
         "printers": "settings/printers.html",
         "profiles": "settings/profiles.html",
         "other": "settings/other.html",
+        "display": "settings/display.html",
         "pause": "settings/pause.html",
     }
     subtitle_by_tab = {
         "printers": "Manage printers connected to KCD.",
         "profiles": "Rates and material costs used for calculations.",
-        "other": "Display preferences, backups, and exports.",
+        "other": "Application mode, backups, and exports.",
+        "display": "Primary filament measurements and table column preferences.",
         "pause": "Pause accounting preferences for hourly time cost.",
     }
 
@@ -4242,6 +4352,11 @@ def settings_profiles_page():
 @app.route("/settings/other", methods=["GET", "POST"], endpoint="settings_other_page")
 def settings_other_page():
     return _settings_view(tab="other")
+
+
+@app.route("/settings/display", methods=["GET", "POST"], endpoint="settings_display_page")
+def settings_display_page():
+    return _settings_view(tab="display")
 
 
 @app.route("/printer-diagnostics", methods=["GET"])

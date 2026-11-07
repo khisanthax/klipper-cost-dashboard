@@ -135,13 +135,29 @@ def quantize(value):
 
 
 def describe_job(row,profile=None):
-    """Presentation metadata only; never recalculate a saved historical cost."""
+    """Present saved measurements consistently across history and Reports.
+
+    Keep the optional profile argument for callers, but do not reinterpret an
+    old print using a mutable profile's current conversion. Explicit pricing
+    previews and live estimates use ``conversion`` with their reviewed basis.
+    """
     try:
-        measure=conversion(row,profile)
+        measure=conversion(row)
     except NumericValidationError as exc:
         # A malformed historical measurement must not hide its saved price or
         # prevent the rest of a history/report page from rendering.
         measure={'grams':None,'grams_per_meter':None,'conversion_source':'Invalid recorded measurement: '+str(exc)}
+    # Saved estimated weights are presentation evidence too. Do not recompute
+    # them using a subsequently edited profile merely to display history.
+    if row.get('filament_grams') not in (None, ''):
+        try:
+            measure['grams'] = number(row['filament_grams'], 'Saved filament grams')
+            measure['conversion_source'] = 'Saved estimated weight' if row.get('filament_weight_kind') == 'estimated' else 'Recorded weight'
+        except NumericValidationError:
+            pass
+    from core.measurement_display import filament_display
+    displayed = filament_display(row, grams=measure['grams'])
+    row['_length_meters'] = float(displayed['meters']) if displayed['meters'] is not None else None
     row['_weight_grams']=float(measure['grams']) if measure['grams'] is not None else None
     row['_weight_factor']=measure['grams_per_meter']
     row['_weight_source']=measure['conversion_source']
