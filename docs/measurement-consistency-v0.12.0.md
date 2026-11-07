@@ -2,7 +2,7 @@
 
 ## Scope and storage contract
 
-Settings → Other → Filament measurement selects Weight (g/kg, the default) or
+Settings → Display → Filament measurement selects Weight (g/kg, the default) or
 Length (m) for the whole installation. SQL-only stores `filament_measurement`
 inside `user_settings.display_settings`. CSV/dual retain their display JSON
 compatibility. No schema migration, raw-quantity rewrite, pricing-mode change or
@@ -42,6 +42,23 @@ The old Recalculate table-column controls were removed because the compact picke
 and price comparison now have fixed primary columns with expandable details.
 Legacy stored column settings are retained for backward compatibility. Other
 table column controls still work.
+
+## Project defaults and project-only prices
+
+Save Project Defaults changes the project's manual/planned pricing defaults;
+it does not update completed historical prints, printer defaults or the global
+reusable profile. Preview New Project Costs evaluates the form's current inputs
+against assigned tracked prints without implicitly saving those defaults.
+Original Project Total / Change / New Project Total include current-default
+manual work unchanged; planned work remains separate and hypothetical.
+Tracked comparisons have four primary columns with optional calculation details.
+
+Apply to Project stores only the reviewed project-adjusted snapshot after an
+expiring signed review and current source/input checks. The original SQL job
+prices remain intact. Use Original Prices removes that project-only view.
+Applied snapshots identify their active pricing view; later defaults changes
+show that previously reviewed snapshot prices are still in use and offer a new
+preview. Mixed/unknown original prices are clearly partial rather than zero.
 
 ## Reproducible acceptance
 
