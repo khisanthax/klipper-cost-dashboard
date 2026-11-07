@@ -232,7 +232,9 @@ def exercise(page,context,base,project,data,artifacts):
     assert list(Path(data,'backups').glob('kcd_backup_*.tar.gz'))
     assert 'Backup' in page.locator('body').inner_text()
     with closing(sqlite3.connect(Path(data)/'kcd.db')) as conn:
-        assert conn.execute('pragma integrity_check').fetchone()[0]=='ok';assert not conn.execute('pragma foreign_key_check').fetchall()
+        assert conn.execute('pragma integrity_check').fetchone()[0]=='ok'
+        foreign_keys=conn.execute('pragma foreign_key_check').fetchall()
+        assert not foreign_keys,foreign_keys
     page.screenshot(path=str(artifacts/'workflow-complete.png'),full_page=True)
     job_before = query("SELECT * FROM jobs WHERE job_uid='mask-0'")
     assert job_before

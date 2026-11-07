@@ -16,6 +16,7 @@ def exercise_reports(page, base, data, artifacts):
     ]
     try:
         with closing(sqlite3.connect(database)) as conn, conn:
+            conn.execute('PRAGMA foreign_keys=ON')
             for uid, printer, ended, status, hours, meters, grams, kind, time_cost, material_cost, total in fixtures:
                 printer_id = conn.execute("SELECT id FROM printers WHERE name=?", (printer,)).fetchone()[0]
                 conn.execute("""INSERT INTO jobs
@@ -63,6 +64,7 @@ def exercise_reports(page, base, data, artifacts):
         page.wait_for_function("document.querySelector('table caption').parentElement.parentElement.scrollLeft > 0")
         # Cache must refresh after a historical edit that deliberately preserves updated_at.
         with closing(sqlite3.connect(database)) as conn, conn:
+            conn.execute('PRAGMA foreign_keys=ON')
             conn.execute("UPDATE jobs SET total_cost=4.1 WHERE job_uid='report-browser-end-day'")
         page.reload()
         table = page.get_by_role("table", name="Monthly print outcomes")
@@ -73,4 +75,8 @@ def exercise_reports(page, base, data, artifacts):
         page.evaluate("document.body.style.zoom=1")
         page.set_viewport_size({"width": 1440, "height": 1000})
         with closing(sqlite3.connect(database)) as conn, conn:
+            # Match production connections: fixture cleanup must cascade image
+            # references, including callbacks that finished during navigation.
+            conn.execute('PRAGMA foreign_keys=ON')
             conn.execute("DELETE FROM jobs WHERE job_uid LIKE 'report-browser-%'")
+            assert not conn.execute('PRAGMA foreign_key_check').fetchall()

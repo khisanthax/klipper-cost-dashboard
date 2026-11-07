@@ -73,6 +73,16 @@ class MeasurementDisplayTests(unittest.TestCase):
                     save_display_settings(display,tmp,{'projects_show_cost_totals':False})
                     self.assertEqual(load_display_settings(display,HEADERS)['filament_measurement'],'length')
 
+    def test_fresh_defaults_have_one_primary_but_preserve_explicit_raw_columns(self):
+        from core.storage import _default_display_settings, _normalize_display_settings
+        from core.config import HEADERS
+        defaults = _default_display_settings(HEADERS)['visible_columns']
+        self.assertIn('filament_meters', defaults)
+        for raw in ('filament_mm','filament_grams','grams_per_meter','filament_weight_kind','filament_density','filament_diameter'):
+            self.assertNotIn(raw, defaults)
+        explicit = ['filament_mm','filament_meters','grams_per_meter']
+        self.assertEqual(_normalize_display_settings({'visible_columns':explicit},HEADERS)['visible_columns'],explicit)
+
     def test_sql_preference_restart_backup_and_history_preservation(self):
         script = r'''
 import json, sqlite3, tarfile
