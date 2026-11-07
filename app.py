@@ -1369,6 +1369,11 @@ def printer_status():
                     item['pricing_error']='Live estimate incomplete; Moonraker measurements are unavailable'
             except (ValueError,RuntimeError,TypeError):
                 item['pricing_error']='Live price unavailable; repair pricing/conversion in Printer Settings'
+        from core.measurement_display import filament_display
+        item['filament_display'] = filament_display(
+            grams=item.get('grams'), meters=(item['filament_mm'] / 1000 if item.get('filament_mm') is not None else None),
+            source=item.get('conversion_source'), kind='estimated', preference=_filament_measurement_preference(),
+        )
     return jsonify({'printers':observations}),200,{'Cache-Control':'no-store'}
 
 
@@ -1674,6 +1679,8 @@ def index():
     from core.filament import describe_job,summarize_weights
     all_filament_profiles=profiles.get_all_profiles()
     summary.update(summarize_weights(rows,all_filament_profiles))
+    from core.measurement_display import filament_total
+    summary['unknown_lengths'] = filament_total(rows)['unknown_lengths']
     for row in history_rows_page:
         describe_job(row,all_filament_profiles.get(row.get('filament_profile_id')))
 
@@ -1740,6 +1747,26 @@ def index():
 @app.context_processor
 def inventory_navigation():
     return {"inventory_available": _is_sql_only()}
+
+
+def _filament_measurement_preference():
+    """Request-local display setting, including a storage-free demo welcome."""
+    if not hasattr(flask.g, "filament_measurement_preference"):
+        public_demo = is_demo_runtime() and not getattr(flask.g, "demo_workspace_session", None)
+        config = {} if public_demo else load_display_settings(DISPLAY_FILE, HEADERS)
+        flask.g.filament_measurement_preference = config.get("filament_measurement", "weight")
+    return flask.g.filament_measurement_preference
+
+
+@app.context_processor
+def filament_measurement_context():
+    from core.measurement_display import filament_display, filament_total
+    pref = _filament_measurement_preference()
+    return {
+        "filament_measurement_preference": pref,
+        "filament_display": lambda row=None, **kwargs: filament_display(row, preference=pref, **kwargs),
+        "filament_total": lambda rows: filament_total(rows, preference=pref),
+    }
 
 
 @app.route("/inventory", methods=["GET", "POST"])
@@ -3192,6 +3219,15 @@ def projects_page():
                 }
             )
         manual_jobs_view.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        from core.measurement_display import project_item_measurement, filament_display, filament_total
+        measurement_preference = _filament_measurement_preference()
+        project_factor = (p.filament_price or {}).get('grams_per_meter')
+        for item in manual_jobs_view:
+            item['_measurement'] = project_item_measurement(item['filament_g'], item['notes'], project_factor)
+            item['filament_display'] = filament_display(item['_measurement'], preference=measurement_preference)
+        totals['filament_display'] = filament_total(
+            jobs + [item['_measurement'] for item in manual_jobs_view], preference=measurement_preference,
+        )
 
         # Tracked (CSV) actual cost only (manual jobs are shown separately in totals).
         tracked_cost = 0.0
@@ -3224,6 +3260,10 @@ def projects_page():
                     "notes": pl.notes,
                 }
             )
+
+        for item in plans_view:
+            item['_measurement'] = project_item_measurement(item['est_filament_g'], item['notes'], project_factor, estimated=True)
+            item['filament_display'] = filament_display(item['_measurement'], preference=measurement_preference)
 
         # Reconcile the actual view at cent precision across tracked and manual
         # components, keeping stored history and overlay full precision intact.
@@ -3435,7 +3475,7 @@ def settings_page():
 
 
 def _settings_endpoint_for_action(action: str) -> str:
-    other_actions = {"update_columns", "backup_now", "update_backup_settings", "update_application_mode"}
+    other_actions = {"update_columns", "backup_now", "update_backup_settings", "update_application_mode", "update_measurement_display"}
     pause_actions = {"update_pause_settings"}
     profiles_actions = {
         "add_filament_profile",
@@ -3461,6 +3501,15 @@ def _settings_view(tab: str):
 
     if request.method == "POST":
         action = (request.form.get("action") or "").strip()
+
+        if action == "update_measurement_display":
+            measurement = request.form.get("filament_measurement")
+            if measurement not in ("weight", "length"):
+                return redirect(url_for("settings_other_page", error="Choose Weight (g/kg) or Length (m)."))
+            display = load_display_settings(DISPLAY_FILE, HEADERS)
+            display["filament_measurement"] = measurement
+            save_display_settings(DISPLAY_FILE, DATA_DIR, display)
+            return redirect(url_for("settings_other_page", msg="Filament display updated. Pricing and historical measurements are unchanged."))
 
         if action == "update_application_mode":
             try:

@@ -57,6 +57,7 @@ def estimate_print(values, upload=None):
     displayed_material = quantize(costs["material_cost"]) if grams is not None else None
     return {
         **costs, "duration_seconds": duration, "filament_grams": grams, "weight_source": weight_source,
+        "filament_meters": metadata.filament_mm / 1000 if metadata and metadata.filament_mm is not None else (grams / factor if grams is not None and factor is not None else None),
         "filament_price_per_kg": per_kg, "hourly_rate": rate,
         "grams_per_meter": factor, "pricing_source": profile,
         "slicer": metadata.slicer if metadata else None, "kind": "estimate",

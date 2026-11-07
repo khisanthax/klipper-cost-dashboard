@@ -55,7 +55,7 @@ def display_job(row):
 
 def summarize(rows, period, now):
     start, end = period
-    totals = {key: None for key in ("hours", "_weight_grams", "time_cost", "material_cost", "total_cost")}
+    totals = {key: None for key in ("hours", "_weight_grams", "_length_meters", "time_cost", "material_cost", "total_cost")}
     unknown = dict.fromkeys(totals, 0)
     counts = dict.fromkeys(("Completed", "Failed", "Canceled", "Other or unknown"), 0)
     # Short ranges show daily activity. Longer ranges use local calendar weeks.

@@ -88,6 +88,7 @@ def _default_display_settings(headers):
         "hidden_printers": [],
         "pause_include_paused_time_default": False,
         "projects_show_cost_totals": True,
+        "filament_measurement": "weight",
     }
 
 
@@ -128,6 +129,7 @@ def _normalize_display_settings(data, headers):
         "hidden_printers": hidden,
         "pause_include_paused_time_default": pause_include,
         "projects_show_cost_totals": show_cost_totals,
+        "filament_measurement": data.get("filament_measurement") if data.get("filament_measurement") in ("weight", "length") else "weight",
     }
 
 def _copy_if_missing(src: str, dest: str) -> bool:
@@ -382,6 +384,8 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     show_cost_totals = display_settings.get("projects_show_cost_totals", existing.get("projects_show_cost_totals", True))
     existing["projects_show_cost_totals"] = True if show_cost_totals is None else bool(show_cost_totals)
+    measurement = display_settings.get("filament_measurement", existing.get("filament_measurement", "weight"))
+    existing["filament_measurement"] = measurement if measurement in ("weight", "length") else "weight"
 
     if _is_sql_only():
         _save_user_settings_sql("display_settings", existing)

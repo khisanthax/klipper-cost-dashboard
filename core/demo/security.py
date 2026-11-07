@@ -58,7 +58,7 @@ PROJECT_ACTIONS = frozenset({
     "fulfill_plan_item", "delete_plan_item", "convert_plan_to_manual",
 })
 SETTINGS_ACTIONS = frozenset({
-    "delete_printer", "update_pause_settings", "save_printer_defaults", "update_columns",
+    "delete_printer", "update_pause_settings", "save_printer_defaults", "update_columns", "update_measurement_display",
     "rename_printer", "merge_printers", "add_filament_profile",
     "update_filament_profile", "delete_filament_profile", "set_active_filament_profile",
     "add_rate_profile", "update_rate_profile", "delete_rate_profile",
