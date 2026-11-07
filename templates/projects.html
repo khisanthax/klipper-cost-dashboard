@@ -170,7 +170,7 @@
                                 <span class="kcd-caret">▸</span>
                             </button>
                         </td>
-                        <td class="fw-semibold">{{ p.name }}</td>
+                        <td class="fw-semibold">{{ p.name }}<div class="small text-muted">{{ 'Project-Adjusted Cost' if p.adjusted_jobs else 'Saved Historical Cost' }}</div>{% if p.pricing_snapshot_status.stale %}<div class="small text-warning">Snapshot uses previously reviewed prices; preview updated costs.</div>{% endif %}</td>
                         <td class="text-end">{{ p.totals.prints|int }}</td>
                         <td class="text-end">{{ "%.2f"|format(p.totals.hours) }}</td>
                         <td class="text-end">
@@ -215,7 +215,7 @@
                                                   {% for fid, profile in (filament_profiles|default({})).items() %}<option value="{{ fid }}" {% if p.price_record.get('profile_id')==fid %}selected{% endif %}>{{ profile.name }}</option>{% endfor %}
                                                 </select>
                                               </label>
-                                              <div class="small text-muted">Selected profile takes precedence on Save. Manual/planned costs use these defaults; tracked costs need a fresh preview and apply. Clear prices to restore defaults.</div>
+                                              <div class="small text-muted">Selected profile supplies this project's pricing; it does not change the reusable profile or printer defaults. Custom pricing below is project-specific.</div>
                                               {% set price_record=p.price_record %}{% set price_form='' %}{% set price_required=false %}
                                               {% include 'partials/_filament_price_inputs.html' %}
                                             </div>
@@ -226,15 +226,14 @@
                                                     <label class="form-check-label" for="labor_only_{{ p.id }}">Labor-only</label>
                                                 </div>
                                             </div>
-                                            <div class="col-md-2 d-flex">
-                                                <button type="submit" class="btn btn-outline-primary w-100">Save</button>
+                                            <div class="col-12 d-flex flex-wrap gap-2">
+                                                <button type="submit" class="btn btn-outline-primary">Save Project Defaults</button>
+                                                <button type="submit" class="btn btn-primary" formaction="{{ url_for('project_pricing_page',project_uid=p.id) }}">Preview New Project Costs</button>
                                             </div>
+                                            <div class="small text-muted">Save pricing for this project's manual and planned work. Existing completed print prices are not changed.</div>
+                                            <div class="small text-muted">Preview uses the current pricing inputs without saving defaults. Apply to Project changes only the project-adjusted tracked-print view.</div>
                                         </form>
-
-                                        <a class="btn btn-outline-secondary"
-                                           href="{{ url_for('project_pricing_page', project_uid=p.id) }}">
-                                            Preview project-adjusted costs…
-                                        </a>
+                                        {% if p.adjusted_jobs %}<form method="post" action="{{ url_for('project_pricing_page',project_uid=p.id) }}"><button class="btn btn-outline-secondary" name="action" value="clear">Use Original Prices</button></form>{% endif %}
 
                                         <a class="btn btn-outline-secondary" href="{{ url_for('recalculate_page',project=p.id) }}">Advanced Recalculate saved history…</a>
                                         {% if project_export_enabled and (show_advanced|default(true)) and (not kcd_demo_mode or demo_endpoint_available('export_project')) %}
@@ -927,7 +926,7 @@
     document.addEventListener("DOMContentLoaded", function () {
         const editProject = "{{ (edit_project or '')|e }}";
         const editManualJobId = "{{ (edit_manual_job_id or '')|e }}";
-        if (!editProject || !editManualJobId) return;
+        if (!editProject) return;
 
         const collapseEl = document.getElementById("proj-" + editProject);
         if (collapseEl && window.bootstrap && bootstrap.Collapse) {
@@ -937,6 +936,7 @@
             } catch (e) { }
         }
 
+        if (!editManualJobId) return;
         const editButton = document.querySelector(`[data-kcd-manual-open="edit"][data-manual-job-id="${editManualJobId}"]`);
         if (editButton) {
             editButton.click();

@@ -85,12 +85,12 @@ def exercise(page,context,base,project,data,artifacts):
     # Existing RaRa acceptance: saved historical totals, project-only snapshot.
     originals=query('SELECT * FROM jobs ORDER BY job_uid')
     page.goto(base+'/projects/'+project+'/pricing')
-    assert '40.83' in page.locator('tfoot').inner_text()
+    assert '40.83' in page.locator('#project-pricing-totals').inner_text()
     assert '2721.882' in page.locator('body').inner_text() or '2721.882' in str(sum(Decimal(str(r['filament_grams'])) for r in query("SELECT filament_grams FROM jobs WHERE job_uid LIKE 'mask-%'")))
-    click(page.get_by_role('button',name='Apply project-adjusted snapshot',exact=True))
+    click(page.get_by_role('button',name='Apply to Project',exact=True))
     assert len(query('SELECT * FROM project_job_pricing'))==15
     assert query('SELECT * FROM jobs ORDER BY job_uid')==originals
-    page.goto(base+'/projects/'+project+'/pricing');click(page.get_by_role('button',name='Use saved historical costs',exact=True))
+    page.goto(base+'/projects/'+project+'/pricing');click(page.get_by_role('button',name='Use Original Prices',exact=True))
     assert not query('SELECT * FROM project_job_pricing')
     # Create with a project profile; manual/planned costs are distinct actual/estimated views.
     page.goto(base+'/projects');create=form('create_project')
@@ -101,7 +101,7 @@ def exercise(page,context,base,project,data,artifacts):
     created=query('SELECT * FROM projects WHERE name=?',"Maker's browser workflow")[0];pid=created['project_uid']
     assert created['hourly_rate_override']==0 and created['filament_cost_per_kg_override']==15
     assert json.loads(created['filament_price_json'])['profile_id']=='petg-15'
-    panel=open_project(pid);edit=form('update_project',panel);edit.locator('[name=notes]').fill('Verified through actual forms');click(edit.get_by_role('button',name='Save',exact=True))
+    panel=open_project(pid);edit=form('update_project',panel);edit.locator('[name=notes]').fill('Verified through actual forms');click(edit.get_by_role('button',name='Save Project Defaults',exact=True))
     assert query('SELECT notes FROM projects WHERE project_uid=?',pid)[0]['notes']=='Verified through actual forms'
     # Assign and remove exactly one existing job; history remains unchanged.
     assignment=page.locator('form').filter(has=page.locator('button[value=assign_jobs]'))
@@ -155,7 +155,7 @@ def exercise(page,context,base,project,data,artifacts):
     # Project defaults can be explicitly cleared without modifying saved history.
     panel=open_project(pid);edit=form('update_project',panel)
     edit.locator('[name=project_filament_profile_id]').select_option('');edit.locator('[name=pricing_amount]').fill('');edit.locator('[name=hourly_rate_override]').fill('')
-    click(edit.get_by_role('button',name='Save',exact=True))
+    click(edit.get_by_role('button',name='Save Project Defaults',exact=True))
     cleared=query('SELECT * FROM projects WHERE project_uid=?',pid)[0]
     assert cleared['hourly_rate_override'] is None and cleared['filament_cost_per_kg_override'] is None
     # Delete project after reviewing the confirmation; jobs are never deleted.

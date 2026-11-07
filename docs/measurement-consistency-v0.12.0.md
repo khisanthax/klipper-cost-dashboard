@@ -25,6 +25,32 @@ original millimeters, material/profile, factor and recorded/estimated provenance
 remain in details. Long filenames have bounded previews and expandable selectable
 full text. Explicit pricing and stock-entry units remain labelled independently.
 
+## Project defaults and project-only pricing
+
+Save Project Defaults saves pricing for this project's manual and planned work;
+existing completed-print prices are not changed. Selected filament profiles supply
+project-specific pricing without editing the reusable profile or printer defaults.
+
+Preview New Project Costs submits the current pricing inputs without saving them.
+Review Original Project Total / Change / New Project Total and the four-column
+Print / Original / Change / New table. Original is saved historical pricing for
+completed prints; new is a proposed project-only snapshot. Manual actual costs
+remain on saved defaults and appear in both totals. Planned/Projected Cost is
+hypothetical and excluded. Other print outcomes are not repriced: their existing
+prices remain in both totals, and unknown prices make the subtotal explicitly
+partial. Previously applied snapshots for non-completed jobs are retained until
+Use Original Prices is chosen. No outcome is inferred from duration or filename.
+
+Apply to Project writes only completed-print project snapshots and an audit event.
+A signed 15-minute review binds the project, normalized unsaved inputs, profiles,
+historical data, membership and manual actual costs. Changed sources require a new
+preview. Project defaults and historical jobs remain unchanged. Projects identifies
+the active Saved Historical Cost or Project-Adjusted Cost view and warns when an
+applied snapshot still uses previously reviewed inputs. Use Original Prices clears
+only the snapshots. Calculation Details retain raw components, signed adjustments,
+measurements and pricing provenance. Displayed cents reconcile across tracked and
+manual components; full precision remains in stored snapshots.
+
 ## Recalculate Center
 
 Select jobs and a plan, choose Preview Changes, review Original Total / Change /
@@ -78,6 +104,13 @@ preview. Mixed/unknown original prices are clearly partial rather than zero.
 - `python tools/browser_pricing_regression.py`: real selection/preview/apply,
   stale plans, selected profiles, $0/hour + $15/kg, original snapshots/recovery,
   equal-cost profile replacement, component reconciliation and responsive review.
+- `python -m unittest discover -s tests -p 'test_project_pricing_review.py'`:
+  unsaved inputs, signed/expired/cross-project reviews, unknown and zero originals,
+  manual subtotals, completed-only scope, retained non-completed snapshots, stale
+  sources and overlay-only apply/clear without historical or profile writes.
+- `python tools/browser_project_pricing_regression.py`: real Project Save Defaults,
+  unsaved preview, simple comparison, Apply to Project, stale notice, Use Original
+  Prices, keyboard details and desktop/tablet/mobile layouts with exact SQL checks.
 - Existing whole-dashboard/axe, history selection, thumbnail, isolated demo,
   installer/SSH/systemd/Docker and seeded upgrade/rollback gates remain required
   in Release Validation. Display summaries do not change inventory deductions.

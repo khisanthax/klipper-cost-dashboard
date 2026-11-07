@@ -1,35 +1,53 @@
 {% extends 'base.html' %}
 {% from "partials/_filename.html" import filename as filename_label %}
 {% from "partials/_filament_measurement.html" import measurement with context %}
+{% macro currency(value, signed=false) -%}{{ '-$' if value < 0 else '+$' if signed and value > 0 else '$' }}{{ '%.2f'|format(value|abs) }}{%- endmacro %}
 {% block content %}
-<h1 class="h3">Project pricing preview — {{ plan.project.name }}</h1>
-<p>Tracked jobs keep their saved historical prices until you explicitly apply this project-only snapshot. Historical job records are retained unchanged. Manual jobs use current project defaults and their recorded grams; exact total overrides remain exact. Planned items are hypothetical estimates and are excluded from actual totals.</p>
-{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
-<div class="alert alert-info">
-  Known filament subtotal: {{ measurement(filament_display(grams=plan.grams, meters=plan.meters, source='Project preview; per-job conversion details below')) }}
-  {% if plan.unknown_weights %}<strong>{{ plan.unknown_weights }} jobs have unavailable measurements or calculation errors; they are not treated as zero weight.</strong>{% endif %}<br>
-  Saved historical: ${{ '%.2f'|format(plan.before_totals.total_cost) }} → Project-adjusted preview: <strong>${{ '%.2f'|format(plan.after_totals.total_cost) }}</strong>.
-  No changes have been applied by opening this page.
+<h1 class="h3">Preview New Project Costs — {{ plan.project.name }}</h1>
+<p>Original means <strong>Saved Historical Cost</strong> for completed prints. New means the proposed <strong>Project-Adjusted Cost</strong>. Only completed prints are repriced; other outcomes retain their current project view. Historical records, reusable profiles and saved project defaults remain unchanged.</p>
+{% if plan.inputs is not none %}<p class="alert alert-info">This preview uses the pricing inputs you just entered. They have not been saved as project defaults.</p>{% endif %}
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+<section class="card mb-3" aria-label="Project price comparison">
+ <div class="card-body row g-3" id="project-pricing-totals">
+  <div class="col-12 col-sm-4"><div>{{ 'Known Original Project Subtotal' if plan.unknown_originals or plan.errors else 'Original Project Total' }}</div><strong class="fs-4">{{ currency(plan.known_original_total) }}</strong>{% if plan.unknown_originals or plan.errors %}<div class="small">Partial subtotal: {{ plan.unknown_originals }} unpriced and {{ plan.errors|length }} calculation error(s).</div>{% endif %}</div>
+  <div class="col-12 col-sm-4"><div>Change</div><strong class="fs-4">{% if plan.unknown_originals or plan.errors %}Unavailable{% else %}{{ currency(plan.after_totals.total_cost-plan.before_totals.total_cost,true) }}{% endif %}</strong></div>
+  <div class="col-12 col-sm-4"><div>{{ 'Known New Project Subtotal' if plan.errors or plan.unknown_new else 'New Project Total' }}</div><strong class="fs-4">{{ currency(plan.after_totals.total_cost) }}</strong>{% if plan.unknown_new %}<div class="small">Partial subtotal: {{ plan.unknown_new }} unchanged job(s) remain unpriced.</div>{% endif %}</div>
+ </div>
+</section>
+<p class="small">Actual totals include assigned tracked prints and {{ plan.manual_rows|length }} manual job(s). Manual work retains current saved-default pricing and exact overrides: <strong>{{ currency(plan.manual_before) }}</strong>{% if plan.manual_after != plan.manual_before %} → {{ currency(plan.manual_after) }} after display-cent allocation (raw prices unchanged){% endif %}. Planned/Projected Cost is hypothetical and excluded.</p>
+{% if plan.unchanged_rows %}<p class="small">{{ plan.unchanged_rows|length }} non-completed job(s) are unchanged. Their known current subtotal is {{ currency(plan.unchanged_before) }}; {{ plan.unknown_new }} remain Unpriced. {% if plan.retained_overlay_count %}{{ plan.retained_overlay_count }} previously applied non-completed snapshot(s) are retained in both totals until Use Original Prices is chosen.{% endif %}</p>{% endif %}
+<div tabindex="0" role="group" aria-label="Scrollable project price comparison" class="table-responsive">
+ <table class="table table-striped table-sm" id="project-pricing-preview">
+  <thead><tr><th scope="col">Print</th><th scope="col" class="text-end">Original</th><th scope="col" class="text-end">Change</th><th scope="col" class="text-end">New</th></tr></thead>
+  <tbody>
+  {% for row in plan.rows %}
+   <tr><td>{{ filename_label(row.filename) }}<details class="small project-calculation-details"><summary>Calculation Details</summary>
+    {{ measurement(filament_display(grams=row.grams, meters=row.meters, factor=row.grams_per_meter, source=row.conversion_source, kind=row.weight_kind)) }}
+    <div style="overflow-wrap:anywhere">Job UID: {{ row.job_uid }}<br>Pricing source: {{ row.pricing_source }}<br>
+     Original Time Cost: {{ row.recorded_costs.time_cost if row.recorded_costs.time_cost is not none else 'Unavailable' }}<br>New Time Cost: {{ row.after.time_cost }}<br>
+     Original Material Cost: {{ row.recorded_costs.material_cost if row.recorded_costs.material_cost is not none else 'Unavailable' }}<br>New Material Cost: {{ row.after.material_cost }}<br>
+     Original Adjustment: {{ row.before.adjustment if row.original_price_known and row.recorded_costs.time_cost is not none and row.recorded_costs.material_cost is not none else 'Unavailable' }}<br>New Adjustment: {{ row.after.adjustment }}<br>
+     Original Total (full precision): {{ row.recorded_costs.total_cost if row.original_price_known else 'Unpriced' }}<br>New Total (full precision): {{ row.after.total_cost }}<br>
+     Displayed New Time / Material / Adjustment: {{ currency(row.after.display_time_cost) }} / {{ currency(row.after.display_material_cost) }} / {{ currency(row.after.display_adjustment) }}
+    </div></details></td>
+    <td class="text-end text-nowrap" data-col="original">{{ currency(row.before.display_total_cost) if row.original_price_known else 'Unpriced' }}</td>
+    <td class="text-end text-nowrap" data-col="change">{{ currency(row.after.display_total_cost-row.before.display_total_cost,true) if row.original_price_known else 'Unavailable' }}</td>
+    <td class="text-end text-nowrap" data-col="new">{{ currency(row.after.display_total_cost) }}</td></tr>
+  {% endfor %}
+  {% for item in plan.errors %}<tr><td>{{ filename_label(item.filename) }}<div class="small text-danger">{{ item.error }}</div></td><td>Unavailable</td><td>Unavailable</td><td>Unavailable</td></tr>{% endfor %}
+  </tbody>
+  <tfoot>
+  {% if plan.manual_rows %}<tr><th>Manual work (unchanged)</th><td class="text-end">{{ currency(plan.manual_before) }}</td><td class="text-end">{{ currency(plan.manual_after-plan.manual_before,true) }}</td><td class="text-end">{{ currency(plan.manual_after) }}</td></tr>{% endif %}
+  {% if plan.unchanged_rows %}<tr><th><details><summary>Other outcomes (unchanged)</summary>{% for row in plan.unchanged_rows %}<div>{{ filename_label(row.filename) }} · {{ row.status }} · {{ currency(row.before.display_total_cost) if row.original_price_known else 'Unpriced' }}{% if row.retained_overlay %} (previous snapshot retained){% endif %}</div>{% endfor %}</details></th><td class="text-end">{{ currency(plan.unchanged_before) }}{% if plan.unknown_new %} + Unpriced{% endif %}</td><td class="text-end">{{ 'Unavailable' if plan.unknown_new else currency(plan.unchanged_after-plan.unchanged_before,true) }}</td><td class="text-end">{{ currency(plan.unchanged_after) }}{% if plan.unknown_new %} + Unpriced{% endif %}</td></tr>{% endif %}
+  </tfoot>
+ </table>
 </div>
-{% for item in plan.errors %}<div class="alert alert-warning">{{ item.filename }}: {{ item.error }}</div>{% endfor %}
-<div tabindex="0" role="group" aria-label="Scrollable table; use arrow keys to view more columns" class="table-responsive">
-<table class="table table-striped table-sm" id="project-pricing-preview">
-<thead><tr><th>Job / conversion</th><th>Source</th><th>View</th><th>Time ($)</th><th>Material ($)</th><th>Adjustment ($)</th><th>Total ($)</th></tr></thead>
-<tbody>
-{% for row in plan.rows %}
-<tr><td rowspan="2">{{ filename_label(row.filename) }}{{ measurement(filament_display(grams=row.grams, meters=row.meters, factor=row.grams_per_meter, source=row.conversion_source, kind=row.weight_kind)) }}</td>
-<td rowspan="2">{{ row.pricing_source }}<br><small>Unrounded adjusted material: ${{ row.after.material_cost }}</small></td><td>Saved historical</td>
-{% for key in ['time_cost','material_cost','adjustment','total_cost'] %}<td>{{ '%.2f'|format(row.before['display_' ~ key]) }}</td>{% endfor %}</tr>
-<tr><td>Project-adjusted preview</td>{% for key in ['time_cost','material_cost','adjustment','total_cost'] %}<td>{{ '%.2f'|format(row.after['display_' ~ key]) }}</td>{% endfor %}</tr>
-{% endfor %}
-</tbody>
-<tfoot><tr><th colspan="3">Adjusted tracked totals (sum of displayed components)</th>{% for key in ['time_cost','material_cost','adjustment','total_cost'] %}<th>{{ '%.2f'|format(plan.after_totals[key]) }}</th>{% endfor %}</tr></tfoot>
-</table></div>
 <form method="post" class="d-flex flex-wrap gap-2 my-3">
-  <input type="hidden" name="fingerprint" value="{{ plan.fingerprint }}">
-  <button class="btn btn-primary" name="action" value="apply" {% if plan.errors %}disabled{% endif %}>Apply project-adjusted snapshot</button>
-  <button class="btn btn-outline-secondary" name="action" value="clear">Use saved historical costs</button>
-  <a class="btn btn-outline-secondary" href="{{ url_for('projects_page') }}">Back to projects</a>
+ <input type="hidden" name="fingerprint" value="{{ plan.fingerprint }}">
+ <input type="hidden" name="review_token" value="{{ review_token }}">
+ <button class="btn btn-primary" name="action" value="apply" {% if plan.errors or error or not plan.rows %}disabled{% endif %}>Apply to Project</button>
+ <button class="btn btn-outline-secondary" name="action" value="clear">Use Original Prices</button>
+ <a class="btn btn-outline-secondary" href="{{ url_for('projects_page',edit_project=plan.project.project_uid) }}">Back to projects</a>
 </form>
-<p class="small text-muted">Displayed cents are allocated across jobs so component totals reconcile. Full precision is retained in the snapshot. Changing defaults later requires a fresh preview and apply. History and Reports continue to show saved historical job costs.</p>
+<p class="small text-muted">No prices change during preview. Displayed cents reconcile across tracked and manual components; full precision is stored in the snapshot. History and Reports retain Saved Historical Cost. Editing defaults later leaves an applied snapshot on its previously reviewed prices until you preview and apply again.</p>
 {% endblock %}

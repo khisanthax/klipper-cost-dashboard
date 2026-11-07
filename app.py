@@ -2837,23 +2837,35 @@ def recalculate_preview():
 @app.route('/projects/<project_uid>/pricing',methods=['GET','POST'])
 def project_pricing_page(project_uid):
     from core import project_pricing
+    from itsdangerous import URLSafeTimedSerializer,BadSignature
     if not _is_sql_only():
         return redirect(url_for('projects_page',error='Project-only pricing snapshots require SQL storage; compatibility history is unchanged'))
     error=None
+    request.max_content_length=64*1024
+    signer=URLSafeTimedSerializer(API_KEY,salt='kcd-project-pricing-review-v1')
     try:
         if request.method=='POST':
-            if request.form.get('action')=='clear':
+            action=request.form.get('action')
+            if action=='clear':
                 project_pricing.clear(project_uid)
-            elif request.form.get('action')=='apply':
-                project_pricing.apply(project_uid,request.form.get('fingerprint',''))
-            return redirect(url_for('projects_page',msg='Project price view updated. Historical job prices were retained.'))
-        plan=project_pricing.preview(project_uid)
+                return redirect(url_for('projects_page',msg='Original historical prices are active. Project snapshots removed; history and defaults unchanged.',edit_project=project_uid),code=303)
+            elif action=='apply':
+                try:review=signer.loads(request.form.get('review_token',''),max_age=900)
+                except BadSignature:raise ValueError('Pricing review expired or is invalid. Preview New Project Costs again.')
+                if review.get('project_uid')!=project_uid:raise ValueError('Pricing review belongs to another project. Preview again.')
+                project_pricing.apply(project_uid,review['fingerprint'],review.get('inputs'))
+                return redirect(url_for('projects_page',msg='Project-Adjusted Cost is active. Saved Historical Cost and project defaults were retained.',edit_project=project_uid),code=303)
+            elif action=='update_project' or action=='preview':
+                plan=project_pricing.preview(project_uid,project_pricing.inputs_from_form(request.form))
+            else:raise ValueError('Unknown project pricing action. Preview New Project Costs again.')
+        else:plan=project_pricing.preview(project_uid)
     except ValueError as exc:
         error=str(exc)
         if error=='Project not found':
             return ('Project not found',404)
         plan=project_pricing.preview(project_uid)
-    return render_template('project_pricing.html',plan=plan,error=error),409 if error else 200
+    review_token=signer.dumps(dict(project_uid=project_uid,inputs=plan['inputs'],fingerprint=plan['fingerprint']))
+    return render_template('project_pricing.html',plan=plan,error=error,review_token=review_token),409 if error else 200
 
 
 @app.get("/projects/<project_uid>/export.json")
@@ -2932,6 +2944,7 @@ def projects_page():
                     filament_price=modern_spec,
                     labor_only=labor_only,
                 )
+                redirect_args = {"msg": "Project defaults saved for manual and planned work. Existing completed print prices were not changed.", "edit_project": project_id}
 
             elif action == "delete_project":
                 project_id = request.form.get("project_id", "").strip()
@@ -3332,6 +3345,7 @@ def projects_page():
                 "hourly_rate_override": p.hourly_rate_override,
                 "price_record": {"filament_mode":p.filament_price.get("mode"),"price_input_mode":p.filament_price.get("input_mode"),"filament_rate":p.filament_price.get("rate"),"spool_price":p.filament_price.get("spool_price"),"net_spool_grams":p.filament_price.get("net_spool_grams"),"grams_per_meter":p.filament_price.get("grams_per_meter"),"profile_id":p.filament_price.get("profile_id")} if p.filament_price else {"filament_mode":"per_kg","filament_rate":p.filament_cost_per_kg_override},
                 "adjusted_jobs": len(overlays),
+                "pricing_snapshot_status": project_pricing.overlay_status(pid,overlays) if overlays else {'active':False,'stale':False},
                 "filament_cost_per_kg_override": p.filament_cost_per_kg_override,
                 "labor_only": bool(p.labor_only),
                 "created_at": p.created_at,

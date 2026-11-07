@@ -187,8 +187,8 @@ def main():
                     # Project-only preview/apply does not overwrite recorded jobs.
                     before_overlay=query('SELECT * FROM jobs ORDER BY job_uid')
                     page.goto(base+'/projects/'+project+'/pricing')
-                    assert page.locator('#project-pricing-preview tbody tr').count()==30
-                    with page.expect_navigation(wait_until='domcontentloaded'):page.get_by_role('button',name='Apply project-adjusted snapshot').click()
+                    assert page.locator('#project-pricing-preview tbody tr').count()==15
+                    with page.expect_navigation(wait_until='domcontentloaded'):page.get_by_role('button',name='Apply to Project',exact=True).click()
                     assert len(query('SELECT * FROM project_job_pricing'))==15
                     assert query('SELECT * FROM jobs ORDER BY job_uid')==before_overlay
                     assert 'Project-adjusted snapshot' in page.locator('body').text_content()
