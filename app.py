@@ -2663,8 +2663,13 @@ def recalculate_preview():
             paused_seconds_total = 0.0
         try:
             old_total = float(r.get("total_cost") or 0.0)
+            original_price_known = r.get("total_cost") not in (None, "") and math.isfinite(old_total)
         except Exception:
             old_total = 0.0
+            original_price_known = False
+        if not math.isfinite(old_total):
+            old_total = 0.0
+        recorded_prices = {key: r.get(key) for key in ("total_cost", "time_cost", "material_cost")}
 
         try:
             computed = (compute_fn.for_row(r) if hasattr(compute_fn,"for_row") else compute_fn(printer_name, duration_seconds, filament_mm, paused_seconds_total)) or {}
@@ -2697,6 +2702,8 @@ def recalculate_preview():
         preview_rows.append(
             {
                 "job_uid": uid,
+                "original_price_known": original_price_known,
+                "recorded_prices": recorded_prices,
                 "printer": printer_name,
                 "filename": str(r.get("filename") or ""),
                 "duration_hours": duration_hours,
@@ -2730,6 +2737,8 @@ def recalculate_preview():
     display_before,display_after=reconcile_preview(preview_rows)
     before_total=float(display_before['total_cost'])
     after_total=float(display_after['total_cost'])
+    unknown_original_count=sum(not row['original_price_known'] for row in preview_rows)
+    known_original_total=sum(row['display_old_total_cost'] for row in preview_rows if row['original_price_known'])
 
     canonical_printers = sorted(get_canonical_printer_names(include_hidden=True))
     filament_profiles = profiles.get_all_profiles()
@@ -2789,7 +2798,8 @@ def recalculate_preview():
         preview_hash=preview_fingerprint(list(raw_preview.values()),compute_fn,plan) if _is_sql_only() and not preview_errors else '',
         preview={
             "rows": preview_rows,
-            "totals": {"before": before_total, "after": after_total, "delta": after_total - before_total},
+            "totals": {"before": known_original_total, "after": after_total, "delta": after_total - before_total,
+                       "unknown_original_count": unknown_original_count},
             "plan": plan,
         },
         pager={

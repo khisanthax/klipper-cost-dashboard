@@ -20,6 +20,12 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-07 — Preserve unpriced originals in recalculation review
+
+- **Status:** local follow-up to the Recalculate UX implementation, not pushed/deployed. Root final review identified that NULL original costs were displayed as zero by the existing preview's numeric-allocation fallback.
+- **Fix:** preview presentation now carries an explicit finite original-price flag and raw saved components. Unpriced rows show Unpriced / Unavailable rather than a fabricated original price or change. Mixed selections label the known original subtotal as partial, count excluded unpriced jobs and mark aggregate change unavailable. Explicit zero remains a known price. Signed price changes use conventional `-$` / `+$` formatting. Internal allocation, pricing, fingerprints, apply and first-original recovery are unchanged.
+- **Verification:** `python -m unittest discover -s tests -p test_recalculate*.py` — 13 passed. New disposable SQL regression verifies mixed known/zero/NULL original totals, unavailable raw components, correct known subtotal/new total, signed changes, nonmutating preview, explicit profile application and restoration of original NULL time/material/total costs. Combined browser/CI validation remains with the parent integration; no production access or changes.
+
 ### 2026-11-07 — Recalculate Center price comparison UX (local implementation)
 
 - **Status / scope:** implemented and locally tested on isolated `codex/recalculate-ux-nov7` from main `8db0cd1`; not pushed, merged, released or deployed. Integrates the shared measurement-display helper from `01dd323`. No production access or state changes.
