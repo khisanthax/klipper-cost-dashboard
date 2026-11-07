@@ -135,9 +135,14 @@ def quantize(value):
 
 
 def describe_job(row,profile=None):
-    """Presentation metadata only; never recalculate a saved historical cost."""
+    """Present saved measurements consistently across history and Reports.
+
+    Keep the optional profile argument for callers, but do not reinterpret an
+    old print using a mutable profile's current conversion. Explicit pricing
+    previews and live estimates use ``conversion`` with their reviewed basis.
+    """
     try:
-        measure=conversion(row,profile)
+        measure=conversion(row)
     except NumericValidationError as exc:
         # A malformed historical measurement must not hide its saved price or
         # prevent the rest of a history/report page from rendering.

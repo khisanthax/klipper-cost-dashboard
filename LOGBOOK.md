@@ -20,6 +20,11 @@ Never include credentials, API keys, personal data, private backup contents, or 
 
 ## Latest established baseline
 
+### 2026-11-07 — Historical quantity provenance consistency
+
+- Final read-only presentation review found that Dashboard/Projects could fall back to a mutable current profile for an old job with no saved conversion, while Reports correctly kept that weight unknown. Historical `describe_job` now uses only saved job measurement/conversion, matching the shared formatter and Reports. Explicit reviewed pricing previews and live estimates retain their current conversion behavior. No raw measurement, profile, price or database row is changed.
+- Added a same-job/profile-edited regression asserting unknown weight in both historical presentation and Reports. Saved estimated weights and known per-job conversions remain preserved. Required final exact-head CI remains the merge gate.
+
 ### 2026-11-07 — PR 78 accessibility validation correction
 
 - Initial full [Release Validation 42373366330](https://github.com/khisanthax/klipper-cost-dashboard/actions/runs/42373366330) passed Linux unit tests, SQL isolation, history/pricing/project browser suites and 56 measurement layouts. The 96-page audit found zero page overflow/unlabelled controls but failed axe `target-size` for adjacent Full filename and Calculation Details summaries on Project pricing. Failure JSON/screenshots remain in that run's artifact and ignored local evidence.

@@ -37,6 +37,10 @@ class MeasurementDisplayTests(unittest.TestCase):
         self.assertEqual(filament_display(stored)["text"], "300.00 g")
         from core.filament import describe_job
         self.assertEqual(describe_job(dict(stored), {"grams_per_meter": 5})["_weight_grams"], 300)
+        historical = dict(filament_meters=10, filament_profile_id='edited-profile')
+        self.assertIsNone(describe_job(historical, {'grams_per_meter':4})['_weight_grams'])
+        from core.reports import prepare_recorded_recent
+        self.assertIsNone(prepare_recorded_recent([historical])[0]['_weight_grams'])
 
     def test_mixed_subtotals_do_not_invent_one_conversion(self):
         total = filament_total([
