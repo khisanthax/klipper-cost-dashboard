@@ -337,7 +337,7 @@
                         <th>File</th>
                         <th>Status</th>
                         <th>Elapsed</th>
-                        <th>Filament used (g)</th>
+                        <th>Filament used</th>
                         <th class="text-end">Live estimated cost</th>
                         <th class="text-end">Est. Final</th>
                         <th>Actions</th>
@@ -360,7 +360,7 @@
                                 {% include "partials/_thumbnail.html" %}
                             {% endif %}
                         </td>
-                        <td data-live-filename>{{ job.filename }}</td>
+                        <td data-live-filename>{{ filename_label(job.filename) }}</td>
                         <td>
                             <span
                                 data-live-state class="badge bg-secondary">

@@ -1,6 +1,22 @@
 /* Current observations are separate from retained KCD event state. */
 (() => {
   let pending=false;
+  function renderFilename(node, value) {
+    const wasOpen=node.querySelector('[data-filename-details]')?.open||false;
+    const wrapper=document.createElement('div'); wrapper.className='kcd-filename';
+    const preview=document.createElement('div'); preview.className='kcd-filename-preview';
+    preview.dataset.filenamePreview=''; preview.textContent=value||'Unknown filename';
+    wrapper.append(preview);
+    if(value) {
+      const details=document.createElement('details'); details.className='small text-muted';
+      details.dataset.filenameDetails=''; details.open=wasOpen;
+      const summary=document.createElement('summary'); summary.textContent='Full filename';
+      const full=document.createElement('div'); full.className='kcd-filename-full';
+      full.dataset.filenameFull=''; full.textContent=value;
+      details.append(summary,full); wrapper.append(details);
+    }
+    node.replaceChildren(wrapper);
+  }
   function renderFilament(node, item, active) {
     const detailsOpen=node.querySelector('[data-filament-details]')?.open||false;
     node.replaceChildren();
@@ -50,7 +66,7 @@
         const current=node.querySelector('[data-live-current]');
         if(current)current.textContent=active?item.filename+' · '+(item.filament_display?.text||'Measurement unavailable')+' · '+(item.total_cost!=null?'$'+item.total_cost.toFixed(2)+' estimated':item.pricing_error||'price unavailable'):'';
         const filename=node.querySelector('[data-live-filename]');
-        if(filename&&active)filename.textContent=item.filename;
+        if(filename&&active)renderFilename(filename,item.filename);
         const cost=node.querySelector('[data-live-cost]');
         if(cost){cost.textContent=active&&item.total_cost!=null?'$'+item.total_cost.toFixed(2):item.pricing_error||item.tracking_warning||item.error||(active?'Estimate unavailable':'No active print');cost.title='Live estimate includes material and time at current printer pricing; final billing applies the configured minimum hour.';}
         const filament=node.querySelector('[data-live-filament]');
