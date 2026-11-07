@@ -77,6 +77,21 @@ class MeasurementViewTests(unittest.TestCase):
             with self.subTest(template=name):
                 self.env.get_template(name)
 
+    def test_long_filename_is_retained_in_closed_selectable_details(self):
+        name = ('very-long-print-name-' * 20) + '<script>.gcode'
+        html = self.env.from_string(
+            '{% from "partials/_filename.html" import filename %}{{ filename(name) }}'
+        ).render(name=name)
+        parsed = MeasurementMarkup()
+        parsed.feed(html)
+        self.assertEqual(parsed.open_details, 0)
+        self.assertIn(name, ''.join(parsed.visible))
+        self.assertIn(name, ''.join(parsed.detail_text))
+        self.assertIn('data-filename-preview', html)
+        self.assertIn('data-filename-full', html)
+        self.assertIn('Full filename', html)
+        self.assertNotIn('<script>', html)
+
 
 if __name__ == '__main__':
     unittest.main()

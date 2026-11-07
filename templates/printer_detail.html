@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_filename.html" import filename as filename_label %}
 {% from "partials/_filament_measurement.html" import measurement with context %}
 {% block content %}
 {% macro money(value) %}{{ '$%.2f'|format(value) if value is not none else 'Unpriced' }}{% endmacro %}
@@ -123,7 +124,7 @@
             <tbody>
                 {% for row in rows %}
                 <tr>
-                    <td>{{ row.timestamp or 'Unknown' }}</td><td class="text-break">{{ row.filename }}</td><td>{{ row.outcome }}</td>
+                    <td>{{ row.timestamp or 'Unknown' }}</td><td class="text-break">{{ filename_label(row.filename) }}</td><td>{{ row.outcome }}</td>
                     <td>{{ hours(row.hours) }}</td><td>{{ measurement(filament_display(row), row) }}</td>
                     <td>{{ money(row.time_cost) }}</td><td>{{ money(row.material_cost) }}</td><td>{{ money(row.total_cost) }}</td>
                 </tr>

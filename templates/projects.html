@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_filename.html" import filename as filename_label %}
 {% from "partials/_filament_measurement.html" import measurement with context %}
 
 {% block content %}
@@ -302,7 +303,7 @@
                                   {% endif %}
                               </td>
                               <td class="text-nowrap{% if 'printer' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.printer|lower }}" data-sort-key="printer" data-col="printer">{{ j.printer }}</td>
-                              <td class="text-break{% if 'filename' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename"><div>{{ j.filename }}</div><small>{{ j.pricing_view }}</small>{% if j.pricing_view == 'Project-adjusted snapshot' %}<div class="small text-muted">Saved historical: ${{ '%.2f'|format(j.historical_costs.total_cost) }}</div>{% endif %}</td>
+                              <td class="text-break{% if 'filename' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.filename|lower }}" data-sort-key="filename" data-col="filename">{{ filename_label(j.filename) }}<small>{{ j.pricing_view }}</small>{% if j.pricing_view == 'Project-adjusted snapshot' %}<div class="small text-muted">Saved historical: ${{ '%.2f'|format(j.historical_costs.total_cost) }}</div>{% endif %}</td>
                              <td class="text-nowrap{% if 'status' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.status|lower }}" data-sort-key="status" data-col="status">{{ j.status }}</td>
                              <td class="text-end{% if 'hours' not in _proj_cols %} kcd-col-hidden{% endif %}" data-sort="{{ j.duration_hours or 0 }}" data-sort-key="hours" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
                              {% set measure_sort = filament_display(j) %}
@@ -371,7 +372,7 @@
                                                 {% for mj in p.manual_jobs %}
                                                 <tr id="mj_row_{{ mj.manual_job_id }}">
                                                     <td class="text-break {% if 'description' not in _manual_cols %}d-none{% endif %}" data-col="description">
-                                                        <div class="fw-semibold">{{ mj.title }}</div>
+                                                        <div class="fw-semibold">{{ filename_label(mj.title, label='Full title') }}</div>
                                                         {% if mj.notes %}
                                                         <div class="text-muted small">{{ mj.notes }}</div>
                                                         {% endif %}
@@ -534,7 +535,7 @@
                                                 {% for pl in p.planned_items %}
                                                 <tr class="{% if pl.status != 'active' %}table-secondary{% endif %}{% if pl.status != 'active' or pl.converted_to_manual_job_id %} opacity-75{% endif %}">
                                                     <td class="text-break {% if 'filename' not in _planned_cols %}d-none{% endif %}" data-col="filename">
-                                                        {{ pl.filename }}
+                                                        {{ filename_label(pl.filename) }}
                                                         {% if pl.source %}
                                                         <div class="text-muted small">Source: {{ pl.source }}</div>
                                                         {% endif %}
@@ -722,7 +723,7 @@
                                  {% endif %}
                              </td>
                               <td class="text-nowrap{% if 'printer' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="printer">{{ j.printer }}</td>
-                              <td class="text-break{% if 'filename' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filename">{{ j.filename }}</td>
+                              <td class="text-break{% if 'filename' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="filename">{{ filename_label(j.filename) }}</td>
                              <td class="text-nowrap{% if 'status' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="status">{{ j.status }}</td>
                              <td class="text-end{% if 'hours' not in _unassigned_cols %} kcd-col-hidden{% endif %}" data-col="hours">{{ "%.2f"|format(j.duration_hours|float) }}</td>
                              {% set measure_sort = filament_display(j) %}

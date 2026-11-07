@@ -2,6 +2,7 @@
 (() => {
   let pending=false;
   function renderFilament(node, item, active) {
+    const detailsOpen=node.querySelector('[data-filament-details]')?.open||false;
     node.replaceChildren();
     if (!active) { node.textContent=item.connected?'No active print':'Unverified'; return; }
     const value=item.filament_display;
@@ -12,6 +13,7 @@
     node.append(primary);
     const details=document.createElement('details');
     details.dataset.filamentDetails='';
+    details.open=detailsOpen;
     details.className='kcd-measurement-details small text-muted text-start mt-1';
     const summary=document.createElement('summary');
     summary.textContent='Measurement details';

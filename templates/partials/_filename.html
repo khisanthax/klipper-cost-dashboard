@@ -1,0 +1,13 @@
+{# Keep the original value in the DOM; only its ordinary preview is clamped. #}
+{% macro filename(value, label='Full filename') -%}
+{% set text = value|string if value not in (none, '') else 'Unknown filename' %}
+<div class="kcd-filename">
+  <div class="kcd-filename-preview" data-filename-preview>{{ text }}</div>
+  {% if value not in (none, '') %}
+  <details class="small text-muted" data-filename-details>
+    <summary>{{ label }}</summary>
+    <div class="kcd-filename-full" data-filename-full>{{ text }}</div>
+  </details>
+  {% endif %}
+</div>
+{%- endmacro %}

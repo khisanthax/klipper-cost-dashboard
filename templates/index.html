@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_filename.html" import filename as filename_label %}
 {% from "partials/_filament_measurement.html" import measurement with context %}
 
 {% block content %}
@@ -653,7 +654,7 @@
                                          <div class="kcd-dt">{{ dt }}</div>
                                      {% endif %}
                                  {% elif h == 'filename' %}
-                                     <div>{{ row.get(h, '') }}</div>
+                                     {{ filename_label(row.get(h, '')) }}
                                      {% if row.get('import_source') == 'moonraker_history' %}
                                      <div class="text-muted small">
                                          Imported (Moonraker){% if row.get('job_outcome') %} &middot; {{ row.get('job_outcome')|upper }}{% endif %}

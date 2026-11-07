@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from "partials/_filename.html" import filename as filename_label %}
 {% from "partials/_filament_measurement.html" import measurement with context %}
 {% block content %}
 <h1 class="h3">Project pricing preview — {{ plan.project.name }}</h1>
@@ -16,7 +17,7 @@
 <thead><tr><th>Job / conversion</th><th>Source</th><th>View</th><th>Time ($)</th><th>Material ($)</th><th>Adjustment ($)</th><th>Total ($)</th></tr></thead>
 <tbody>
 {% for row in plan.rows %}
-<tr><td rowspan="2">{{ row.filename }}<br>{{ measurement(filament_display(grams=row.grams, meters=row.meters, factor=row.grams_per_meter, source=row.conversion_source, kind=row.weight_kind)) }}</td>
+<tr><td rowspan="2">{{ filename_label(row.filename) }}{{ measurement(filament_display(grams=row.grams, meters=row.meters, factor=row.grams_per_meter, source=row.conversion_source, kind=row.weight_kind)) }}</td>
 <td rowspan="2">{{ row.pricing_source }}<br><small>Unrounded adjusted material: ${{ row.after.material_cost }}</small></td><td>Saved historical</td>
 {% for key in ['time_cost','material_cost','adjustment','total_cost'] %}<td>{{ '%.2f'|format(row.before['display_' ~ key]) }}</td>{% endfor %}</tr>
 <tr><td>Project-adjusted preview</td>{% for key in ['time_cost','material_cost','adjustment','total_cost'] %}<td>{{ '%.2f'|format(row.after['display_' ~ key]) }}</td>{% endfor %}</tr>

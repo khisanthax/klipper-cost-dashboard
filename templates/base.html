@@ -118,6 +118,20 @@
         .kcd-measurement-details summary { cursor: pointer; }
         .kcd-measurement-details dl { margin-top: .5rem; }
         .kcd-measurement-details dd { margin: 0 0 .5rem; overflow-wrap: anywhere; }
+        .kcd-filename {
+            width: clamp(12ch, 24vw, 36ch); min-width: 12ch; max-width: 36ch;
+            white-space: normal;
+        }
+        .kcd-filename-preview {
+            display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+            line-clamp: 2; line-height: 1.4; max-height: 2.8em;
+            overflow: hidden; overflow-wrap: anywhere; word-break: break-word;
+        }
+        .kcd-filename summary { cursor: pointer; }
+        .kcd-filename-full {
+            margin-top: .5rem; white-space: pre-wrap; overflow-wrap: anywhere;
+            word-break: break-word; user-select: text;
+        }
     </style>
 </head>
 
