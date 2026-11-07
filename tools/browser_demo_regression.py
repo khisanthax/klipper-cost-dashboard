@@ -1,5 +1,6 @@
 """Exercise the isolated public demo with two disposable browser contexts."""
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -94,7 +95,7 @@ def exercise(base_url):
                 create = desktop.locator("form").filter(has=desktop.locator('input[value="create_project"]'))
                 create.get_by_label("Project name", exact=True).fill("Visitor A test project")
                 create.get_by_role("button", name="Create", exact=True).click()
-                expect(desktop.locator('[data-project-name]').get_by_text("Visitor A test project", exact=True)).to_be_visible()
+                expect(desktop.locator('[data-project-name]').filter(has_text=re.compile(r'^Visitor A test project$'))).to_be_visible()
                 mobile.goto(base_url + "/projects")
                 assert_unavailable_controls_hidden(mobile)
                 expect(mobile.get_by_text("Visitor A test project", exact=True)).to_have_count(0)
