@@ -2697,6 +2697,25 @@ def recalculate_preview():
         except Exception:
             material_cost = 0.0
 
+        # Rendering a preview must not turn absent telemetry into zero merely
+        # because the legacy pricing callable accepts numeric fallbacks.
+        from core.measurement_display import filament_display
+        measure_options = {}
+        if computed.get('filament_grams') is not None:
+            measure_options['grams'] = computed['filament_grams']
+        if computed.get('grams_per_meter') is not None:
+            measure_options['factor'] = computed['grams_per_meter']
+        display_measure = filament_display(r, **measure_options)
+        display_hours = None
+        for key, divisor in (('duration_seconds', 3600), ('duration_hours', 1)):
+            try:
+                value = float(r[key])
+                if math.isfinite(value) and value >= 0:
+                    display_hours = value / divisor
+                    break
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
+
         before_total += old_total
         after_total += new_total
         preview_rows.append(
@@ -2706,16 +2725,18 @@ def recalculate_preview():
                 "recorded_prices": recorded_prices,
                 "printer": printer_name,
                 "filename": str(r.get("filename") or ""),
-                "duration_hours": duration_hours,
-                "filament_meters": filament_meters,
+                "duration_hours": display_hours,
+                "billable_hours": computed.get('billable_hours'),
+                "filament_meters": display_measure['meters'],
                 "time_cost": time_cost,
                 "material_cost": material_cost,
                 "old_time_cost": r.get("time_cost") or 0,
                 "old_material_cost": r.get("material_cost") or 0,
                 "old_adjustment": float(r.get("total_cost") or 0)-float(r.get("time_cost") or 0)-float(r.get("material_cost") or 0),
                 "adjustment": computed.get("adjustment",0),
-                "filament_grams": computed.get("filament_grams"),
-                "grams_per_meter": computed.get("grams_per_meter"),
+                "filament_grams": display_measure['grams'],
+                "grams_per_meter": display_measure['factor'],
+                "weight_kind": computed.get('filament_weight_kind') or display_measure['kind'],
                 "conversion_source": computed.get("conversion_source"),
                 "pricing_source": computed.get("pricing_source"),
                 "filament_mode": computed.get("filament_mode"),

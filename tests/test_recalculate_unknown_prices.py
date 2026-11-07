@@ -54,6 +54,17 @@ restore_originals(['unknown'],apply=True)
 with db.connect_db() as conn:
  row=conn.execute("SELECT * FROM jobs WHERE job_uid='unknown'").fetchone()
  assert row['time_cost'] is None and row['material_cost'] is None and row['total_cost'] is None
+with db.connect_db() as conn:
+ db.upsert_job(conn,dict(job_uid='missing-measures',printer='Fixture',filename='unknown-measures.gcode',status='completed',timestamp=1800000000,duration_seconds=None,duration_hours=None,filament_mm=None,filament_meters=None,grams_per_meter=None,rate_per_hour=0,filament_mode='per_meter',filament_rate=.25,time_cost=0,material_cost=2,total_cost=2))
+response=client.post('/recalculate/preview',data=dict(job_uids=['missing-measures'],apply_rate_profile='1',rate_profile_id='free'))
+assert response.status_code==200,response.data
+row=contexts[-1]['preview']['rows'][0]
+assert row['duration_hours'] is None and row['filament_meters'] is None and row['filament_grams'] is None,row
+assert 'Duration: Unknown' in response.get_data(as_text=True)
+assert 'Unknown weight' in response.get_data(as_text=True)
+with db.connect_db() as conn:
+ row=conn.execute("SELECT duration_seconds,duration_hours,filament_mm,filament_meters FROM jobs WHERE job_uid='missing-measures'").fetchone()
+ assert all(value is None for value in row)
 '''
         with tempfile.TemporaryDirectory() as tmp:
             result=subprocess.run([sys.executable,'-c',code],cwd=Path(__file__).resolve().parents[1],
