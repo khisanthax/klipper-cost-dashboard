@@ -94,7 +94,7 @@ preview. Mixed/unknown original prices are clearly partial rather than zero.
 - `python -m unittest discover -s tests -p 'test_recalculate*.py'`: pricing safety,
   current/first-original distinctions, NULL/zero originals and recoverable apply.
 - `python tools/browser_measurement_regression.py`: real Flask/SQLite/Moonraker
-  fixtures with 525 jobs; both preferences across seven routes and desktop,
+  fixtures with 525 jobs; both preferences across eight routes (64 combinations) and desktop,
   tablet, mobile and 200% CSS zoom, manual/planned/estimate quantities, independent
   browser context and restart persistence, closed keyboard details, bounded
   filenames and exact business-data preservation. Normal negative-thumbnail-cache
@@ -123,9 +123,24 @@ after the established backup/restore/rollback and inactive-printer guards.
 
 ## Delivery status
 
-Implementation and focused local tests are complete; final integrated browser
-and Linux release-validation evidence belongs in LOGBOOK and GitHub checks.
-Production was independently read-only verified on November 7 at v0.11.0 with
-1,052 jobs, 318 objects and 438 archived references. No v0.12.0 deployment is
-claimed by this candidate record. The actual deployment report must record its
-fresh baseline, immutable image, backup, preservation and rollback evidence.
+Released and production-verified v0.12.0 at exact 98831507/index
+`sha256:ffe9451b8edb106ba90c8cc91633d7366e7022feec71e3bdab52b1533c971201`. [Actual deployment/rollback evidence](v0.12.0-deployment-2026-11-07.md)
+records the fresh SQL/object archive, isolated exact-image/previous-image restore,
+all four printer identities and read-only production checks. No measurement preference,
+project pricing or recalculation POST was submitted against production.
+
+Final exact-head Linux validation passed **403 tests, 96 dashboard/axe layouts and
+64 measurement combinations** (8 routes × 2 preferences × 4 layouts), real Project and
+Recalculate review/apply fixtures, security/TLS/demo/SSH/systemd/Docker/source
+and seeded upgrade/rollback checks. Main 42374820388 and tag 42375377772 passed.
+Earlier Windows/fixture mismatches and axe/demo-locator failures were repaired
+and remain documented in LOGBOOK; final Linux evidence is authoritative.
+
+Actual 1,052 jobs, 318 object hashes and 438 archived references,
+all business rows and historical pricing stayed identical. The original 15-job
+case/15 original-price snapshots matched exact fingerprints, including legitimate
+zero hourly cost and saved $15/kg basis. Displayed Original remains $40.83.
+Weight is the read default because no preference was previously saved; that
+preference remains absent and all explicit column selections remain unchanged.
+Native-toolbar zoom/assistive/physical-device and ARM-hardware certification are
+not established by Chromium CSS zoom/axe or multi-platform registry validation.

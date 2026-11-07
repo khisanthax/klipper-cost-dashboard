@@ -8,6 +8,8 @@
 - Distinguish Save Project Defaults from Preview New Project Costs. Review current inputs, Apply to Project using an isolated pricing snapshot, or Use Original Prices without overwriting historical prints; identify active and outdated snapshots explicitly.
 - Preserve saved estimated weights and per-item mixed-material subtotals. Add SQL/CSV/dual persistence, restart/backup, browser preference/layout and financial regression coverage.
 
+- [Verified production deployment/rollback evidence](docs/v0.12.0-deployment-2026-11-07.md): immutable image, fresh isolated backup/restore, preserved prices/objects and read-only Display/Project/Recalculate acceptance.
+
 ## v0.11.0 - 2026-11-05
 
 - Ship separate opt-in browser administration using exact target allowlists, private credentials, active-configuration inspection, reviewed expiring previews, inactive guards and the shared CLI registration/repair engine. Keep advanced host/service/macro operations CLI-only.

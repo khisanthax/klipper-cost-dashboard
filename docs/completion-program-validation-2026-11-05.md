@@ -1,5 +1,8 @@
 # KCD completion-program acceptance record
 
+> Historical November 5 completion-program record. Current November 7 production is v0.12.0; see [LOGBOOK](../LOGBOOK.md) and [actual measurement/pricing deployment](v0.12.0-deployment-2026-11-07.md). The earlier program outcomes below are retained as dated evidence.
+
+
 
 **Current outcome:** Every existing source PR is resolved through normal protected
 merges under the [solo-maintainer policy](solo-maintainer-release-policy.md).
