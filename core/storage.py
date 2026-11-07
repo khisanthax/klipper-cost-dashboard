@@ -39,6 +39,14 @@ _DISPLAY_HIDDEN_DEFAULTS = {
     "filament_mm_raw",
     "filament_mm_est",
     "filament_mm_effective",
+    # One consumption column by default. Raw measurements/conversion columns
+    # remain opt-in; every primary quantity also has closed audit details.
+    "filament_mm",
+    "grams_per_meter",
+    "filament_grams",
+    "filament_weight_kind",
+    "filament_density",
+    "filament_diameter",
 }
 
 
@@ -336,7 +344,7 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     visible_columns = []
     try:
-        visible_columns = list(display_settings.get("visible_columns") or [])
+        visible_columns = list(display_settings.get("visible_columns", existing.get("visible_columns")) or [])
     except Exception:
         visible_columns = []
 
@@ -347,7 +355,7 @@ def save_display_settings(display_file, data_dir, display_settings):
 
     visible = [c for c in visible_columns if c in HEADERS and c != "job_uid"]
     if not visible:
-        visible = [h for h in HEADERS if h not in ("job_uid", "thumbnail", "pause_count", "runout_count")]
+        visible = list(_default_display_settings(HEADERS)["visible_columns"])
 
     hidden = display_settings.get("hidden_printers", existing.get("hidden_printers", []))
     if not isinstance(hidden, list):

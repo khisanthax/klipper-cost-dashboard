@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from core.measurement_display import filament_display, filament_total, project_item_measurement
 
@@ -57,6 +58,20 @@ class MeasurementDisplayTests(unittest.TestCase):
         self.assertEqual(filament_display(item, preference="length")["text"], "100.00 m")
         self.assertIn("Reviewed", item["conversion_source"])
         self.assertTrue(filament_display(project_item_measurement(300), preference="length")["unknown"])
+
+    def test_csv_and_dual_preference_roundtrip_and_legacy_defaults(self):
+        from core.storage import load_display_settings, save_display_settings
+        from core.config import HEADERS
+        with tempfile.TemporaryDirectory() as tmp:
+            for backend in ('csv', 'dual'):
+                display = str(Path(tmp)/('display-'+backend+'.json'))
+                with patch.dict(os.environ, {'KCD_STORAGE_BACKEND':backend}):
+                    self.assertEqual(load_display_settings(display, HEADERS)['filament_measurement'],'weight')
+                    for pref in ('length','weight','length'):
+                        save_display_settings(display,tmp,{'filament_measurement':pref})
+                        self.assertEqual(load_display_settings(display,HEADERS)['filament_measurement'],pref)
+                    save_display_settings(display,tmp,{'projects_show_cost_totals':False})
+                    self.assertEqual(load_display_settings(display,HEADERS)['filament_measurement'],'length')
 
     def test_sql_preference_restart_backup_and_history_preservation(self):
         script = r'''

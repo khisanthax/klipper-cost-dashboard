@@ -225,8 +225,9 @@
                     <tr>
                         <td data-col="filename">
                             <details class="kcd-recalc-audit">
-                                <summary style="overflow-wrap:anywhere">{{ p.filename }}</summary>
+                                <summary><span class="kcd-filename-preview" data-filename-preview>{{ p.filename }}</span></summary>
                                 <div class="small py-2" style="min-width:200px;overflow-wrap:anywhere">
+                                    <p>Full filename: {{ p.filename }}</p>
                                     <p>Printer: {{ p.printer }}<br>Job UID: {{ p.job_uid }}</p>
                                     <p>Filament: {{ filament_display(p, grams=p.filament_grams, meters=p.filament_meters, factor=p.grams_per_meter, source=p.conversion_source).text }}<br>Duration: {{ p.duration_hours }} hours<br>Length: {{ p.filament_meters }} m<br>Weight: {{ p.filament_grams if p.filament_grams is not none else 'Unknown' }} g<br>Conversion: {{ p.grams_per_meter if p.grams_per_meter is not none else 'Unknown' }} g/m · {{ p.conversion_source }}</p>
                                     <p>Pricing source: {{ p.pricing_source }}<br>Hourly rate: {{ p.old_rate_per_hour }} → {{ p.rate_per_hour }} $/hour<br>Material rate: {{ p.old_filament_rate }} {{ {"per_kg":"$/kg","per_gram":"$/g","per_meter":"$/m"}.get(p.old_filament_mode,p.old_filament_mode) }} → {{ p.filament_rate }} {{ {"per_kg":"$/kg","per_gram":"$/g","per_meter":"$/m"}.get(p.filament_mode,p.filament_mode) }}<br>Previous conversion: {{ p.old_grams_per_meter }} g/m<br>Selected hourly profile: {{ p.hourly_rate_profile_id or 'None' }}<br>Selected filament profile: {{ p.filament_profile_id or 'None' }}</p>
@@ -323,8 +324,9 @@
                                        value="{{ r.job_uid }}"
                                        {% if selected_job_uids and (r.job_uid in selected_job_uids) %}checked{% endif %}>
                             </td>
-                            <td data-col="filename"><details><summary style="overflow-wrap:anywhere">{{ r.filename }}</summary>
+                            <td data-col="filename"><details><summary><span class="kcd-filename-preview" data-filename-preview>{{ r.filename }}</span></summary>
                                 <div class="small py-2" style="overflow-wrap:anywhere">
+                                    Full filename: {{ r.filename }}<br>
                                     Printer: {{ r.printer }} · {{ r.status }}<br>
                                     Duration: {{ r.duration_hours }} hours<br>
                                     Filament: {{ filament_display(r).text }}<br>

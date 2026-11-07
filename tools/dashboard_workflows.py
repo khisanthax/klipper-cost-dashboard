@@ -222,12 +222,12 @@ def exercise(page,context,base,project,data,artifacts):
     page.goto(base+'/settings/pause');page.locator('#pause_include_default').check();click(page.get_by_role('button',name='Save pause settings',exact=True))
     assert json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['pause_include_paused_time_default']
     page.goto(base+'/settings/other')
-    display=form('update_columns').filter(has=page.locator('input[name=table][value=recalc_jobs]'))
-    display.locator('input[name=columns][value=material_cost]').uncheck()
-    click(display.get_by_role('button',name='Save Recalculate Columns',exact=True))
-    assert 'material_cost' not in json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['tables']['recalc_jobs']['visible_columns']
-    page.goto(base+'/recalculate');material_header=page.locator('#recalc-table th[data-col=material_cost]')
-    assert material_header.count()==1 and not material_header.is_visible()
+    display=form('update_columns').filter(has=page.locator('input[name=table][value=history]'))
+    display.locator('input[name=columns][value=filament_rate]').uncheck()
+    click(display.get_by_role('button',name='Save Print History Columns',exact=True))
+    assert 'filament_rate' not in json.loads(query("SELECT value_json FROM user_settings WHERE key='display_settings'")[0]['value_json'])['tables']['history']['visible_columns']
+    page.goto(base+'/');assert page.locator('#history-table th[data-col=filament_rate]').count()==0
+    page.goto(base+'/recalculate');assert page.locator('#recalc-table thead th').count()==3
     page.goto(base+'/settings/other');click(form('backup_now').get_by_role('button',name='Backup now',exact=True))
     assert list(Path(data,'backups').glob('kcd_backup_*.tar.gz'))
     assert 'Backup' in page.locator('body').inner_text()
@@ -253,7 +253,7 @@ def exercise(page,context,base,project,data,artifacts):
     estimate.get_by_label('Estimated consumption (g)', exact=True).fill('78')
     estimate.get_by_label('Estimate source', exact=True).fill('Slicer estimate, not measured')
     click(estimate.get_by_role('button', name='Save estimate without deduction'))
-    assert page.get_by_text('80.000 g remaining', exact=True).is_visible()
+    assert page.get_by_text('80.00 g', exact=True).is_visible()
     for _ in range(2):
         page.get_by_text('Record verified job use', exact=True).click()
         consumption = form('consume')
@@ -261,7 +261,7 @@ def exercise(page,context,base,project,data,artifacts):
         consumption.get_by_label('Measured consumption (g)').fill('77.5')
         consumption.get_by_role('checkbox').check()
         click(consumption.get_by_role('button', name='Deduct measured amount'))
-    assert page.get_by_text('2.500 g remaining', exact=True).is_visible()
+    assert page.get_by_text('2.50 g', exact=True).is_visible()
     assert page.get_by_text('Low stock', exact=True).is_visible()
     assert len(query("SELECT * FROM filament_stock_events WHERE kind='verified_consumption'")) == 1
     page.get_by_text('Verified consumption and corrections', exact=True).click()
@@ -270,7 +270,8 @@ def exercise(page,context,base,project,data,artifacts):
     correction.get_by_label('Correction reason', exact=True).fill('Measured on corrected scale')
     correction_payload = dict(correction.locator('input').evaluate_all('es=>es.map(e=>[e.name,e.value])'))
     click(correction.get_by_role('button', name='Record linked correction'))
-    assert page.get_by_text('3.875 g remaining', exact=True).is_visible()
+    assert page.get_by_text('3.88 g', exact=True).is_visible()
+    assert query('SELECT remaining_mg FROM filament_spools')[0]['remaining_mg'] == 3875
     replay = context.request.post(base + '/inventory', form=correction_payload)
     assert replay.status == 200 and 'Already recorded; stock was not changed again.' in replay.text()
     stale_payload = {**correction_payload, 'operation_uid': uuid.uuid4().hex, 'grams': '76'}
@@ -291,7 +292,8 @@ def exercise(page,context,base,project,data,artifacts):
     reactivation = form('reactivate')
     reactivation.get_by_label('Archive or reactivation reason', exact=True).fill('Returned to printer')
     click(reactivation.get_by_role('button', name='Reactivate spool', exact=True))
-    assert page.get_by_text('3.875 g remaining', exact=True).is_visible()
+    assert page.get_by_text('3.88 g', exact=True).is_visible()
+    assert query('SELECT remaining_mg FROM filament_spools')[0]['remaining_mg'] == 3875
     assert len(query('SELECT * FROM filament_spool_lifecycle_events')) == 2
     assert job_before == query("SELECT * FROM jobs WHERE job_uid='mask-0'")
     for width, height, zoom, label in ((390,844,1,'mobile'),(768,1024,1,'tablet'),(1440,1000,2,'zoom200')):

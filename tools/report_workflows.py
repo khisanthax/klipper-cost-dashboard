@@ -35,15 +35,19 @@ def exercise_reports(page, base, data, artifacts):
         table = page.get_by_role("table", name="Monthly print outcomes")
         october = table.get_by_role("row").filter(has=page.get_by_role("rowheader", name="2019-10", exact=False))
         cells = october.locator("th,td")
-        assert cells.count() == 13
+        assert cells.count() == 12
         assert "4" == cells.nth(1).inner_text().splitlines()[0]
         assert [cells.nth(index).inner_text() for index in (2, 3, 4, 5)] == ["1", "1", "1", "1"]
         assert "33.3%" in cells.nth(6).inner_text()
         assert "-66.7 pp" in cells.nth(6).inner_text()
-        for index, amount in ((7, "3.50"), (8, "25.00 m"), (9, "70.00 g"), (10, "$5.00"), (11, "$1.00"), (12, "$3.00")):
+        for index, amount in ((7, "3.50"), (8, "70.00 g"), (9, "$5.00"), (10, "$1.00"), (11, "$3.00")):
             assert cells.nth(index).inner_text().startswith(amount), (index, cells.nth(index).inner_text())
-        assert "2 missing" in cells.nth(12).inner_text()
-        assert "Change unavailable" in cells.nth(12).inner_text()
+        assert "2 missing" in cells.nth(11).inner_text()
+        assert "Change unavailable" in cells.nth(11).inner_text()
+        detail=cells.nth(8).locator('[data-filament-details]')
+        detail.locator('summary').click()
+        assert '25' in detail.inner_text() and ' m' in detail.inner_text()
+        detail.locator('summary').click()
         recent = page.locator("#report-recent-jobs")
         assert recent.get_by_role("cell", name="Unpriced", exact=True).count() == 2
         assert "Completed" not in recent.inner_text()

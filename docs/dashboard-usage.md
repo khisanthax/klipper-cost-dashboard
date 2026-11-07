@@ -80,9 +80,18 @@ confirmation and retain backups before destructive operations.
 
 ## Historical recalculation
 
-Select jobs and the intended profiles/overrides, choose Preview changes and
-inspect saved versus proposed costs, weight, conversion and units. Applying
-changes updates current saved historical prices and retains original snapshots.
+Select jobs and the intended profiles/overrides, then choose **Preview Changes**.
+Review **Original Total**, **Change**, and **New Total**, with one price comparison
+per filename. Expand a filename for calculation details, exact components,
+signed adjustments, profiles and conversion provenance. Original means the
+currently recorded price before this operation; a prior first-original snapshot
+is separately recoverable. Unpriced originals remain **Unpriced** and their
+changes are unavailable; a legitimate $0 remains $0.00. Partial original totals
+are labelled as known subtotals.
+
+Choose **Apply New Prices** only after reviewing a valid preview. Its status
+explains when another preview is needed. A $0 change can still apply different
+profiles. Applying updates current recorded prices and retains original snapshots.
 Changed selections, prices, profiles or jobs invalidate the review. Repeated runs
 distinguish changed from already matching records; a matched SQL update count
 alone is not reported as verified success. See [pricing recovery](pricing-and-thumbnail-recovery.md)
