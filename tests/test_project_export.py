@@ -109,8 +109,11 @@ assert 'Download project JSON' in client.get('/projects').get_data(as_text=True)
 mode_context['show_advanced']=False
 assert 'Download project JSON' not in client.get('/projects').get_data(as_text=True)
 assert client.get('/projects/'+project.id+'/export.json').status_code==200
-mode_context.update(show_advanced=True,kcd_demo_mode=True,demo_endpoint_available=lambda endpoint:False)
-assert 'Download project JSON' not in client.get('/projects').get_data(as_text=True)
+mode_context.update(show_advanced=True,kcd_demo_mode=True,demo_endpoint_available=lambda *_args:False)
+response=client.get('/projects')
+assert response.status_code==200,response.data
+assert 'Download project JSON' not in response.get_data(as_text=True)
+assert 'Preview New Project Costs</button>' not in response.get_data(as_text=True)
 """
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(

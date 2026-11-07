@@ -42,6 +42,7 @@
   </tfoot>
  </table>
 </div>
+{% if not kcd_demo_mode or demo_endpoint_available('project_pricing_page', 'POST') %}
 <form method="post" class="d-flex flex-wrap gap-2 my-3">
  <input type="hidden" name="fingerprint" value="{{ plan.fingerprint }}">
  <input type="hidden" name="review_token" value="{{ review_token }}">
@@ -49,5 +50,6 @@
  <button class="btn btn-outline-secondary" name="action" value="clear">Use Original Prices</button>
  <a class="btn btn-outline-secondary" href="{{ url_for('projects_page',edit_project=plan.project.project_uid) }}">Back to projects</a>
 </form>
+{% else %}<p>Project pricing changes are unavailable in this demo.</p><a class="btn btn-outline-secondary" href="{{ url_for('projects_page',edit_project=plan.project.project_uid) }}">Back to projects</a>{% endif %}
 <p class="small text-muted">No prices change during preview. Displayed cents reconcile across tracked and manual components; full precision is stored in the snapshot. History and Reports retain Saved Historical Cost. Editing defaults later leaves an applied snapshot on its previously reviewed prices until you preview and apply again.</p>
 {% endblock %}

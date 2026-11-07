@@ -3465,6 +3465,7 @@ def projects_page():
         error=error,
         message=message,
         project_export_enabled=_is_sql_only(),
+        project_pricing_enabled=_is_sql_only(),
         edit_project=edit_project,
         edit_manual_job_id=edit_manual_job_id,
         display_settings=display_settings,

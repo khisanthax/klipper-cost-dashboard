@@ -228,14 +228,15 @@
                                             </div>
                                             <div class="col-12 d-flex flex-wrap gap-2">
                                                 <button type="submit" class="btn btn-outline-primary">Save Project Defaults</button>
-                                                <button type="submit" class="btn btn-primary" formaction="{{ url_for('project_pricing_page',project_uid=p.id) }}">Preview New Project Costs</button>
+                                                {% if project_pricing_enabled and (not kcd_demo_mode or demo_endpoint_available('project_pricing_page', 'POST')) %}<button type="submit" class="btn btn-primary" formaction="{{ url_for('project_pricing_page',project_uid=p.id) }}">Preview New Project Costs</button>{% endif %}
                                             </div>
                                             <div class="small text-muted">Save pricing for this project's manual and planned work. Existing completed print prices are not changed.</div>
                                             <div class="small text-muted">Preview uses the current pricing inputs without saving defaults. Apply to Project changes only the project-adjusted tracked-print view.</div>
+                                            {% if not project_pricing_enabled %}<div class="small text-muted">Project-adjusted pricing requires SQL-only storage. You can still save manual and planned defaults.</div>{% elif kcd_demo_mode %}<div class="small text-muted">Project pricing snapshots are unavailable in this demo.</div>{% endif %}
                                         </form>
-                                        {% if p.adjusted_jobs %}<form method="post" action="{{ url_for('project_pricing_page',project_uid=p.id) }}"><button class="btn btn-outline-secondary" name="action" value="clear">Use Original Prices</button></form>{% endif %}
+                                        {% if p.adjusted_jobs and project_pricing_enabled and (not kcd_demo_mode or demo_endpoint_available('project_pricing_page', 'POST')) %}<form method="post" action="{{ url_for('project_pricing_page',project_uid=p.id) }}"><button class="btn btn-outline-secondary" name="action" value="clear">Use Original Prices</button></form>{% endif %}
 
-                                        <a class="btn btn-outline-secondary" href="{{ url_for('recalculate_page',project=p.id) }}">Advanced Recalculate saved history…</a>
+                                        {% if show_advanced|default(true) %}<a class="btn btn-outline-secondary" href="{{ url_for('recalculate_page',project=p.id) }}">Advanced Recalculate saved history…</a>{% endif %}
                                         {% if project_export_enabled and (show_advanced|default(true)) and (not kcd_demo_mode or demo_endpoint_available('export_project')) %}
                                         <a class="btn btn-outline-secondary" href="{{ url_for('export_project', project_uid=p.id) }}">Download project JSON</a>
                                         {% endif %}

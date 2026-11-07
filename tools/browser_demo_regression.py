@@ -32,6 +32,8 @@ def wait_until_ready(server, base_url):
 
 def exercise(base_url):
     def assert_unavailable_controls_hidden(page):
+        expect(page.get_by_role('button',name='Preview New Project Costs',exact=True)).to_have_count(0)
+        expect(page.get_by_role('button',name='Use Original Prices',exact=True)).to_have_count(0)
         expect(page.locator(
             "a[href^='/printers/'],a[href='/orders'],a[href='/inventory'],"
             "a[href='/estimates'],a[href$='/export.json']"
@@ -83,8 +85,11 @@ def exercise(base_url):
 
                 desktop.goto(base_url + "/projects")
                 assert_unavailable_controls_hidden(desktop)
-                sample_pricing = desktop.locator('a[href^="/projects/"][href$="/pricing"]').first.get_attribute("href")
-                assert sample_pricing and first.request.get(base_url + sample_pricing).status == 200
+                sample_project = desktop.locator('input[name="project_id"]').first.input_value()
+                sample_pricing = '/projects/' + sample_project + '/pricing'
+                pricing = first.request.get(base_url + sample_pricing)
+                assert pricing.status == 200
+                assert 'Apply to Project</button>' not in pricing.text()
                 assert first.request.get(base_url + "/settings/profiles").status == 200
                 create = desktop.locator("form").filter(has=desktop.locator('input[value="create_project"]'))
                 create.get_by_label("Project name", exact=True).fill("Visitor A test project")
