@@ -34,14 +34,14 @@
     <article class="card card-body mb-3">
         <h3 class="h5">{{ spool.material }}{% if spool.color %} · {{ spool.color }}{% endif %}</h3>
         <p>
-            Net filament: {{ filament_display(grams=spool.net_mg / 1000, factor=spool.grams_per_meter, source='Net spool weight; verified spool conversion', kind='recorded').text }}
+            Net filament: {{ filament_display(grams=spool.net_mg / 1000, factor=spool.grams_per_meter, source='Net spool weight', kind='recorded').text }}
             {% if spool.remaining_mg <= spool.low_stock_mg %}<span class="badge text-bg-warning">Low stock</span>{% endif %}
             <br>{{ spool.manufacturer or 'Manufacturer unknown' }} · {{ spool.printer_name or 'No assigned printer' }}
             {% if spool.archived_at %}<span class="badge text-bg-secondary">Archived</span> · {{ spool.archive_reason }}{% endif %}
             {% if spool.purchase_cents is not none %} · {{ '$%.2f'|format(spool.purchase_cents / 100) }}{% endif %}
             {% if spool.purchased_on %} · {{ spool.purchased_on }}{% endif %}
         </p>
-        <div class="mb-2">Remaining: {{ measurement(filament_display(grams=spool.remaining_mg / 1000, factor=spool.grams_per_meter, source='Physical spool balance; verified spool conversion', kind='recorded'), label='Balance measurement details') }}</div>
+        <div class="mb-2">Remaining: {{ measurement(filament_display(grams=spool.remaining_mg / 1000, factor=spool.grams_per_meter, source='Physical spool balance', kind='recorded'), label='Balance measurement details') }}</div>
         {% if not spool.archived_at %}
         <details class="mb-2">
             <summary>Assign printer</summary>
